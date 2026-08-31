@@ -9,7 +9,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,8 +18,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -30,7 +27,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -88,66 +84,66 @@ fun SettingsScreen(
         SectionTitle(stringResource(R.string.settings_section_appearance), Lucide.Palette)
         // 放弃卡片形式：外观项直接陈列在页面上（用户定稿）
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                // 主题模式：外置标签 + 分段控件（SingleChoiceSegmentedButtonRow，
-                // 单选、始终有选中项，紧凑的一排整体控件，适合即时切换展示模式）
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 主题模式：外置标签 + 分段控件（SingleChoiceSegmentedButtonRow，
+            // 单选、始终有选中项，紧凑的一排整体控件，适合即时切换展示模式）
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = stringResource(R.string.settings_theme_title),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                // 未选中段用最低层表面色，与选中段区分
+                val segmentedColors = SegmentedButtonDefaults.colors(
+                    inactiveContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                )
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    SegmentedButton(
+                        selected = themeMode == ThemeMode.LIGHT,
+                        onClick = { viewModel.setThemeMode(ThemeMode.LIGHT) },
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3),
+                        colors = segmentedColors
+                    ) {
+                        Text(stringResource(R.string.settings_theme_light))
+                    }
+                    SegmentedButton(
+                        selected = themeMode == ThemeMode.DARK,
+                        onClick = { viewModel.setThemeMode(ThemeMode.DARK) },
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3),
+                        colors = segmentedColors
+                    ) {
+                        Text(stringResource(R.string.settings_theme_dark))
+                    }
+                    SegmentedButton(
+                        selected = themeMode == ThemeMode.SYSTEM,
+                        onClick = { viewModel.setThemeMode(ThemeMode.SYSTEM) },
+                        shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3),
+                        colors = segmentedColors
+                    ) {
+                        Text(stringResource(R.string.settings_theme_system))
+                    }
+                }
+            }
+            // ── 触觉反馈 ──
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = stringResource(R.string.settings_theme_title),
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = stringResource(R.string.settings_haptics_title),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        text = stringResource(R.string.settings_haptics_desc),
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    // 未选中段给白色底：在深灰卡片上与选中段（主色容器）都清晰可辨
-                    val segmentedColors = SegmentedButtonDefaults.colors(
-                        inactiveContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest
-                    )
-                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                        SegmentedButton(
-                            selected = themeMode == ThemeMode.LIGHT,
-                            onClick = { viewModel.setThemeMode(ThemeMode.LIGHT) },
-                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3),
-                            colors = segmentedColors
-                        ) {
-                            Text(stringResource(R.string.settings_theme_light))
-                        }
-                        SegmentedButton(
-                            selected = themeMode == ThemeMode.DARK,
-                            onClick = { viewModel.setThemeMode(ThemeMode.DARK) },
-                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3),
-                            colors = segmentedColors
-                        ) {
-                            Text(stringResource(R.string.settings_theme_dark))
-                        }
-                        SegmentedButton(
-                            selected = themeMode == ThemeMode.SYSTEM,
-                            onClick = { viewModel.setThemeMode(ThemeMode.SYSTEM) },
-                            shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3),
-                            colors = segmentedColors
-                        ) {
-                            Text(stringResource(R.string.settings_theme_system))
-                        }
-                    }
                 }
-                // ── 触觉反馈 ──
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = stringResource(R.string.settings_haptics_title),
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            text = stringResource(R.string.settings_haptics_desc),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = hapticsEnabled,
-                        onCheckedChange = { viewModel.setHapticsEnabled(it) }
-                    )
-                }
+                Switch(
+                    checked = hapticsEnabled,
+                    onCheckedChange = { viewModel.setHapticsEnabled(it) }
+                )
+            }
         }
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
