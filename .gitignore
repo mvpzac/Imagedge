@@ -24,3 +24,6 @@ github-upload/
 
 # 本地工具数据（WorkBuddy 记忆/产物，勿提交）
 .workbuddy/
+
+# 头脑风暴视觉稿（本地工具数据，勿提交）
+.superpowers/
