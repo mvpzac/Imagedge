@@ -22,6 +22,9 @@ import javax.inject.Singleton
  * 不震：滚动、翻页、滑条拖动过程、后台轮询事件。
  *
  * 三道闸：应用内开关（默认开）→ 系统「触摸震动」设置 → 设备有震动器。
+ *
+ * 实现：minSdk 29，恒用 createPredefined 系统预置效果，不做波形回落。
+ * 震动器惰性缓存，首次使用时解析一次。
  */
 @Singleton
 class Haptics @Inject constructor(
@@ -45,36 +48,27 @@ class Haptics @Inject constructor(
     private fun vibrate(pattern: Pattern) {
         if (!_enabled.value) return
         if (!systemHapticsEnabled()) return
-        val vibrator = resolveVibrator() ?: return
-        runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val effectId = when (pattern) {
-                    Pattern.TICK -> VibrationEffect.EFFECT_TICK
-                    Pattern.CLICK -> VibrationEffect.EFFECT_CLICK
-                    Pattern.THUD -> VibrationEffect.EFFECT_HEAVY_CLICK
-                    Pattern.DOUBLE -> VibrationEffect.EFFECT_DOUBLE_CLICK
-                }
-                vibrator.vibrate(VibrationEffect.createPredefined(effectId))
-            } else {
-                val (timings, amplitudes) = when (pattern) {
-                    Pattern.TICK -> longArrayOf(0, 10) to intArrayOf(0, 60)
-                    Pattern.CLICK -> longArrayOf(0, 15) to intArrayOf(0, 90)
-                    Pattern.THUD -> longArrayOf(0, 30) to intArrayOf(0, 160)
-                    Pattern.DOUBLE -> longArrayOf(0, 20, 80, 20) to intArrayOf(0, 120, 0, 120)
-                }
-                vibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, -1))
-            }
+        val vibrator = vibrator ?: return
+        val effectId = when (pattern) {
+            Pattern.TICK -> VibrationEffect.EFFECT_TICK
+            Pattern.CLICK -> VibrationEffect.EFFECT_CLICK
+            Pattern.THUD -> VibrationEffect.EFFECT_HEAVY_CLICK
+            Pattern.DOUBLE -> VibrationEffect.EFFECT_DOUBLE_CLICK
         }
+        // 震动是反馈通道：失败必须静默降级，绝不影响主流程
+        runCatching { vibrator.vibrate(VibrationEffect.createPredefined(effectId)) }
     }
 
-    private fun resolveVibrator(): Vibrator? = runCatching {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            context.getSystemService(VibratorManager::class.java)?.defaultVibrator
-        } else {
-            @Suppress("DEPRECATION")
-            context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-        }
-    }.getOrNull()?.takeIf { runCatching { it.hasVibrator() }.getOrDefault(false) }
+    private val vibrator: Vibrator? by lazy {
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                context.getSystemService(VibratorManager::class.java)?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+        }.getOrNull()?.takeIf { it.hasVibrator() }
+    }
 
     private fun systemHapticsEnabled(): Boolean = runCatching {
         Settings.System.getInt(
