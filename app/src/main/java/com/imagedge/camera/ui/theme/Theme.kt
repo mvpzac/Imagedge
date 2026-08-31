@@ -4,7 +4,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
 
 /**
  * <pre>
@@ -40,7 +39,7 @@ private val ImagedgeDarkScheme = darkColorScheme(
     primary = InkDark,
     onPrimary = OnInkDark,
     secondary = InfoDark,
-    onSecondary = Color(0xFF0E2A6B),
+    onSecondary = OnInfoContainer,
     tertiary = SuccessDark,
     background = BgDark,
     surface = SurfaceDark,
@@ -52,7 +51,7 @@ private val ImagedgeDarkScheme = darkColorScheme(
     outlineVariant = OutlineDark,
     error = ErrorDark,
     errorContainer = ErrorContainerDark,
-    onError = Color(0xFF4A0F0F),
+    onError = OnErrorDark,
     onErrorContainer = OnErrorContainerDark
 )
 

@@ -80,7 +80,7 @@ fun HomeScreen(
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Hero 品牌字：得意黑 + primary 色（与底部磁吸指示条同源，支持动态取色）
+        // Hero 品牌字：得意黑 + primary 色（与底部磁吸指示条同源）
         Text(
             text = stringResource(R.string.app_name),
             style = MaterialTheme.typography.displayLarge.copy(

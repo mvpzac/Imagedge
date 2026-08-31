@@ -73,6 +73,7 @@ val OnWarningContainerDark = Color(0xFFFDE3A7)
 val ErrorDark = Color(0xFFF87171)
 val ErrorContainerDark = Color(0xFF331416)
 val OnErrorContainerDark = Color(0xFFFBC9C9)
+val OnErrorDark = Color(0xFF4A0F0F)         // 错误容器前景（深色）
 
 val InfoDark = Color(0xFF7DA6FA)
 val InfoContainerDark = Color(0xFF131F38)

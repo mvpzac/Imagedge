@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 调色板（交互规格 S7：iOS 蓝主色 + Material3 语义色；低版本动态取色回退） -->
-    <color name="background_default">#FAFAF7</color>
+    <!-- 窗口首帧背景（与主题 BgLight 对齐，避免启动色温闪烁） -->
+    <color name="background_default">#F3F4F5</color>
 </resources>
