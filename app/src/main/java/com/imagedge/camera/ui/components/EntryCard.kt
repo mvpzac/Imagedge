@@ -29,7 +29,8 @@ fun IconBadge(
     modifier: Modifier = Modifier,
     size: Dp = 44.dp,
     iconSize: Dp = 20.dp,
-    tint: Color = MaterialTheme.colorScheme.primary
+    tint: Color = MaterialTheme.colorScheme.primary,
+    contentDescription: String? = null
 ) {
     Box(
         modifier = modifier
@@ -37,7 +38,7 @@ fun IconBadge(
             .background(tint.copy(alpha = 0.12f), shape = PillShape),
         contentAlignment = Alignment.Center
     ) {
-        LucideIcon(icon, contentDescription = null, size = iconSize, tint = tint)
+        LucideIcon(icon, contentDescription = contentDescription, size = iconSize, tint = tint)
     }
 }
 

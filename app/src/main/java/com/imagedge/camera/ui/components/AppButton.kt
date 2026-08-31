@@ -19,6 +19,9 @@ import androidx.compose.ui.unit.dp
 import com.imagedge.camera.ui.theme.Radius
 import com.imagedge.camera.ui.theme.Spacing
 
+/** 按钮内容内边距：垂直 14dp 与文字行高凑约 48dp 目标高度；水平 24dp 保非全宽时不贴边 */
+private val ButtonContentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp)
+
 /** 统一按钮：PRIMARY 主色实心 / SECONDARY 描边 / GHOST 文字 */
 enum class AppButtonType { PRIMARY, SECONDARY, GHOST }
 
@@ -33,15 +36,10 @@ fun AppButton(
     fullWidth: Boolean = true
 ) {
     val shape = RoundedCornerShape(Radius.Control)
-    val iconTint = when (type) {
-        AppButtonType.PRIMARY -> MaterialTheme.colorScheme.onPrimary
-        AppButtonType.SECONDARY -> MaterialTheme.colorScheme.primary
-        AppButtonType.GHOST -> MaterialTheme.colorScheme.primary
-    }
     val content: @Composable () -> Unit = {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (leadingIcon != null) {
-                LucideIcon(leadingIcon, contentDescription = null, size = 18.dp, tint = iconTint)
+                LucideIcon(leadingIcon, contentDescription = null, size = 18.dp)
                 Spacer(Modifier.width(Spacing.S))
             }
             Text(text, style = MaterialTheme.typography.labelLarge)
@@ -53,7 +51,7 @@ fun AppButton(
             onClick = onClick,
             enabled = enabled,
             shape = shape,
-            contentPadding = PaddingValues(vertical = 14.dp),
+            contentPadding = ButtonContentPadding,
             modifier = baseModifier
         ) { content() }
         AppButtonType.SECONDARY -> OutlinedButton(
@@ -61,14 +59,14 @@ fun AppButton(
             enabled = enabled,
             shape = shape,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-            contentPadding = PaddingValues(vertical = 14.dp),
+            contentPadding = ButtonContentPadding,
             modifier = baseModifier
         ) { content() }
         AppButtonType.GHOST -> TextButton(
             onClick = onClick,
             enabled = enabled,
             shape = shape,
-            contentPadding = PaddingValues(vertical = 14.dp),
+            contentPadding = ButtonContentPadding,
             modifier = baseModifier
         ) { content() }
     }

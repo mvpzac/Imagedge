@@ -15,6 +15,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.imagedge.camera.ui.theme.Radius
 import com.imagedge.camera.ui.theme.Spacing
@@ -45,12 +46,13 @@ fun EmptyState(
         if (icon != null) {
             LucideIcon(icon, contentDescription = null, size = 32.dp, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Text(title, style = MaterialTheme.typography.titleMedium)
+        Text(title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
         if (desc != null) {
             Text(
                 text = desc,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = Spacing.XL)
             )
         }
@@ -58,8 +60,7 @@ fun EmptyState(
             AppButton(
                 text = actionLabel,
                 onClick = onAction,
-                fullWidth = false,
-                modifier = Modifier.padding(top = Spacing.S)
+                fullWidth = false
             )
         }
     }
