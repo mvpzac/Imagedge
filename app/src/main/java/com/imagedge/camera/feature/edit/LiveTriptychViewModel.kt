@@ -12,6 +12,7 @@ import androidx.lifecycle.viewModelScope
 import com.imagedge.camera.core.common.AppLog
 import com.imagedge.camera.motionphoto.MotionPhotoComposer
 import com.imagedge.camera.motionphoto.MotionPhotoParser
+import com.imagedge.camera.ui.feedback.Haptics
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -37,7 +38,8 @@ import kotlinx.coroutines.withContext
  */
 @HiltViewModel
 class LiveTriptychViewModel @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val haptics: Haptics
 ) : ViewModel() {
 
     /** 该段画面在裁切窗口内的垂直对齐（横图裁成更"竖"的比例时决定保上/中/下） */
@@ -469,12 +471,14 @@ class LiveTriptychViewModel @Inject constructor(
                 _state.update {
                     it.copy(exporting = false, progressText = null, success = true, message = "三拼 LIVE 图已保存到相册")
                 }
+                haptics.thud()
                 cleanup()
             } catch (e: Exception) {
                 AppLog.w("triptych", "三拼导出失败：${e.message}")
                 _state.update {
                     it.copy(exporting = false, progressText = null, message = "导出失败：${e.message}")
                 }
+                haptics.double()
                 cleanup()
             }
         }

@@ -9,6 +9,7 @@ import com.imagedge.camera.data.model.MediaItem
 import com.imagedge.camera.data.model.MediaSessionCache
 import com.imagedge.camera.data.remote.CameraRepository
 import com.imagedge.camera.data.transfer.DownloadManager
+import com.imagedge.camera.ui.feedback.Haptics
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -55,7 +56,8 @@ enum class BrowseMode { SELECTION, FULL_CARD }
 class AlbumViewModel @Inject constructor(
     private val repository: CameraRepository,
     private val downloadManager: DownloadManager,
-    private val sessionCache: MediaSessionCache
+    private val sessionCache: MediaSessionCache,
+    private val haptics: Haptics
 ) : ViewModel() {
 
     private val _items = MutableStateFlow<List<MediaItem>>(emptyList())
@@ -307,7 +309,11 @@ class AlbumViewModel @Inject constructor(
         _selected.update { current ->
             if (item.channelKey in current) current - item.channelKey else current + item.channelKey
         }
+        haptics.tick()
     }
+
+    /** 筛选切换反馈（筛选为 UI 局部状态，由 UI 调用） */
+    fun onFilterChanged() = haptics.tick()
 
     /** 清空选中 */
     fun clearSelection() {

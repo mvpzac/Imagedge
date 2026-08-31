@@ -20,6 +20,7 @@ import com.imagedge.camera.R
 import com.imagedge.camera.core.common.AppLog
 import com.imagedge.camera.motionphoto.MotionPhotoComposer
 import com.imagedge.camera.motionphoto.MotionPhotoParser
+import com.imagedge.camera.ui.feedback.Haptics
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -49,7 +50,8 @@ import kotlinx.coroutines.withContext
  */
 @HiltViewModel
 class ExifFrameViewModel @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val haptics: Haptics
 ) : ViewModel() {
 
     /** 内置模板（4 套） */
@@ -676,9 +678,11 @@ class ExifFrameViewModel @Inject constructor(
                 _state.update {
                     it.copy(exporting = false, success = true, message = "已保存到相册（DCIM/Imagedge）")
                 }
+                haptics.thud()
             } catch (e: Exception) {
                 AppLog.w("exifframe", "导出失败：${e.message}")
                 _state.update { it.copy(exporting = false, message = "导出失败：${e.message}") }
+                haptics.double()
             }
         }
     }

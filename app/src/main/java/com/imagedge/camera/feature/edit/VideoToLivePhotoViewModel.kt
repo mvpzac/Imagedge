@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.imagedge.camera.core.common.AppLog
 import com.imagedge.camera.motionphoto.MotionPhotoComposer
 import com.imagedge.camera.motionphoto.MotionPhotoVideoCoverExtractor
+import com.imagedge.camera.ui.feedback.Haptics
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -28,7 +29,8 @@ import kotlinx.coroutines.withContext
  */
 @HiltViewModel
 class VideoToLivePhotoViewModel @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val haptics: Haptics
 ) : ViewModel() {
 
     /** 封面候选帧（时间线缩略图用） */
@@ -317,6 +319,7 @@ class VideoToLivePhotoViewModel @Inject constructor(
                     else "导出完成：成功 $done 个，失败 $fail 个"
                 )
             }
+            if (fail == 0) haptics.thud() else haptics.double()
         }
     }
 

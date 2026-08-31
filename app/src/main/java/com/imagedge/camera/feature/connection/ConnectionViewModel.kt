@@ -25,7 +25,8 @@ import javax.inject.Inject
 class ConnectionViewModel @Inject constructor(
     private val repository: CameraRepository,
     private val cameraWifiManager: CameraWifiManager,
-    private val stateHolder: ConnectionStateHolder
+    private val stateHolder: ConnectionStateHolder,
+    private val haptics: Haptics
 ) : ViewModel() {
 
     val state: StateFlow<ConnectionState> = stateHolder.state
@@ -46,8 +47,10 @@ class ConnectionViewModel @Inject constructor(
                         cameraModel = result.deviceModel
                     )
                 }
+                haptics.thud()
             } catch (e: Exception) {
                 stateHolder.update { ConnectionState(ConnectionPhase.ERROR, errorMessage = e.message ?: "连接失败") }
+                haptics.double()
             }
         }
     }

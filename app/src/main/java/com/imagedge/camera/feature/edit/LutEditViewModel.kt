@@ -11,6 +11,7 @@ import com.imagedge.camera.data.lut.UserLutStore
 import com.imagedge.camera.lut.CubeLut
 import com.imagedge.camera.lut.CubeLutParser
 import com.imagedge.camera.lut.LutProcessor
+import com.imagedge.camera.ui.feedback.Haptics
 import com.imagedge.camera.ui.feedback.SnackbarController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -82,7 +83,8 @@ class LutEditViewModel @Inject constructor(
     @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
     private val processor: LutProcessor,
     private val userLutStore: UserLutStore,
-    private val snackbarController: SnackbarController
+    private val snackbarController: SnackbarController,
+    private val haptics: Haptics
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(LutEditState())
@@ -316,11 +318,13 @@ class LutEditViewModel @Inject constructor(
                     exportBitmap.compress(Bitmap.CompressFormat.JPEG, 95, it)
                 }
                 _state.update { it.copy(saved = true, message = "已保存：$name") }
+                haptics.thud()
                 // 成功用轻提示（2~3s 自动消失）；失败则留在页面上的红色文字里，
                 // 因为失败信息需要用户看清并据此处理，不该一闪而过。
                 snackbarController.show("已保存到相册：$name")
             } catch (e: Exception) {
                 _state.update { it.copy(message = "保存失败：${e.message}") }
+                haptics.double()
             }
         }
     }

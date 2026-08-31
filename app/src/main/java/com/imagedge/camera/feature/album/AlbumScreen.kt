@@ -147,7 +147,10 @@ fun AlbumScreen(
                 MediaFilter.entries.forEach { f ->
                     FilterChip(
                         selected = filter == f,
-                        onClick = { filter = f },
+                        onClick = {
+                            filter = f
+                            viewModel.onFilterChanged()
+                        },
                         label = {
                             Text(
                                 text = stringResource(f.labelRes),

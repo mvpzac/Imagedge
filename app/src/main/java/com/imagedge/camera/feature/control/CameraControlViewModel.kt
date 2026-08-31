@@ -21,6 +21,7 @@ import com.imagedge.camera.data.model.CameraSettings
 import com.imagedge.camera.data.remote.CameraRepository
 import com.imagedge.camera.data.remote.LiveViewRepository
 import com.imagedge.camera.data.transfer.DownloadManager
+import com.imagedge.camera.ui.feedback.Haptics
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -156,7 +157,8 @@ class CameraControlViewModel @Inject constructor(
     private val liveViewRepository: LiveViewRepository,
     private val cameraRepository: CameraRepository,
     private val bleShutter: SonyBleShutter,
-    private val downloadManager: DownloadManager
+    private val downloadManager: DownloadManager,
+    private val haptics: Haptics
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ControlState())
@@ -218,6 +220,7 @@ class CameraControlViewModel @Inject constructor(
      */
     fun shutterDown() {
         if (bleShutter.state.value is BleShutterState.Connected) {
+            haptics.thud()
             viewModelScope.launch {
                 bleShutter.halfPress()
                 _state.update { it.copy(message = "对焦中…（松开拍摄）") }
@@ -228,9 +231,11 @@ class CameraControlViewModel @Inject constructor(
                 try {
                     cameraRepository.takePicture()
                     _state.update { it.copy(message = "快门已触发（PTP），正在自动拉回…") }
+                    haptics.thud()
                     refreshAfterCapture()
                 } catch (e: Exception) {
                     _state.update { it.copy(message = "拍摄失败：${e.message}") }
+                    haptics.double()
                 } finally {
                     _state.update { it.copy(taking = false) }
                 }
@@ -263,6 +268,7 @@ class CameraControlViewModel @Inject constructor(
                     bleShutter.halfRelease()
                 }
                 _state.update { it.copy(message = "已拍摄（BLE）") }
+                haptics.thud()
                 // 拍照后短暂静默 PTP，让相机写卡（相机「静态影像保存目的地」设为「仅拍摄装置」时写卡很快；
                 // 若设为「手机+拍摄装置」则拍照后会推照片到手机导致写卡卡住——需用户改相机设置，非协议问题）
                 cameraRepository.silencePtp(5000)
@@ -274,6 +280,7 @@ class CameraControlViewModel @Inject constructor(
 
     /** 录像开始/停止切换（按下 0x0F + 松开 0x0E；切换后短暂静默 PTP 让相机写视频） */
     fun recordToggle() {
+        haptics.thud()
         bleShutter.record()
         cameraRepository.silencePtp(5000)
     }
