@@ -153,6 +153,7 @@ class SettingsViewModel @Inject constructor(
 
     val hapticsEnabled: StateFlow<Boolean> = haptics.enabled
     fun setHapticsEnabled(enabled: Boolean) {
+        // 先持久化再震动：开→关时震动会被 Haptics 的应用开关闸拦截（符合预期，关闭后不再震）；不要调换顺序
         haptics.setEnabled(enabled)
         haptics.click()
     }

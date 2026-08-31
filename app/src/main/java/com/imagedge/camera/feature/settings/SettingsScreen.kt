@@ -124,8 +124,11 @@ fun SettingsScreen(
                 }
             }
             // ── 触觉反馈 ──
+            // 整行可点击切换（扩大命中区域），不局限于右侧 Switch
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { viewModel.setHapticsEnabled(!hapticsEnabled) },
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
