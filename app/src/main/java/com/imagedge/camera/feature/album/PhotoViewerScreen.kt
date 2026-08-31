@@ -28,7 +28,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -36,7 +35,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.MediaItem as Media3Item
@@ -46,6 +45,10 @@ import android.net.Uri
 import com.imagedge.camera.R
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.LucideIcon
+import com.imagedge.camera.ui.theme.OnViewer
+import com.imagedge.camera.ui.theme.PillShape
+import com.imagedge.camera.ui.theme.Radius
+import com.imagedge.camera.ui.theme.ViewerBackdrop
 import com.imagedge.camera.data.model.MediaItem
 import com.imagedge.camera.ptp.PhotoType
 import java.io.File
@@ -84,7 +87,7 @@ fun PhotoViewerScreen(
     }
 
     Scaffold(
-        containerColor = Color.Black,
+        containerColor = ViewerBackdrop,
         topBar = {
             val current = items.getOrNull(pagerState.settledPage)
             TopAppBar(
@@ -93,12 +96,12 @@ fun PhotoViewerScreen(
                         Text(
                             text = current?.filename ?: "",
                             style = MaterialTheme.typography.titleSmall,
-                            color = Color.White
+                            color = OnViewer
                         )
                         Text(
                             text = formatSize(current?.sizeBytes ?: 0),
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.7f)
+                            color = OnViewer.copy(alpha = 0.7f)
                         )
                     }
                 },
@@ -108,7 +111,7 @@ fun PhotoViewerScreen(
                         onClick = onBack,
                         modifier = Modifier
                             .padding(4.dp)
-                            .background(Color.Black.copy(alpha = 0.35f), CircleShape)
+                            .background(ViewerBackdrop.copy(alpha = 0.35f), PillShape)
                     ) {
                         LucideIcon(
                             Lucide.ArrowLeft,
@@ -118,7 +121,7 @@ fun PhotoViewerScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Black.copy(alpha = 0.6f)
+                    containerColor = ViewerBackdrop.copy(alpha = 0.6f)
                 )
             )
         },
@@ -128,7 +131,10 @@ fun PhotoViewerScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color.Black.copy(alpha = 0.6f))
+                        .background(
+                            ViewerBackdrop.copy(alpha = 0.6f),
+                            RoundedCornerShape(topStart = Radius.Card, topEnd = Radius.Card)
+                        )
                         .padding(16.dp),
                     horizontalArrangement = Arrangement.Center
                 ) {
@@ -143,7 +149,7 @@ fun PhotoViewerScreen(
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     stringResource(R.string.viewer_no_items),
-                    color = Color.White
+                    color = OnViewer
                 )
             }
             return@Scaffold
@@ -183,10 +189,10 @@ fun PhotoViewerScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        CircularProgressIndicator(color = Color.White)
+                        CircularProgressIndicator(color = OnViewer)
                         Text(
                             text = stringResource(R.string.viewer_loading),
-                            color = Color.White,
+                            color = OnViewer,
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
@@ -216,19 +222,19 @@ private fun VideoPreview(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                CircularProgressIndicator(color = Color.White)
-                Text("下载视频 ${state.progress}%", color = Color.White)
+                CircularProgressIndicator(color = OnViewer)
+                Text("下载视频 ${state.progress}%", color = OnViewer)
                 LinearProgressIndicator(
                     progress = { state.progress / 100f },
                     modifier = Modifier.fillMaxWidth(0.6f),
-                    color = Color.White
+                    color = OnViewer
                 )
             }
             is VideoDownloadState.Failed -> Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Text("下载失败：${state.message}", color = Color.White)
+                Text("下载失败：${state.message}", color = OnViewer)
                 Button(onClick = onPlay) { Text("重试") }
             }
             else -> Button(onClick = onPlay) { Text("播放视频") }
