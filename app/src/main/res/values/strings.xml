@@ -23,6 +23,11 @@
     <string name="home_manual_hint">若手机已连上相机热点，留空点「连接」即可自动发现；也可手动填写相机 IP（AP 模式固定 192.168.122.1）</string>
     <string name="home_manual_connect">连接</string>
 
+    <!-- 首页三步连接引导（未连接时显示，连接后自动消失） -->
+    <string name="home_guide_step1">相机进入「智能手机连接」，屏幕出现二维码</string>
+    <string name="home_guide_step2">点「扫码连接」，手机自动配网</string>
+    <string name="home_guide_step3">相机端勾选照片，即可浏览与下载</string>
+
     <!-- 相册 -->
     <string name="album_selection_title">选片集</string>
     <string name="album_full_card_title">整卡查看</string>

@@ -41,6 +41,7 @@ import com.imagedge.camera.data.model.ConnectionPhase
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.theme.SmileySansFamily
 import com.imagedge.camera.ui.components.LucideIcon
+import com.imagedge.camera.ui.components.StepsGuideCard
 import com.imagedge.camera.ui.feedback.SnackbarController
 import com.imagedge.camera.feature.connection.ConnectionViewModel
 import com.imagedge.camera.feature.connection.QrScanDialog
@@ -167,6 +168,18 @@ fun HomeScreen(
                     }
                 }
             }
+        }
+
+        // 三步连接引导：仅未连接时显示，连接成功后自动消失
+        if (state.phase == ConnectionPhase.DISCONNECTED) {
+            StepsGuideCard(
+                steps = listOf(
+                    stringResource(R.string.home_guide_step1),
+                    stringResource(R.string.home_guide_step2),
+                    stringResource(R.string.home_guide_step3)
+                ),
+                modifier = Modifier.padding(top = 16.dp)
+            )
         }
 
         // 主 CTA：已连接 → 断开；未连接 → 扫码连接（主）+ 手动连接（次要）

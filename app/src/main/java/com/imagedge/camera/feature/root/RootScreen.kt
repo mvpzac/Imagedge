@@ -377,7 +377,7 @@ private fun FloatingNavBar(
 }
 
 /**
- * 单个导航图标：选中时上浮 3dp + 主色；被选中瞬间朝来向偏移 5dp 后弹回（磁吸触感）。
+ * 单个导航图标：选中时上浮 3dp + 主色；选中瞬间朝来向偏移 5dp 后弹回。
  * 图标下移 4dp（全局补偿已归零）—— 实测仅胶囊导航内图标先天偏高，页面图标居中即可。
  */
 private val NavIconExtraShiftY = 4.dp
