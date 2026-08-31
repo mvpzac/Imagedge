@@ -142,6 +142,21 @@ fun RemoteShootingScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // 断连提示横幅（内容首部，视口内始终可见）：未连接即显示，
+            // 连接中切「重连中…」文案并禁用点击，等效 AlbumScreen 的防抖守卫；
+            // ViewModel.connect() 内部另有 connecting 去重，重复点击不会发起并发连接
+            if (!state.isConnected) {
+                StatusBanner(
+                    message = stringResource(R.string.album_disconnected_banner),
+                    actionLabel = stringResource(
+                        if (state.connecting) R.string.album_disconnected_reconnecting
+                        else R.string.album_disconnected_retry
+                    ),
+                    onAction = { if (!state.connecting) viewModel.connect() },
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+            }
+
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -364,18 +379,6 @@ fun RemoteShootingScreen(
                         }
                     }
                 }
-            }
-
-            // 断连提示横幅：未连接且未在尝试连接时给出「重连」入口。
-            // 连接尝试中（state.connecting）横幅整体隐藏，等效 AlbumScreen 的防抖守卫；
-            // ViewModel.connect() 内部另有 connecting 去重，重复点击不会发起并发连接
-            if (!state.isConnected && !state.connecting) {
-                StatusBanner(
-                    message = stringResource(R.string.album_disconnected_banner),
-                    actionLabel = stringResource(R.string.album_disconnected_retry),
-                    onAction = { viewModel.connect() },
-                    modifier = Modifier.padding(12.dp)
-                )
             }
 
             state.message?.let {
