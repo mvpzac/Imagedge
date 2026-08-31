@@ -1,0 +1,143 @@
+package com.imagedge.camera.feature.album
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Card
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.imagedge.camera.R
+import com.imagedge.camera.ui.components.Lucide
+import com.imagedge.camera.ui.components.LucideIcon
+import com.imagedge.camera.ui.feedback.SnackbarController
+
+/**
+ * <pre>
+ *     author : Imagedge Team
+ *     time   : 2026/08/30
+ *     desc   : 相册中枢页——「选片集」与「整卡查看」拆为两个并列入口（默认选片集），
+ *              整卡查看在传输未完成时拦截并提示；另含相册传输（下载队列）/ 相册编辑（LUT）。
+ *     version: 1.1
+ * </pre>
+ */
+
+@Composable
+fun AlbumHubScreen(
+    onOpenSelection: () -> Unit = {},
+    onOpenFullCard: () -> Unit = {},
+    onOpenTransfer: () -> Unit = {},
+    onOpenEdit: () -> Unit = {},
+    snackbarController: SnackbarController,
+    albumViewModel: AlbumViewModel = hiltViewModel()
+) {
+    val hasActiveDownload by albumViewModel.hasActiveDownload.collectAsStateWithLifecycle()
+    val fullCardBusyHint = stringResource(R.string.hub_full_card_busy_hint)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text(
+            text = stringResource(R.string.tab_album),
+            style = MaterialTheme.typography.headlineLarge,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        // 选片集：默认入口（相机连接后默认走选片集通道）
+        HubCard(
+            icon = Lucide.Images,
+            title = stringResource(R.string.hub_selection_title),
+            desc = stringResource(R.string.hub_selection_desc),
+            onClick = onOpenSelection
+        )
+        // 整卡查看：手动点击才切换通道；传输未完成时拦截并提示
+        HubCard(
+            icon = Lucide.HardDrive,
+            title = stringResource(R.string.hub_full_card_title),
+            desc = stringResource(R.string.hub_full_card_desc),
+            onClick = {
+                if (hasActiveDownload) {
+                    snackbarController.show(fullCardBusyHint)
+                } else {
+                    onOpenFullCard()
+                }
+            }
+        )
+        HubCard(
+            icon = Lucide.Download,
+            title = stringResource(R.string.hub_transfer_title),
+            desc = stringResource(R.string.hub_transfer_desc),
+            onClick = onOpenTransfer
+        )
+        HubCard(
+            icon = Lucide.SlidersHorizontal,
+            title = stringResource(R.string.hub_edit_title),
+            desc = stringResource(R.string.hub_edit_desc),
+            onClick = onOpenEdit
+        )
+    }
+}
+
+@Composable
+private fun HubCard(icon: Int, title: String, desc: String, onClick: () -> Unit) {
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 左侧图标：主色淡底圆形衬底，建立入口识别度
+            Box(
+                modifier = Modifier
+                    .padding(end = 16.dp)
+                    .size(44.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                        shape = CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                LucideIcon(
+                    icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = title, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = desc,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            // 入口指示：右箭头图标（替代原「进入」文字按钮，整卡可点）
+            IconButton(onClick = onClick) {
+                LucideIcon(
+                    Lucide.ChevronRight,
+                    contentDescription = stringResource(R.string.remote_entry_open),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 启动主题：无 ActionBar，由 Compose 全权接管 UI（对齐 iOS 高级感定制） -->
+    <style name="Theme.Imagedge" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/background_default</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

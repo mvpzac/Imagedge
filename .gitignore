@@ -1,0 +1,26 @@
+# Gradle
+.gradle/
+.kotlin/
+build/
+local.properties
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# 签名与密钥（严禁提交）
+*.jks
+*.keystore
+keystore.properties
+
+# 本地产物
+captures/
+*.apk
+*.aab
+
+# 开源上传快照目录（github-upload 为仓库工作区的干净拷贝，勿入库）
+github-upload/
+
+# 本地工具数据（WorkBuddy 记忆/产物，勿提交）
+.workbuddy/

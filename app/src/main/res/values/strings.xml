@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 应用名 -->
+    <string name="app_name">Imagedge</string>
+
+    <!-- 底部导航（Tab） -->
+    <string name="tab_home">主页</string>
+    <string name="tab_album">相册</string>
+    <string name="tab_settings">设置</string>
+
+    <!-- 主页 -->
+    <string name="home_brand_sub">Designed for Sony Cameras</string>
+    <string name="home_status_disconnected">未连接相机</string>
+    <string name="home_status_connecting">正在连接相机…</string>
+    <string name="home_status_connected">已连接</string>
+    <string name="home_channel">通道：%1$s</string>
+    <string name="home_status_error">连接失败</string>
+    <string name="home_status_hint">在相机上打开「智能手机连接」显示二维码，再点下方「扫码连接」自动配网</string>
+    <string name="home_btn_disconnect">断开连接</string>
+    <string name="home_btn_disconnect_desc">断开当前相机的连接</string>
+    <string name="home_btn_manual">手动连接</string>
+    <string name="home_btn_manual_desc">输入相机 IP 地址或自动发现</string>
+    <string name="home_manual_hint">若手机已连上相机热点，留空点「连接」即可自动发现；也可手动填写相机 IP（AP 模式固定 192.168.122.1）</string>
+    <string name="home_manual_connect">连接</string>
+
+    <!-- 相册 -->
+    <string name="album_selection_title">选片集</string>
+    <string name="album_full_card_title">整卡查看</string>
+    <string name="album_empty_hint">等待相机内容…\n请保持相机处于「智能手机连接」页面；「选片集」还需在相机「发送到智能手机」里勾选要发送的照片，「整卡」则直接列出卡内全部照片</string>
+    <string name="album_empty_title">还没有照片</string>
+    <string name="album_error_title">加载失败</string>
+    <string name="album_retry">重试</string>
+    <string name="album_btn_download">下载 %1$d 项</string>
+    <string name="album_filter_all">全部</string>
+    <string name="album_filter_photo">照片</string>
+    <string name="album_filter_video">视频</string>
+    <string name="album_filter_raw">RAW</string>
+    <string name="album_filter_empty_title">当前筛选下没有内容</string>
+    <string name="album_filter_empty_hint">换个筛选类型，或点「重置」查看全部</string>
+    <string name="album_filter_reset">重置</string>
+    <string name="ble_connect_btn">连接蓝牙遥控（快门）</string>
+    <string name="ble_connect_hint">先在相机菜单开启「蓝牙遥控」并允许配对，再点按钮连接。蓝牙快门比 Wi-Fi 触发更稳</string>
+    <string name="ble_scanning">正在搜索相机蓝牙遥控…</string>
+    <string name="ble_connected_prefix">蓝牙遥控已连接：</string>
+    <string name="ble_connecting_prefix">正在连接蓝牙遥控：</string>
+    <string name="viewer_back">返回</string>
+    <string name="viewer_download">下载</string>
+    <string name="viewer_loading">加载原图…</string>
+    <string name="viewer_no_items">暂无可预览内容</string>
+    <string name="settings_section_appearance">外观</string>
+    <string name="settings_theme_light">浅色</string>
+    <string name="settings_theme_dark">深色</string>
+    <string name="settings_theme_system">跟随系统</string>
+    <string name="settings_theme_title">主题模式</string>
+    <string name="settings_brand_color">主题颜色</string>
+    <string name="settings_brand_color_hint">动态取色开启时，主题颜色暂不生效</string>
+    <string name="settings_dynamic_color">动态取色</string>
+    <string name="settings_ip_label">相机 IP 地址</string>
+    <string name="settings_section_download">下载</string>
+    <string name="settings_section_lut">LUT 管理</string>
+    <string name="settings_lut_empty">暂无自定义 LUT（编辑页与设置页导入的 .cube 都会保存在这里）</string>
+    <string name="settings_lut_import">导入 .cube</string>
+    <string name="settings_lut_export">导出</string>
+    <string name="settings_lut_delete">删除</string>
+    <string name="settings_lut_delete_confirm_title">删除 LUT</string>
+    <string name="settings_lut_delete_confirm_body">确定删除「%1$s」？删除后无法恢复，需要重新导入。</string>
+    <string name="settings_lut_delete_cancel">取消</string>
+
+    <!-- LUT 适用类型（导入后由用户声明，决定归入编辑页哪一排） -->
+    <string name="lut_type_dialog_title">这个 LUT 适用于哪类画面？</string>
+    <string name="lut_type_dialog_body">.cube 文件本身不记录输入曲线，而三类画面互不相通——套错会让画面发灰或过冲。请选择它的适用场景：</string>
+    <string name="lut_type_creative">普通照片 / 已还原画面（sRGB、Rec.709）</string>
+    <string name="lut_type_slog2">索尼 S-Log2 灰片</string>
+    <string name="lut_type_slog3">索尼 S-Log3 灰片</string>
+    <string name="lut_type_confirm">确定</string>
+    <string name="lut_type_skip">按文件名推断</string>
+    <string name="settings_pick_dir">选择下载目录</string>
+    <string name="settings_restore_dir">恢复默认</string>
+    <string name="settings_download_hint">照片保存至所选目录（默认 DCIM/Imagedge，系统相册可见）；RAW/JPG/视频均支持</string>
+    <string name="settings_section_about">关于</string>
+    <string name="settings_section_permission">权限</string>
+    <string name="settings_permission_entry_desc">查看本应用使用的全部权限及用途</string>
+
+    <!-- 权限使用说明（诚实披露 + 按需申请） -->
+    <string name="permission_title">权限使用说明</string>
+    <string name="permission_intro">本应用只申请实现功能所必需的权限，不采集与相机连接无关的数据。以下是全部权限及其用途，你可以随时在系统设置中关闭，关闭后仅相关功能不可用。</string>
+    <string name="permission_section_runtime">需要授权的权限</string>
+    <string name="permission_section_normal">基础权限（系统自动授予，不可关闭）</string>
+    <string name="permission_status_granted">已授予</string>
+    <string name="permission_status_denied">未授予</string>
+    <string name="permission_denied_hint">需要「%1$s」权限：%2$s</string>
+    <string name="permission_open_settings">去系统设置开启</string>
+
+    <string name="permission_camera_label">相机</string>
+    <string name="permission_camera_purpose">扫描相机屏幕上的连接二维码，用于扫码配网</string>
+    <string name="permission_nearby_wifi_label">附近 Wi-Fi 设备</string>
+    <string name="permission_nearby_wifi_purpose">将手机连接到相机热点、与相机建立无线传输通道（不用于定位）</string>
+    <string name="permission_notification_label">通知</string>
+    <string name="permission_notification_purpose">后台传输照片/视频时显示下载进度</string>
+    <string name="permission_bluetooth_connect_label">蓝牙连接</string>
+    <string name="permission_bluetooth_connect_purpose">通过蓝牙向相机发送快门指令，实现遥控拍摄</string>
+    <string name="permission_bluetooth_scan_label">蓝牙扫描</string>
+    <string name="permission_bluetooth_scan_purpose">发现附近的索尼相机并配对（不用于定位）</string>
+    <string name="permission_location_label">位置信息</string>
+    <string name="permission_location_purpose">Android 12 及以下系统中蓝牙扫描需要此权限，仅用于发现相机，不采集、不上传位置</string>
+    <string name="permission_location_coarse_label">大致位置（兼容）</string>
+    <string name="permission_location_coarse_purpose">Android 12 及以下系统中部分机型蓝牙扫描的兼容权限，同样不采集位置</string>
+
+    <string name="permission_internet_label">网络访问</string>
+    <string name="permission_internet_purpose">与相机建立 PTP/IP 连接、获取实时取景与传输照片</string>
+    <string name="permission_network_state_label">网络状态</string>
+    <string name="permission_network_state_purpose">识别当前 Wi-Fi 网络并读取网关地址（相机 IP）</string>
+    <string name="permission_change_network_label">更改网络连接</string>
+    <string name="permission_change_network_purpose">将手机连接到相机热点（扫码配网）</string>
+    <string name="permission_wifi_state_label">Wi-Fi 状态</string>
+    <string name="permission_wifi_state_purpose">读取当前 Wi-Fi 信息以自动发现相机</string>
+    <string name="permission_change_wifi_label">更改 Wi-Fi 状态</string>
+    <string name="permission_change_wifi_purpose">建立并维持与相机热点的连接</string>
+    <string name="permission_multicast_label">多播</string>
+    <string name="permission_multicast_purpose">UPnP 设备发现（旧款索尼相机的备用连接方式）</string>
+    <string name="permission_foreground_label">前台服务</string>
+    <string name="permission_foreground_purpose">后台持续传输照片/视频时保持连接稳定</string>
+
+    <string name="settings_about_body">开源项目（Apache-2.0 License）\n基于 PTP/IP 与 BLE 无线协议栈，面向索尼相机\n\n免责声明：本项目与 Sony Corporation 无关；Sony 及相关商标归其所有者所有。协议实现基于公开资料与社区逆向成果，仅供学习研究。</string>
+    <string name="hub_selection_title">选片集</string>
+    <string name="hub_selection_desc">浏览相机已勾选发送的照片</string>
+    <string name="hub_full_card_title">整卡查看</string>
+    <string name="hub_full_card_desc">浏览 SD 卡内全部照片</string>
+    <string name="hub_full_card_busy_hint">照片/视频传输中，请等待下载完成后再查看整卡</string>
+    <string name="hub_transfer_title">相册传输</string>
+    <string name="hub_transfer_desc">下载队列与传输进度</string>
+    <string name="hub_edit_title">相册编辑</string>
+    <string name="hub_edit_desc">视频转 LIVE 图 · LUT 滤镜调色</string>
+    <string name="edit_title">相册编辑</string>
+    <string name="edit_lut_title">LUT 滤镜</string>
+    <string name="edit_hub_livephoto_desc">选择视频导出为动态照片</string>
+    <string name="edit_hub_lut_desc">内置滤镜与 .cube 导入调色</string>
+    <string name="edit_pick_image">选择图片</string>
+    <string name="edit_pick_hint">选择一张本机照片开始调色（支持导入 .cube LUT）</string>
+    <string name="edit_strength">强度</string>
+    <string name="edit_save">保存到相册</string>
+
+    <!-- LUT 滤镜页：按适用画面类型分排 + 问号说明 -->
+    <string name="edit_lut_filter_title">滤镜</string>
+    <string name="edit_lut_help">查看 LUT 使用说明</string>
+    <string name="edit_lut_help_title">LUT 滤镜使用说明</string>
+    <string name="edit_lut_help_body">LUT 按适用的画面分成三类，三者互不相通：\n\n· 创意滤镜：用于普通照片和已还原的画面（sRGB、Rec.709），直接套用即可。\n\n· S-Log2 / S-Log3 滤镜：用于索尼相机拍摄的 Log 灰片，会先把灰片还原成正常色彩，再套上风格。\n\n选错类型会明显偏色：普通照片套 Log 还原 LUT 会发灰，Log 灰片套创意 LUT 会过冲。\n\n需要更多滤镜：前往「设置 → LUT 管理」导入 .cube 文件，导入时可声明它适用的画面类型。</string>
+    <string name="edit_lut_group_creative">创意滤镜（普通照片 / 已还原画面）</string>
+    <string name="edit_lut_group_slog2">S-Log2 滤镜（索尼 Log 灰片）</string>
+    <string name="edit_lut_group_slog3">S-Log3 滤镜（索尼 Log 灰片）</string>
+    <string name="edit_lut_group_empty">暂无，可在「设置 → LUT 管理」导入</string>
+    <string name="livephoto_title">视频转 LIVE 图</string>
+    <string name="livephoto_desc">选择一个或多个视频，导出为多品牌手机可播放的动态照片（LIVE 图）</string>
+    <string name="livephoto_pick">选择视频</string>
+    <string name="livephoto_hint">支持 MP4 视频，导出的 LIVE 图保存到系统相册</string>
+    <string name="livephoto_processing">正在导出…</string>
+    <string name="livephoto_result_hint">已保存到系统相册，可在相册中查看动态照片</string>
+    <string name="livephoto_continue">继续导出</string>
+    <string name="qr_camera_permission">需要相机权限才能扫描二维码</string>
+    <string name="qr_retry">重新扫码</string>
+    <string name="qr_connecting">正在连接 %1$s …</string>
+    <string name="qr_success">已连上热点 %1$s，正在建立相机连接…</string>
+    <string name="qr_waiting">将相机屏幕上的二维码对准取景框</string>
+    <string name="home_btn_qr">扫码连接</string>
+    <string name="home_btn_qr_desc">扫描相机屏幕二维码，自动配网并连接</string>
+    <string name="control_btn_record">录像 开始/停止</string>
+    <string name="control_liveview">实时取景</string>
+    <string name="control_liveview_waiting">等待实时取景画面…（需相机已连接）</string>
+    <string name="album_disconnected_banner">相机连接已断开。请确认手机连着相机热点，并在相机上重新进入传输模式</string>
+    <string name="album_disconnected_retry">重连</string>
+    <string name="album_disconnected_reconnecting">重连中…</string>
+
+    <!-- 下载队列 -->
+    <string name="download_title">下载</string>
+    <string name="download_clear">清空</string>
+    <string name="download_empty">没有下载任务</string>
+    <string name="download_empty_desc">在相册里长按选择照片后点「下载」，任务会出现在这里</string>
+
+    <!-- 传输记录 -->
+    <string name="download_queue_tab">下载队列</string>
+    <string name="download_history_tab">传输记录</string>
+    <string name="download_history_clear">清空记录</string>
+    <string name="download_history_empty">暂无传输记录</string>
+    <string name="download_history_empty_desc">完成照片/视频下载后，记录会显示在这里，长按可查看详情</string>
+    <string name="download_history_path">保存路径</string>
+    <string name="download_history_start">开始时间</string>
+    <string name="download_history_end">结束时间</string>
+    <string name="download_history_camera">导出相机</string>
+    <string name="download_history_close">关闭</string>
+    <string name="download_history_unknown">未知</string>
+
+    <!-- 相机控制 -->
+    <string name="remote_title">遥控拍摄</string>
+    <string name="remote_entry_title">遥控拍摄</string>
+    <string name="remote_entry_desc">实时取景 · 遥控快门 · 录像 · 参数调节（BLE 蓝牙 + Wi-Fi）</string>
+    <string name="remote_entry_open">进入</string>
+    <string name="control_btn_shoot">按住对焦 · 松开拍照</string>
+    <string name="control_shoot_mode">照相模式</string>
+    <string name="control_shoot_mode_on_camera">请在相机上切换</string>
+    <string name="control_wb">白平衡</string>
+    <string name="control_eb">曝光补偿</string>
+    <string name="control_iso">ISO</string>
+    <string name="control_fnumber">光圈</string>
+    <string name="control_shutter">快门</string>
+    <string name="control_params_title">拍摄参数</string>
+
+    <!-- 设置 -->
+</resources>

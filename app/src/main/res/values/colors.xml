@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 调色板（交互规格 S7：iOS 蓝主色 + Material3 语义色；低版本动态取色回退） -->
+    <color name="background_default">#FAFAF7</color>
+    <color name="ic_launcher_background">#5B50E6</color>
+</resources>

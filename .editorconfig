@@ -1,0 +1,24 @@
+# 编辑器统一规范（规范第 2 条：编码格式统一 UTF-8，格式化一致）
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Kotlin / Java：单行 ≤100 字符（规范 4.7）
+[*.{kt,kts,java}]
+indent_size = 4
+max_line_length = 100
+
+# XML / 资源文件
+[*.{xml,gradle}]
+indent_size = 4
+max_line_length = 120
+
+# 换行符统一 LF（避免跨平台差异）
+[*.bat]
+end_of_line = crlf
