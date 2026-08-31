@@ -26,11 +26,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -44,7 +42,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.asImageBitmap
@@ -60,10 +57,15 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import com.imagedge.camera.ui.components.AppButton
+import com.imagedge.camera.ui.components.AppButtonType
 import com.imagedge.camera.ui.components.EmptyState
 import com.imagedge.camera.ui.components.Lucide
-import com.imagedge.camera.ui.components.LucideIcon
 import com.imagedge.camera.ui.components.PageHeader
+import com.imagedge.camera.ui.components.ProcessingView
+import com.imagedge.camera.ui.theme.OnViewer
+import com.imagedge.camera.ui.theme.Radius
+import com.imagedge.camera.ui.theme.ViewerBackdrop
 
 /**
  * 视频转 LIVE 图导出页（批次 A）：
@@ -106,20 +108,14 @@ fun VideoToLivePhotoScreen(
                 )
 
                 state.processing -> {
-                    Spacer(Modifier.height(24.dp))
-                    CircularProgressIndicator()
-                    Text(
-                        text = state.progressText ?: "正在处理…",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    ProcessingView(message = state.progressText ?: "正在处理…")
                 }
 
                 state.doneCount > 0 || state.failCount > 0 -> {
                     EmptyState(
-                        icon = if (state.failCount == 0) Lucide.CircleCheck else Lucide.TriangleAlert,
                         title = state.message.orEmpty(),
-                        description = "已保存到系统相册，可在各平台以「实况/动态照片」方式分享",
+                        icon = if (state.failCount == 0) Lucide.CircleCheck else Lucide.TriangleAlert,
+                        desc = "已保存到系统相册，可在各平台以「实况/动态照片」方式分享",
                         actionLabel = "继续导出",
                         onAction = {
                             videoPicker.launch(
@@ -130,37 +126,17 @@ fun VideoToLivePhotoScreen(
                 }
 
                 else -> {
-                    Spacer(Modifier.height(48.dp))
-                    LucideIcon(
-                        Lucide.Video,
-                        contentDescription = null,
-                        size = 48.dp,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "视频转 LIVE 图",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "选取视频中最精彩的 1.5~5 秒，自选封面帧，一键转成可在国产主流手机与社交平台显示的实况照片",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                    Button(
-                        onClick = {
+                    EmptyState(
+                        title = "视频转 LIVE 图",
+                        icon = Lucide.Video,
+                        desc = "选取视频中最精彩的 1.5~5 秒，自选封面帧，一键转成可在国产主流手机与社交平台显示的实况照片",
+                        actionLabel = "选择视频",
+                        onAction = {
                             videoPicker.launch(
                                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
                             )
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.small
-                    ) {
-                        LucideIcon(Lucide.Video, contentDescription = null, size = 18.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Text("选择视频")
-                    }
+                        }
+                    )
                     Text(
                         text = "导出的 LIVE 图在小红书、微信、微博等平台分享时，请开启对应的「实况 / 原图」开关",
                         style = MaterialTheme.typography.bodySmall,
@@ -202,7 +178,7 @@ private fun SessionEditor(viewModel: VideoToLivePhotoViewModel) {
             modifier = Modifier
                 .fillMaxWidth()
                 .height(170.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(Radius.Card))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
@@ -247,7 +223,7 @@ private fun SessionEditor(viewModel: VideoToLivePhotoViewModel) {
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(Radius.Tag))
         ) {
             val totalWidth = maxWidth
             val duration = session.durationMs.coerceAtLeast(1L)
@@ -273,14 +249,14 @@ private fun SessionEditor(viewModel: VideoToLivePhotoViewModel) {
                     modifier = Modifier
                         .width(msToDp(session.keepStartMs))
                         .fillMaxHeight()
-                        .background(Color.Black.copy(alpha = 0.5f))
+                        .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f))
                 )
                 Box(
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
                         .width(totalWidth - msToDp(session.keepEndMs))
                         .fillMaxHeight()
-                        .background(Color.Black.copy(alpha = 0.5f))
+                        .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f))
                 )
 
                 // 滑块窗口：整体左右拖动（包含关键点的约束在 VM 内钳制）
@@ -290,7 +266,7 @@ private fun SessionEditor(viewModel: VideoToLivePhotoViewModel) {
                         .width(msToDp(session.effectiveWindowMs))
                         .fillMaxHeight()
                         .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
-                        .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                        .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(Radius.Tag))
                         .pointerInput(session.durationMs, session.effectiveWindowMs) {
                             detectHorizontalDragGestures { change, dragAmount ->
                                 change.consume()
@@ -340,31 +316,25 @@ private fun SessionEditor(viewModel: VideoToLivePhotoViewModel) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            OutlinedButton(
+            AppButton(
+                text = "预览",
                 onClick = { previewing = true },
                 modifier = Modifier.weight(1f),
-                shape = MaterialTheme.shapes.small
-            ) {
-                Text("预览")
-            }
-            Button(
+                type = AppButtonType.SECONDARY,
+                fullWidth = false
+            )
+            AppButton(
+                text = if (state.pendingUris.isEmpty()) "生成 LIVE 图" else "完成本段",
                 onClick = { viewModel.confirmSession() },
                 modifier = Modifier.weight(1f),
-                shape = MaterialTheme.shapes.small
-            ) {
-                Text(
-                    if (state.pendingUris.isEmpty()) "生成 LIVE 图"
-                    else "完成本段"
-                )
-            }
+                fullWidth = false
+            )
         }
-        OutlinedButton(
+        AppButton(
+            text = "放弃",
             onClick = { viewModel.cancelSession() },
-            modifier = Modifier.fillMaxWidth(),
-            shape = MaterialTheme.shapes.small
-        ) {
-            Text("放弃")
-        }
+            type = AppButtonType.SECONDARY
+        )
 
         if (previewing) {
             ClipPreviewDialog(
@@ -418,7 +388,7 @@ private fun ClipPreviewDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black),
+                .background(ViewerBackdrop),
             contentAlignment = Alignment.Center
         ) {
             AndroidView(
@@ -458,12 +428,12 @@ private fun ClipPreviewDialog(
                     0.5 * 1024 * 1024) / 1024 / 1024
                 Text(
                     "预估导出大小 ≈ %.1f MB".format(estimatedMb),
-                    color = Color.White,
+                    color = OnViewer,
                     style = MaterialTheme.typography.bodySmall
                 )
                 Text(
                     "按住画面播放片段 · 松手回到封面",
-                    color = Color.White,
+                    color = OnViewer,
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -473,7 +443,7 @@ private fun ClipPreviewDialog(
                     .align(Alignment.TopEnd)
                     .padding(16.dp)
             ) {
-                Text("关闭", color = Color.White)
+                Text("关闭", color = OnViewer)
             }
         }
     }
