@@ -16,17 +16,16 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -53,6 +52,8 @@ import com.imagedge.camera.ui.components.AlbumGridSkeleton
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.EmptyState
 import com.imagedge.camera.ui.components.PageHeader
+import com.imagedge.camera.ui.components.StatusBanner
+import com.imagedge.camera.ui.theme.Radius
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -163,31 +164,15 @@ fun AlbumScreen(
 
             // 断线提示横幅（连接状态由保活/事务自愈维护）
             if (connectionState == ChannelConnectionState.DISCONNECTED) {
-                Surface(
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = stringResource(R.string.album_disconnected_banner),
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(onClick = { viewModel.reconnect() }, enabled = !reconnecting) {
-                            Text(
-                                if (reconnecting) stringResource(R.string.album_disconnected_reconnecting)
-                                else stringResource(R.string.album_disconnected_retry)
-                            )
-                        }
-                    }
-                }
+                StatusBanner(
+                    message = stringResource(R.string.album_disconnected_banner),
+                    actionLabel = stringResource(
+                        if (reconnecting) R.string.album_disconnected_reconnecting
+                        else R.string.album_disconnected_retry
+                    ),
+                    onAction = { if (!reconnecting) viewModel.reconnect() },
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
             }
 
             // 筛选 + 分组结果（按日期分组、组内按文件名排序）
@@ -199,27 +184,26 @@ fun AlbumScreen(
                 loading -> AlbumGridSkeleton()
                 // 失败：说明原因 + 重试入口（规范：失败必须带「怎么办」）
                 error != null -> EmptyState(
-                    icon = Lucide.TriangleAlert,
                     title = stringResource(R.string.album_error_title),
-                    description = error.orEmpty(),
+                    desc = error.orEmpty(),
                     actionLabel = stringResource(R.string.album_retry),
-                    onAction = { viewModel.loadMedia() }
+                    onAction = { viewModel.loadMedia() },
+                    modifier = Modifier.fillMaxSize()
                 )
                 // 空态：说明 + 下一步行动（规范：空状态不能只丢一句"暂无数据"）
                 items.isEmpty() -> EmptyState(
-                    icon = Lucide.Info,
                     title = stringResource(R.string.album_empty_title),
-                    description = stringResource(R.string.album_empty_hint),
-                    actionLabel = stringResource(R.string.album_retry),
-                    onAction = { viewModel.loadMedia() }
+                    desc = stringResource(R.string.album_empty_hint),
+                    icon = Lucide.Images,
+                    modifier = Modifier.fillMaxSize()
                 )
                 // 筛选后为空：提示切换筛选
                 filtered.isEmpty() -> EmptyState(
-                    icon = Lucide.Info,
                     title = stringResource(R.string.album_filter_empty_title),
-                    description = stringResource(R.string.album_filter_empty_hint),
+                    desc = stringResource(R.string.album_filter_empty_hint),
                     actionLabel = stringResource(R.string.album_filter_reset),
-                    onAction = { filter = MediaFilter.ALL }
+                    onAction = { filter = MediaFilter.ALL },
+                    modifier = Modifier.fillMaxSize()
                 )
                 else -> {
                     LazyVerticalGrid(
@@ -295,7 +279,12 @@ private fun MediaCell(
                 modifier = cellModifier
             )
         } else {
-            Box(modifier = cellModifier.background(MaterialTheme.colorScheme.surfaceVariant))
+            Box(
+                modifier = cellModifier.background(
+                    MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(Radius.Tag)
+                )
+            )
         }
 
         // 选中态边框
@@ -303,7 +292,10 @@ private fun MediaCell(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
+                    .background(
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+                        shape = RoundedCornerShape(Radius.Tag)
+                    )
             )
         }
 
@@ -315,7 +307,10 @@ private fun MediaCell(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(4.dp)
-                    .background(MaterialTheme.colorScheme.background.copy(alpha = 0.7f))
+                    .background(
+                        MaterialTheme.colorScheme.background.copy(alpha = 0.7f),
+                        shape = RoundedCornerShape(Radius.Tag)
+                    )
                     .padding(horizontal = 4.dp, vertical = 1.dp)
             )
         }
