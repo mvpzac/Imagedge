@@ -170,8 +170,8 @@ fun HomeScreen(
             }
         }
 
-        // 三步连接引导：仅未连接时显示，连接成功后自动消失
-        if (state.phase == ConnectionPhase.DISCONNECTED) {
+        // 三步连接引导：未连接或连接失败时显示，连接成功后自动消失
+        if (state.phase == ConnectionPhase.DISCONNECTED || state.phase == ConnectionPhase.ERROR) {
             StepsGuideCard(
                 steps = listOf(
                     stringResource(R.string.home_guide_step1),
