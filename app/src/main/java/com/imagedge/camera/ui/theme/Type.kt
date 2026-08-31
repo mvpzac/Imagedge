@@ -78,10 +78,16 @@ val ImagedgeTypography = Typography(
         fontWeight = FontWeight.Bold,
         lineHeight = 32.sp
     ),
+    // PageHeader 等二级页标题（此前未定义，回落到 M3 默认系统字体）
+    headlineSmall = base.copy(
+        fontSize = FontSize.H3,
+        fontWeight = FontWeight.Bold,
+        lineHeight = 32.sp
+    ),
     titleMedium = base.copy(
-        fontSize = 18.sp,
+        fontSize = FontSize.Body,
         fontWeight = FontWeight.Medium,
-        lineHeight = 26.sp
+        lineHeight = 24.sp
     ),
     titleSmall = base.copy(
         fontSize = FontSize.Body,
