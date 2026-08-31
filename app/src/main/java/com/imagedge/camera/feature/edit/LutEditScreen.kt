@@ -18,7 +18,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -27,7 +26,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
@@ -47,9 +45,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.R
 import com.imagedge.camera.data.lut.LutType
+import com.imagedge.camera.ui.components.AppButton
+import com.imagedge.camera.ui.components.EmptyState
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.LucideIcon
 import com.imagedge.camera.ui.components.PageHeader
+import com.imagedge.camera.ui.components.ResultMessage
 import com.imagedge.camera.feature.edit.FILTER_NONE
 
 /**
@@ -124,29 +125,16 @@ fun LutEditScreen(
                         ) { CircularProgressIndicator() }
                     }
                 } else {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        Button(onClick = {
-                            imagePicker.launch(arrayOf("image/*"))
-                        }) { Text(stringResource(R.string.edit_pick_image)) }
-                        Text(
-                            text = stringResource(R.string.edit_pick_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    EmptyState(
+                        title = stringResource(R.string.edit_pick_hint),
+                        actionLabel = stringResource(R.string.edit_pick_image),
+                        onAction = { imagePicker.launch(arrayOf("image/*")) }
+                    )
                 }
             }
 
             state.message?.let {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (state.saved) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.error
-                )
+                ResultMessage(text = it, ok = state.saved)
             }
 
             if (state.hasImage) {
@@ -216,13 +204,11 @@ fun LutEditScreen(
                 }
 
                 // ── 保存 ──
-                Button(
+                AppButton(
+                    text = stringResource(R.string.edit_save),
                     onClick = { viewModel.save() },
-                    enabled = state.filtered != null && !state.processing,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(stringResource(R.string.edit_save))
-                }
+                    enabled = state.filtered != null && !state.processing
+                )
                 }
             }
         }
