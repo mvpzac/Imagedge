@@ -15,28 +15,38 @@ import androidx.compose.ui.graphics.Color
  * </pre>
  */
 
-// ── 品牌主色（唯一）────────────────────────────────────────────
-val BrandViolet = Color(0xFF5B50E6)       // 主色（浅色主题）
-val BrandVioletDark = Color(0xFFB0A6FF)   // 深色主题下的主色（提亮保证 4.5:1 对比度）
+// ── 主色（极简黑白：浅色=近黑，深色=近白）─────────────────────
+val InkLight = Color(0xFF1A1B1E)          // 浅色主题主按钮/强调
+val OnInkLight = Color(0xFFFAFAFB)        // 主按钮上的文字
+val InkDark = Color(0xFFE8E9EB)           // 深色主题主按钮/强调
+val OnInkDark = Color(0xFF17181A)
 
-// ── 中性色：刻意避开 #000000 与 #FFFFFF ─────────────────────────
-// 浅色（背景偏暖白，比纯白柔和）
-val BgLight = Color(0xFFFAF9F7)
-val SurfaceLight = Color(0xFFFFFEFD)
-val SurfaceVariantLight = Color(0xFFF2F0EE)
-val OnLight = Color(0xFF1A1A1E)           // 主文字（近黑）
-val OnLightVariant = Color(0xFF5F6670)    // 次文字
-val OnLightMuted = Color(0xFF9AA1AB)      // 弱文字
-val OutlineLight = Color(0xFFDCDFE4)
+// 旧品牌色：保留供 Theme.kt 编译，Task 6 移除
+// TODO(Task 6): 改版后移除
+val BrandViolet = Color(0xFF5B50E6)
+val BrandVioletDark = Color(0xFFB0A6FF)
 
-// 深色
+// ── 中性色：浅色（冷调浅灰底 + 近黑文字）──────────────────────
+val BgLight = Color(0xFFF3F4F5)
+val SurfaceLight = Color(0xFFFBFBFC)
+val SurfaceVariantLight = Color(0xFFEFF0F2)
+val OnLight = Color(0xFF17181A)
+val OnLightVariant = Color(0xFF5C6168)
+val OnLightMuted = Color(0xFF9CA1A8)
+val OutlineLight = Color(0xFFE0E2E6)
+
+// ── 中性色：深色 ────────────────────────────────────────────
 val BgDark = Color(0xFF0F1014)
 val SurfaceDark = Color(0xFF17181D)
 val SurfaceVariantDark = Color(0xFF22242B)
-val OnDark = Color(0xFFF3F4F6)            // 主文字（近白）
-val OnDarkVariant = Color(0xFFA8B0BC)     // 次文字
-val OnDarkMuted = Color(0xFF6E7684)       // 弱文字
+val OnDark = Color(0xFFF3F4F6)
+val OnDarkVariant = Color(0xFFA8B0BC)
+val OnDarkMuted = Color(0xFF6E7684)
 val OutlineDark = Color(0xFF2C2F36)
+
+// ── 功能性场景色（大图查看器全屏黑底：看图场景例外，不受主题影响）──
+val ViewerBackdrop = Color(0xFF000000)
+val OnViewer = Color(0xFFEDEEF0)
 
 // ── 语义色（浅色主题：深字 + 浅底，对比度稳过 4.5:1）─────────────
 val Success = Color(0xFF15803D)
@@ -88,16 +98,17 @@ val MonoOnLight = OnLight
 val MonoOnLightVariant = OnLightVariant
 val MonoOnLightMuted = OnLightMuted
 val MonoError = Error
-val MonoAccent = BrandViolet
-val AccentAmber = BrandViolet
-val AccentAmberDark = BrandViolet
-val OnAccentAmber = SurfaceLight
+val MonoAccent = InkLight
+val AccentAmber = InkLight
+val AccentAmberDark = InkDark
+val OnAccentAmber = OnInkLight
 val AccentBlue = Info
 
 /**
  * 内置品牌色板（设置页可选）。
  * 每档提供浅色/深色两套主色——深色档为提亮变体，保证深底 4.5:1 对比度。
  * 紫罗兰为出厂默认；动态取色开启时优先生效（见 Theme.kt）。
+ * // TODO(Task 6): 改版后移除
  */
 enum class BrandColor(val label: String, val lightPrimary: Color, val darkPrimary: Color) {
     ROSE("玫红", Color(0xFFCE1B77), Color(0xFFF48CC0)),
