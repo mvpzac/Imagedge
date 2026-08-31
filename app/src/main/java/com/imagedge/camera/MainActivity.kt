@@ -67,8 +67,6 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val themeMode by themeController.mode.collectAsState()
-            val dynamicColor by themeController.dynamicColor.collectAsState()
-            val brandColor by themeController.brandColor.collectAsState()
             // 首次进入：统一申请运行所需权限（拒绝后不影响其他功能，用到时顶部弹窗说明）
             RequestRequiredPermissions()
             ImagedgeTheme(
@@ -76,9 +74,7 @@ class MainActivity : ComponentActivity() {
                     ThemeMode.SYSTEM -> isSystemInDarkTheme()
                     ThemeMode.DARK -> true
                     ThemeMode.LIGHT -> false
-                },
-                dynamicColor = dynamicColor,
-                brandColor = brandColor
+                }
             ) {
                 // UI 锁定：全屏等比缩放到设计基准宽（394dp），跨机型保持版式不变
                 DesignScaleLocked {

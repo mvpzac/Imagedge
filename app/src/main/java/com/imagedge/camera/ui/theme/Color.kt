@@ -22,11 +22,6 @@ val OnInkLight = Color(0xFFFAFAFB)        // 主按钮上的文字
 val InkDark = Color(0xFFE8E9EB)           // 深色主题主按钮/强调
 val OnInkDark = Color(0xFF17181A)
 
-// 旧品牌色：保留供 Theme.kt 编译，Task 6 移除
-// TODO(Task 6): 改版后移除
-val BrandViolet = Color(0xFF5B50E6)
-val BrandVioletDark = Color(0xFFB0A6FF)
-
 // ── 中性色：浅色（冷调浅灰底 + 近黑文字）──────────────────────
 val BgLight = Color(0xFFF3F4F5)
 val SurfaceLight = Color(0xFFFBFBFC)
@@ -82,18 +77,3 @@ val OnErrorContainerDark = Color(0xFFFBC9C9)
 val InfoDark = Color(0xFF7DA6FA)
 val InfoContainerDark = Color(0xFF131F38)
 val OnInfoContainerDark = Color(0xFFCBDDFF)
-
-/**
- * 内置品牌色板（设置页可选）。
- * 每档提供浅色/深色两套主色——深色档为提亮变体，保证深底 4.5:1 对比度。
- * 改版前的历史色板，Task 6 移除；动态取色开启时优先生效（见 Theme.kt）。
- */
-// TODO(Task 6): 改版后移除
-enum class BrandColor(val label: String, val lightPrimary: Color, val darkPrimary: Color) {
-    ROSE("玫红", Color(0xFFCE1B77), Color(0xFFF48CC0)),
-    VIOLET("紫罗兰", BrandViolet, BrandVioletDark),
-    OCEAN("海洋蓝", Color(0xFF1976D2), Color(0xFFA3C9FA)),
-    FOREST("森林绿", Color(0xFF2E7D32), Color(0xFFA5D6A7)),
-    SUNSET("活力橙", Color(0xFFE65100), Color(0xFFFFB77D)),
-    TEAL("青碧", Color(0xFF00897B), Color(0xFF8CD5CB)),
-}
