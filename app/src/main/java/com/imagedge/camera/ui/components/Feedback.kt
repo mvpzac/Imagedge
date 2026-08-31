@@ -92,7 +92,7 @@ fun AlbumGridSkeleton(
         items(12) {
             SkeletonBox(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(Radius.Control)
+                shape = RoundedCornerShape(Radius.Tag)
             )
         }
     }
