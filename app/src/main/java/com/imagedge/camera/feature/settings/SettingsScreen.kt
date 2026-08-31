@@ -2,10 +2,7 @@ package com.imagedge.camera.feature.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -45,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.BuildConfig
+import com.imagedge.camera.ui.components.IconBadge
 import com.imagedge.camera.R
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.LucideIcon
@@ -337,23 +335,12 @@ fun SettingsScreen(
                 .padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .padding(end = 12.dp)
-                    .size(36.dp)
-                    .background(
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                        shape = CircleShape
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                LucideIcon(
-                    Lucide.ShieldCheck,
-                    contentDescription = null,
-                    size = 18.dp,
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
+            IconBadge(
+                icon = Lucide.ShieldCheck,
+                size = 36.dp,
+                iconSize = 18.dp,
+                modifier = Modifier.padding(end = 12.dp)
+            )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = stringResource(R.string.permission_title),

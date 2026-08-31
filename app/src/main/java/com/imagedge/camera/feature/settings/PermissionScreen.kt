@@ -4,18 +4,14 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -38,6 +34,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.imagedge.camera.R
 import com.imagedge.camera.core.permission.AppPermissions
 import com.imagedge.camera.core.permission.PermissionGate
+import com.imagedge.camera.ui.components.IconBadge
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.LucideIcon
 import com.imagedge.camera.ui.components.PageHeader
@@ -159,28 +156,13 @@ private fun PermissionRow(
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .padding(end = 12.dp)
-                .size(36.dp)
-                .background(
-                    color = if (granted) {
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                    } else {
-                        MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
-                    },
-                    shape = CircleShape
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            LucideIcon(
-                if (granted) Lucide.ShieldCheck else Lucide.TriangleAlert,
-                contentDescription = null,
-                size = 18.dp,
-                tint = if (granted) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.error
-            )
-        }
+        IconBadge(
+            icon = if (granted) Lucide.ShieldCheck else Lucide.TriangleAlert,
+            size = 36.dp,
+            iconSize = 18.dp,
+            tint = if (granted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+            modifier = Modifier.padding(end = 12.dp)
+        )
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
