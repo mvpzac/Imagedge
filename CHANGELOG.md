@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.1.7] - 2026-09-01
+
+### Changed / 变更（UX 极简黑白改版）
+
+- **Minimal black-and-white theme**: light-gray background + near-black primary, dark mode retained; the 6-tier brand color picker and dynamic color extraction are removed — the appearance section now only has the theme mode switch (light / dark / system). Default theme for new installs is light
+- **Soft rounded-corner scale**: 8 / 12 / 16 / 20 / 28 dp + capsules across the whole app; every hard-coded corner, right-angle grid cell and stray `CircleShape` removed
+- **Shared component layer** (`ui/components`): `AppButton` (primary/secondary/text), `IconBadge`, `EntryCard`, `EmptyState`, `ProcessingView`, `ResultMessage`, `StatusBanner`, `StepsGuideCard` — replaces 20+ duplicated style assemblies across album / download / control / edit screens
+- **Motion tokens**: two spring levels + durations centralised in `ui/theme/Motion.kt`; nav springs unified
+- **Scenario guidance**: three-step "connect your camera" guide card on the home screen (disconnected / error states), unified disconnect banner on the remote-shooting page, download empty state gains a "go to album" action
+- **Haptic feedback**: `Haptics` singleton with four trigger classes (selection tick / action thud / switch click / error double), an in-app toggle in Settings, and respect for the system touch-feedback setting; wired into album multi-select, filters, shutter / video record, save / export, and connection success / failure
+
+### Fixed / 修复（全量代码审查，27 项）
+
+- **Data loss**: a resume-download that finished but failed to commit to the gallery no longer reports success and deletes the temp file — the task is marked failed and retryable
+- **LUT editor concurrency**: non-cancellable filter jobs were trampling shared pixel buffers; processing is now serialised with a `Mutex`, state writes are atomic (`update {}`), and exporting re-renders at full resolution while the interactive preview runs at ~640 px
+- **Motion Photo packaging**: MPF entry size now includes the MPF segment, UltraHDR XMP merge targets the correct segment, top-level JPEG EOI is located by marker structure instead of a raw `FFD9` scan, large MOVs are rewritten with bounded memory, temp directories are cleaned up, and the OPlus timestamp follows the user-selected cover
+- **Album thumbnails no longer go permanently grey** after a memory-trim (thumbnail cache generation), and the triptych preview no longer stays stale when the user edits during rendering
+- **BLE**: scan callback permission guard, disconnect stops scanning, pairing receiver double-unregister guarded; PTP: socket leak on mid-handshake failure fixed, `DeviceInfo` array counts bounded
+- Plus lint cleanup (0 errors), CI now runs unit tests + lint, and unit tests added for `lut` / `raw` / `motionphoto`
+
 ## [0.1.6] - 2026-08-31
 
 ### Added / 新增

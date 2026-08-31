@@ -16,8 +16,8 @@ android {
         applicationId = "com.imagedge.camera"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1006
-        versionName = "0.1.6"
+        versionCode = 1007
+        versionName = "0.1.7"
 
         // 仅支持 64 位设备（项目决策 2026-08-29）：排除 32 位 ABI
         ndk {
