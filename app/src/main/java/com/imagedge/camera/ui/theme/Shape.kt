@@ -9,20 +9,20 @@ import androidx.compose.ui.unit.dp
  *     author : Imagedge Team
  *     time   : 2026/08/29
  *     desc   : 形状 Token（圆角只取 5 档，全项目统一）
- *              4dp 标签/小元素 · 8dp 按钮/输入框 · 12dp 卡片
- *              16dp 大容器/弹窗 · 999dp 胶囊/头像
+ *              8dp 标签/小元素 · 12dp 按钮/输入框 · 16dp 卡片
+ *              20dp 大容器/弹窗 · 999dp 胶囊/头像
  *     version: 1.0
  * </pre>
  */
 
-/** 圆角刻度 */
+/** 圆角刻度（最小 8，全项目无直角感） */
 object Radius {
-    val Tag = 4.dp        // 标签、角标、小色块
-    val Control = 8.dp    // 按钮、输入框、下拉项
-    val Card = 12.dp      // 卡片、列表项
-    val Container = 16.dp // 大容器、底部弹窗
+    val Tag = 8.dp        // 标签、角标、小元素
+    val Control = 12.dp   // 按钮、输入框、下拉项
+    val Card = 16.dp      // 卡片、列表项
+    val Container = 20.dp // 大容器、分组面板
     val Sheet = 28.dp     // 半屏弹窗顶部圆角
-    val Pill = 50         // 胶囊 / 头像（百分比，配合 RoundedCornerShape(percent = 50)）
+    val Pill = 50         // 胶囊 / 头像（百分比）
 }
 
 val ImagedgeShapes = Shapes(
