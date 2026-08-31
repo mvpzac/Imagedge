@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -22,7 +21,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
@@ -30,9 +28,14 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.imagedge.camera.ui.components.AppButton
+import com.imagedge.camera.ui.components.AppButtonType
 import com.imagedge.camera.ui.components.EmptyState
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.PageHeader
+import com.imagedge.camera.ui.components.ProcessingView
+import com.imagedge.camera.ui.components.ResultMessage
+import com.imagedge.camera.ui.theme.Radius
 
 /**
  * 边框水印（批次 C）：选照片 → EXIF 自动读取（可手动修正）→ 4 套模板实时预览
@@ -65,9 +68,9 @@ fun ExifFrameScreen(
             when {
                 state.sourceUri == null -> {
                     EmptyState(
-                        icon = Lucide.Camera,
                         title = "边框水印",
-                        description = "为照片添加品牌 LOGO、相机型号、等效焦距、快门、ISO 信息边框；EXIF 缺失可手动编辑。实况图加框后动态保留",
+                        icon = Lucide.Camera,
+                        desc = "为照片添加品牌 LOGO、相机型号、等效焦距、快门、ISO 信息边框；EXIF 缺失可手动编辑。实况图加框后动态保留",
                         actionLabel = "选择照片",
                         onAction = {
                             picker.launch(
@@ -78,26 +81,12 @@ fun ExifFrameScreen(
                 }
 
                 state.exporting -> {
-                    androidx.compose.foundation.layout.Box(
-                        modifier = Modifier.fillMaxWidth().padding(top = 48.dp),
-                        contentAlignment = Alignment.Center
-                    ) { CircularProgressIndicator() }
-                    Text(
-                        "正在导出…",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    ProcessingView(message = "正在导出…")
                 }
 
                 else -> {
                     if (state.message != null) {
-                        Text(
-                            text = state.message.orEmpty(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (state.success) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.error
-                        )
+                        ResultMessage(text = state.message.orEmpty(), ok = state.success)
                     }
 
                     // ── 实时预览（所见即所得）──
@@ -109,7 +98,7 @@ fun ExifFrameScreen(
                             contentScale = ContentScale.FillWidth,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(Radius.Card))
                         )
                     } else if (state.rendering) {
                         Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth()) {
@@ -147,16 +136,15 @@ fun ExifFrameScreen(
                         )
                     }
 
-                    Button(
-                        onClick = { viewModel.export() },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.small
-                    ) { Text("导出到相册") }
-                    androidx.compose.material3.OutlinedButton(
+                    AppButton(
+                        text = "导出到相册",
+                        onClick = { viewModel.export() }
+                    )
+                    AppButton(
+                        text = "重新选择照片",
                         onClick = { viewModel.reset() },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.small
-                    ) { Text("重新选择照片") }
+                        type = AppButtonType.SECONDARY
+                    )
                 }
             }
         }
