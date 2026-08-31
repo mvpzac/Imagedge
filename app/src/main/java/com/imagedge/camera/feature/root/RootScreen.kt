@@ -6,10 +6,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -59,6 +57,9 @@ import com.imagedge.camera.R
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.LucideIcon
 import com.imagedge.camera.ui.feedback.SnackbarController
+import com.imagedge.camera.ui.theme.Motion
+import com.imagedge.camera.ui.theme.PillShape
+import com.imagedge.camera.ui.theme.Radius
 import com.imagedge.camera.feature.album.AlbumHubScreen
 import com.imagedge.camera.feature.album.AlbumScreen
 import com.imagedge.camera.feature.album.BrowseMode
@@ -79,10 +80,17 @@ import com.imagedge.camera.feature.settings.SettingsScreen
  *     author : Imagedge Team
  *     time   : 2026/08/27
  *     desc   : 根导航（底部 3-Tab：主页 / 相册 / 设置，交互规格 S3；
- *              悬浮磁吸胶囊导航：脱离底边 + 低阻尼弹簧滑条过冲回弹）
+ *              悬浮磁吸胶囊导航：脱离底边 + 弹簧滑条过冲回弹，参数见 Motion token）
  *     version: 1.1
  * </pre>
  */
+
+/**
+ * 导航胶囊阴影（中性黑，黑白主题通用）
+ * 注：Color(Long) 需完整 ARGB —— 24 位写法 alpha=0 会让阴影完全透明
+ */
+private val NavShadowAmbient = Color(0x1A1A1A1E)
+private val NavShadowSpot = Color(0x331A1A1E)
 
 /** 底部导航目的地定义 */
 private enum class RootDestination(
@@ -262,7 +270,7 @@ private fun TopBanner(message: String?, modifier: Modifier = Modifier) {
             Surface(
                 color = MaterialTheme.colorScheme.inverseSurface,
                 contentColor = MaterialTheme.colorScheme.inverseOnSurface,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(Radius.Container),
                 shadowElevation = 8.dp,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -282,8 +290,8 @@ private fun TopBanner(message: String?, modifier: Modifier = Modifier) {
 
 /**
  * 悬浮磁吸导航（方案 C）：
- * - 胶囊容器脱离屏幕底部（左右 16dp、底部悬空 12dp），规范 lg 阴影（rgba(26,26,30,α)）
- * - 主色药丸指示条：低阻尼弹簧（dampingRatio 0.5）在 tab 间滑动，到位过冲回弹 —— 磁吸感
+ * - 胶囊容器脱离屏幕底部（左右 16dp、底部悬空 12dp），阴影色见文件顶部常量（NavShadow*）
+ * - 主色药丸指示条：弹簧在 tab 间滑动，到位过冲回弹（参数见 Motion token）—— 磁吸感
  * - 选中图标：上浮 + 变主色；切换瞬间朝来向轻微偏移再弹回（Animatable snapTo→animateTo），
  *   模拟「被吸住」的触感
  * - 图标承载语义（role=Tab + contentDescription），无标签文字（胶囊高度留给图标）
@@ -306,31 +314,26 @@ private fun FloatingNavBar(
                 .fillMaxWidth()
                 .shadow(
                     elevation = 12.dp,
-                    shape = RoundedCornerShape(50),
-                    // Color(Long) 需完整 ARGB：24 位写法 alpha=0 会让阴影完全透明
-                    ambientColor = Color(0x1A1A1A1E),
-                    spotColor = Color(0x331A1A1E)
+                    shape = PillShape,
+                    ambientColor = NavShadowAmbient,
+                    spotColor = NavShadowSpot
                 )
         ) {
-            val surfaceShape = RoundedCornerShape(50)
             val itemWidth = maxWidth / destinations.size
             val selectedIndex = destinations
                 .indexOfFirst { it.route == selectedRoute }
                 .coerceAtLeast(0)
 
-            // 磁吸滑条：低阻尼弹簧产生过冲回弹
+            // 磁吸滑条：弹簧产生过冲回弹（参数见 Motion token，两档弹簧统一）
             val indicatorOffset by animateDpAsState(
                 targetValue = itemWidth * selectedIndex,
-                animationSpec = spring(
-                    dampingRatio = 0.5f,
-                    stiffness = Spring.StiffnessMediumLow
-                ),
+                animationSpec = Motion.springSoftDp,
                 label = "navIndicator"
             )
 
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                shape = surfaceShape,
+                shape = PillShape,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Box(modifier = Modifier.fillMaxWidth()) {
@@ -344,7 +347,7 @@ private fun FloatingNavBar(
                             .width(indicatorWidth)
                             .background(
                                 color = MaterialTheme.colorScheme.primary,
-                                shape = RoundedCornerShape(50)
+                                shape = PillShape
                             )
                     )
                     Row(
@@ -387,7 +390,7 @@ private fun NavBarIcon(
     // 图标上浮
     val floatOffset by animateDpAsState(
         targetValue = if (selected) (-3).dp else 0.dp,
-        animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium),
+        animationSpec = Motion.springSnappyDp,
         label = "navFloat"
     )
     // 磁吸偏移：选中瞬间从来向拉入
@@ -400,7 +403,7 @@ private fun NavBarIcon(
             shiftAnim.snapTo((direction * 5).dp)
             shiftAnim.animateTo(
                 0.dp,
-                spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessMedium)
+                Motion.springSnappyDp
             )
         }
         if (selected) lastIndex.intValue = myIndex
