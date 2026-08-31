@@ -62,7 +62,7 @@
     <string name="settings_ip_label">相机 IP 地址</string>
     <string name="settings_section_download">下载</string>
     <string name="settings_section_lut">LUT 管理</string>
-    <string name="settings_lut_empty">暂无自定义 LUT（编辑页与设置页导入的 .cube 都会保存在这里）</string>
+    <string name="settings_lut_empty">暂无自定义 LUT（在设置页导入的 .cube 都会保存在这里）</string>
     <string name="settings_lut_import">导入 .cube</string>
     <string name="settings_lut_export">导出</string>
     <string name="settings_lut_delete">删除</string>
@@ -121,7 +121,7 @@
     <string name="permission_change_wifi_label">更改 Wi-Fi 状态</string>
     <string name="permission_change_wifi_purpose">建立并维持与相机热点的连接</string>
     <string name="permission_multicast_label">多播</string>
-    <string name="permission_multicast_purpose">UPnP 设备发现（旧款索尼相机的备用连接方式）</string>
+    <string name="permission_multicast_purpose">用于发现相机的内容传输服务（「发送到智能手机」选片集）</string>
     <string name="permission_foreground_label">前台服务</string>
     <string name="permission_foreground_purpose">后台持续传输照片/视频时保持连接稳定</string>
 
@@ -140,7 +140,7 @@
     <string name="edit_hub_livephoto_desc">选择视频导出为动态照片</string>
     <string name="edit_hub_lut_desc">内置滤镜与 .cube 导入调色</string>
     <string name="edit_pick_image">选择图片</string>
-    <string name="edit_pick_hint">选择一张本机照片开始调色（支持导入 .cube LUT）</string>
+    <string name="edit_pick_hint">选择一张本机照片开始调色（更多滤镜可在设置 → LUT 管理导入）</string>
     <string name="edit_strength">强度</string>
     <string name="edit_save">保存到相册</string>
 
@@ -148,7 +148,7 @@
     <string name="edit_lut_filter_title">滤镜</string>
     <string name="edit_lut_help">查看 LUT 使用说明</string>
     <string name="edit_lut_help_title">LUT 滤镜使用说明</string>
-    <string name="edit_lut_help_body">LUT 按适用的画面分成三类，三者互不相通：\n\n· 创意滤镜：用于普通照片和已还原的画面（sRGB、Rec.709），直接套用即可。\n\n· S-Log2 / S-Log3 滤镜：用于索尼相机拍摄的 Log 灰片，会先把灰片还原成正常色彩，再套上风格。\n\n选错类型会明显偏色：普通照片套 Log 还原 LUT 会发灰，Log 灰片套创意 LUT 会过冲。\n\n需要更多滤镜：前往「设置 → LUT 管理」导入 .cube 文件，导入时可声明它适用的画面类型。</string>
+    <string name="edit_lut_help_body">LUT 按适用的画面分成三类，三者互不相通：\n\n· 创意滤镜：用于普通照片和已还原的画面（sRGB、Rec.709），直接套用即可。\n\n· S-Log2 / S-Log3 滤镜：用于索尼相机拍摄的 Log 灰片，内置了色彩还原，直接套用即可得到正常色彩 + 风格化的画面。\n\n选错类型会明显偏色：普通照片套 Log 还原 LUT 会发灰，Log 灰片套创意 LUT 会过冲。\n\n需要更多滤镜：前往「设置 → LUT 管理」导入 .cube 文件，导入时可声明它适用的画面类型。</string>
     <string name="edit_lut_group_creative">创意滤镜（普通照片 / 已还原画面）</string>
     <string name="edit_lut_group_slog2">S-Log2 滤镜（索尼 Log 灰片）</string>
     <string name="edit_lut_group_slog3">S-Log3 滤镜（索尼 Log 灰片）</string>
