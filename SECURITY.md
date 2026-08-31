@@ -10,7 +10,7 @@ encouraged to stay on the most recent version.
 If you discover a security vulnerability, please **do not** open a public issue.
 Instead, report it privately so it can be addressed before disclosure:
 
-- Open a [private vulnerability report](https://github.com/<owner>/Imagedge/security/advisories/new)
+- Open a [private vulnerability report](https://github.com/mvpzac/Imagedge/security/advisories/new)
   on GitHub (preferred), or
 - Contact the maintainers via GitHub Issues with the label `security` for
   non-sensitive questions.

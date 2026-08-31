@@ -64,7 +64,7 @@ Deep dives:
 ## Build
 
 ```bash
-git clone https://github.com/<your-name>/Imagedge.git
+git clone https://github.com/mvpzac/Imagedge.git
 cd Imagedge
 ./gradlew :app:assembleDebug
 # APK: app/build/outputs/apk/debug/app-debug.apk

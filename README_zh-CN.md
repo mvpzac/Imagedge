@@ -64,7 +64,7 @@ Gradle 多模块，按功能分包（PBF）：
 ## 构建
 
 ```bash
-git clone https://github.com/<your-name>/Imagedge.git
+git clone https://github.com/mvpzac/Imagedge.git
 cd Imagedge
 ./gradlew :app:assembleDebug
 # APK 输出：app/build/outputs/apk/debug/app-debug.apk
