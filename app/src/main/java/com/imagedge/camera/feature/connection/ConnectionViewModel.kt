@@ -7,6 +7,7 @@ import com.imagedge.camera.data.model.ConnectionState
 import com.imagedge.camera.data.model.ConnectionStateHolder
 import com.imagedge.camera.data.remote.CameraRepository
 import com.imagedge.camera.data.remote.wifi.CameraWifiManager
+import com.imagedge.camera.ui.feedback.Haptics
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
