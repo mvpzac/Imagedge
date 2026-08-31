@@ -6,12 +6,13 @@ import androidx.compose.ui.graphics.Color
  * <pre>
  *     author : Imagedge Team
  *     time   : 2026/08/29
- *     desc   : 色彩 Token v4.0（Material 3 Expressive + UI 设计规范）
+ *     desc   : 色彩 Token v5.0（极简黑白）
+ *              浅色 = 浅灰底 + 近黑主调（Ink），深色 = 近白主调。
  *              三条硬规矩：
- *              1. 主色只有 1 个（紫罗兰 #5B50E6），强调色每屏 ≤1 处
- *              2. 不用纯黑 #000000 / 纯白 #FFFFFF
- *              3. 语义色只表状态，且状态必须「图标 + 文字」双保险，不单独靠颜色
- *     version: 4.0
+ *              1. 主色只有黑白两态（浅 InkLight / 深 InkDark），无彩色主色
+ *              2. 语义色只表状态，状态必须「图标 + 文字」双保险，不单独靠颜色
+ *              3. 纯黑仅允许用于看图全屏背景（ViewerBackdrop 例外）
+ *     version: 5.0
  * </pre>
  */
 
@@ -82,34 +83,12 @@ val InfoDark = Color(0xFF7DA6FA)
 val InfoContainerDark = Color(0xFF131F38)
 val OnInfoContainerDark = Color(0xFFCBDDFF)
 
-// ── 兼容旧引用（历史代码仍在使用，逐步替换后可删）────────────────
-val MonoBgDark = BgDark
-val MonoSurfaceDark = SurfaceDark
-val MonoSurfaceDark2 = SurfaceVariantDark
-val MonoBorderDark = OutlineDark
-val MonoOnDark = OnDark
-val MonoOnDarkVariant = OnDarkVariant
-val MonoOnDarkMuted = OnDarkMuted
-val MonoBgLight = BgLight
-val MonoSurfaceLight = SurfaceLight
-val MonoSurfaceLight2 = SurfaceVariantLight
-val MonoBorderLight = OutlineLight
-val MonoOnLight = OnLight
-val MonoOnLightVariant = OnLightVariant
-val MonoOnLightMuted = OnLightMuted
-val MonoError = Error
-val MonoAccent = InkLight
-val AccentAmber = InkLight
-val AccentAmberDark = InkDark
-val OnAccentAmber = OnInkLight
-val AccentBlue = Info
-
 /**
  * 内置品牌色板（设置页可选）。
  * 每档提供浅色/深色两套主色——深色档为提亮变体，保证深底 4.5:1 对比度。
- * 紫罗兰为出厂默认；动态取色开启时优先生效（见 Theme.kt）。
- * // TODO(Task 6): 改版后移除
+ * 改版前的历史色板，Task 6 移除；动态取色开启时优先生效（见 Theme.kt）。
  */
+// TODO(Task 6): 改版后移除
 enum class BrandColor(val label: String, val lightPrimary: Color, val darkPrimary: Color) {
     ROSE("玫红", Color(0xFFCE1B77), Color(0xFFF48CC0)),
     VIOLET("紫罗兰", BrandViolet, BrandVioletDark),

@@ -6,33 +6,29 @@ import androidx.compose.animation.core.tween
 import androidx.compose.ui.unit.Dp
 
 /**
- * 动效规范（全项目统一两档弹簧 + 两档时长）：
- * - snappy：小元素（指示条、图标上浮）
- * - soft：容器（导航滑条、面板弹入）
+ * <pre>
+ *     author : Imagedge Team
+ *     time   : 2026/08/31
+ *     desc   : 动效规范（全项目统一两档弹簧 + 两档时长）：
+ *              - snappy：小元素（指示条、图标上浮）
+ *              - soft：容器（导航滑条、面板弹入）
+ *     version: 1.0
+ * </pre>
  */
 object Motion {
-    val springSnappy = spring<Float>(
-        dampingRatio = 0.7f,
-        stiffness = Spring.StiffnessMedium
-    )
-    val springSoft = spring<Float>(
-        dampingRatio = 0.6f,
-        stiffness = Spring.StiffnessMediumLow
-    )
+    private fun <T> snappySpring() = spring<T>(dampingRatio = 0.7f, stiffness = Spring.StiffnessMedium)
+    private fun <T> softSpring() = spring<T>(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow)
+
+    val springSnappy = snappySpring<Float>()
+    val springSoft = softSpring<Float>()
 
     /** Dp 版本（RootScreen 等位移动画用） */
-    val springSnappyDp = spring<Dp>(
-        dampingRatio = 0.7f,
-        stiffness = Spring.StiffnessMedium
-    )
-    val springSoftDp = spring<Dp>(
-        dampingRatio = 0.6f,
-        stiffness = Spring.StiffnessMediumLow
-    )
+    val springSnappyDp = snappySpring<Dp>()
+    val springSoftDp = softSpring<Dp>()
 
     val durationShort = 150
     val durationStandard = 250
 
-    fun <T> fadeShort() = tween<T>(durationMillis = durationShort)
-    fun <T> fadeStandard() = tween<T>(durationMillis = durationStandard)
+    fun <T> tweenShort() = tween<T>(durationMillis = durationShort)
+    fun <T> tweenStandard() = tween<T>(durationMillis = durationStandard)
 }

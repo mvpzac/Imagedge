@@ -79,11 +79,13 @@ val ImagedgeTypography = Typography(
         lineHeight = 32.sp
     ),
     // PageHeader 等二级页标题（此前未定义，回落到 M3 默认系统字体）
+    // 刻意与 titleLarge 一致（同 24sp Bold），为 PageHeader 提供显式角色
     headlineSmall = base.copy(
         fontSize = FontSize.H3,
         fontWeight = FontWeight.Bold,
         lineHeight = 32.sp
     ),
+    // 卡片/列表项标题用 titleMedium，行内强调用 titleSmall
     titleMedium = base.copy(
         fontSize = FontSize.Body,
         fontWeight = FontWeight.Medium,

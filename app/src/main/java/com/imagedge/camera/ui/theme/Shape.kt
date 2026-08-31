@@ -8,10 +8,10 @@ import androidx.compose.ui.unit.dp
  * <pre>
  *     author : Imagedge Team
  *     time   : 2026/08/29
- *     desc   : 形状 Token（圆角只取 5 档，全项目统一）
- *              8dp 标签/小元素 · 12dp 按钮/输入框 · 16dp 卡片
- *              20dp 大容器/弹窗 · 999dp 胶囊/头像
- *     version: 1.0
+ *     desc   : 形状 Token（圆角 6 档（含半屏 Sheet），全项目统一）
+ *              8dp 标签 · 12dp 按钮/输入框 · 16dp 卡片
+ *              20dp 大容器/分组 · 28dp 半屏弹窗顶部 · 50% 胶囊
+ *     version: 2.0
  * </pre>
  */
 
