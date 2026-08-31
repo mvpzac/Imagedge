@@ -1,28 +1,17 @@
 package com.imagedge.camera.feature.edit
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.imagedge.camera.R
+import com.imagedge.camera.ui.components.EntryCard
 import com.imagedge.camera.ui.components.Lucide
-import com.imagedge.camera.ui.components.LucideIcon
 import com.imagedge.camera.ui.components.PageHeader
 
 /**
@@ -81,50 +70,6 @@ fun EditHubScreen(
                 desc = "品牌 LOGO + 相机参数（型号/焦距/快门/ISO）信息边框，EXIF 自动读取可手动修正",
                 onClick = onOpenExifFrame
             )
-        }
-    }
-}
-
-@Composable
-private fun EntryCard(icon: Int, title: String, desc: String, onClick: () -> Unit) {
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .padding(end = 16.dp)
-                    .size(44.dp)
-                    .background(
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                        shape = CircleShape
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                LucideIcon(
-                    icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = title, style = MaterialTheme.typography.titleMedium)
-                Text(
-                    text = desc,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            IconButton(onClick = onClick) {
-                LucideIcon(
-                    Lucide.ChevronRight,
-                    contentDescription = stringResource(R.string.remote_entry_open),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
         }
     }
 }

@@ -2,29 +2,20 @@ package com.imagedge.camera.feature.album
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Card
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.R
+import com.imagedge.camera.ui.components.EntryCard
 import com.imagedge.camera.ui.components.Lucide
-import com.imagedge.camera.ui.components.LucideIcon
 import com.imagedge.camera.ui.feedback.SnackbarController
 
 /**
@@ -62,14 +53,14 @@ fun AlbumHubScreen(
         )
 
         // 选片集：默认入口（相机连接后默认走选片集通道）
-        HubCard(
+        EntryCard(
             icon = Lucide.Images,
             title = stringResource(R.string.hub_selection_title),
             desc = stringResource(R.string.hub_selection_desc),
             onClick = onOpenSelection
         )
         // 整卡查看：手动点击才切换通道；传输未完成时拦截并提示
-        HubCard(
+        EntryCard(
             icon = Lucide.HardDrive,
             title = stringResource(R.string.hub_full_card_title),
             desc = stringResource(R.string.hub_full_card_desc),
@@ -81,63 +72,17 @@ fun AlbumHubScreen(
                 }
             }
         )
-        HubCard(
+        EntryCard(
             icon = Lucide.Download,
             title = stringResource(R.string.hub_transfer_title),
             desc = stringResource(R.string.hub_transfer_desc),
             onClick = onOpenTransfer
         )
-        HubCard(
+        EntryCard(
             icon = Lucide.SlidersHorizontal,
             title = stringResource(R.string.hub_edit_title),
             desc = stringResource(R.string.hub_edit_desc),
             onClick = onOpenEdit
         )
-    }
-}
-
-@Composable
-private fun HubCard(icon: Int, title: String, desc: String, onClick: () -> Unit) {
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // 左侧图标：主色淡底圆形衬底，建立入口识别度
-            Box(
-                modifier = Modifier
-                    .padding(end = 16.dp)
-                    .size(44.dp)
-                    .background(
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                        shape = CircleShape
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                LucideIcon(
-                    icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = title, style = MaterialTheme.typography.titleMedium)
-                Text(
-                    text = desc,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            // 入口指示：右箭头图标（替代原「进入」文字按钮，整卡可点）
-            IconButton(onClick = onClick) {
-                LucideIcon(
-                    Lucide.ChevronRight,
-                    contentDescription = stringResource(R.string.remote_entry_open),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
     }
 }
