@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -22,12 +21,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -42,10 +39,14 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.imagedge.camera.ui.components.AppButton
+import com.imagedge.camera.ui.components.AppButtonType
 import com.imagedge.camera.ui.components.EmptyState
 import com.imagedge.camera.ui.components.Lucide
-import com.imagedge.camera.ui.components.LucideIcon
 import com.imagedge.camera.ui.components.PageHeader
+import com.imagedge.camera.ui.components.ProcessingView
+import com.imagedge.camera.ui.components.ResultMessage
+import com.imagedge.camera.ui.theme.Radius
 
 /**
  * LIVE 图三拼（批次 B，对标 DJI Mimo「Live 三拼」，两阶段流程）：
@@ -82,16 +83,7 @@ fun LiveTriptychScreen(
         ) {
             when {
                 state.parsing || state.exporting -> {
-                    Spacer(Modifier.height(24.dp))
-                    Row(
-                        horizontalArrangement = Arrangement.Center,
-                        modifier = Modifier.fillMaxWidth()
-                    ) { CircularProgressIndicator() }
-                    Text(
-                        text = state.progressText ?: "处理中…",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    ProcessingView(message = state.progressText ?: "处理中…")
                 }
 
                 state.slots.size == 3 && state.phase == LiveTriptychViewModel.Phase.PREVIEW -> {
@@ -104,17 +96,12 @@ fun LiveTriptychScreen(
 
                 else -> {
                     if (state.message != null) {
-                        Text(
-                            text = state.message.orEmpty(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (state.success) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.error
-                        )
+                        ResultMessage(text = state.message.orEmpty(), ok = state.success)
                     }
                     EmptyState(
-                        icon = Lucide.Images,
                         title = "LIVE 图三拼",
-                        description = "选择 3 张实况图（横竖屏均可），先统一裁切长宽比、重选封面、开关声音，再拼接为一张 LIVE 图",
+                        icon = Lucide.Images,
+                        desc = "选择 3 张实况图（横竖屏均可），先统一裁切长宽比、重选封面、开关声音，再拼接为一张 LIVE 图",
                         actionLabel = "选择实况图",
                         onAction = {
                             picker.launch(
@@ -151,11 +138,10 @@ private fun EditStage(
         SlotCard(index = index, slot = slot, viewModel = viewModel)
     }
 
-    Button(
-        onClick = { viewModel.enterPreview() },
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.small
-    ) { Text("进入拼接预览") }
+    AppButton(
+        text = "进入拼接预览",
+        onClick = { viewModel.enterPreview() }
+    )
 }
 
 /** 阶段二：拼图预览 + 预估大小 + 生成 */
@@ -174,7 +160,7 @@ private fun PreviewStage(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(aspect.targetW.toFloat() / (aspect.targetH * 3))
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(Radius.Card))
         )
     } else if (state.previewLoading) {
         Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth()) {
@@ -186,16 +172,15 @@ private fun PreviewStage(
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
-    Button(
-        onClick = { viewModel.export() },
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.small
-    ) { Text("生成三拼 LIVE 图") }
-    OutlinedButton(
+    AppButton(
+        text = "生成三拼 LIVE 图",
+        onClick = { viewModel.export() }
+    )
+    AppButton(
+        text = "返回调整",
         onClick = { viewModel.backToEdit() },
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.small
-    ) { Text("返回调整") }
+        type = AppButtonType.SECONDARY
+    )
 }
 
 @Composable
@@ -242,10 +227,10 @@ private fun SlotCard(
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
                                 .size(width = 72.dp, height = 44.dp)
-                                .clip(RoundedCornerShape(6.dp))
+                                .clip(RoundedCornerShape(Radius.Tag))
                                 .then(
                                     if (selected) Modifier.border(
-                                        2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(6.dp)
+                                        2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(Radius.Tag)
                                     ) else Modifier
                                 )
                                 .clickable { viewModel.setCover(index, thumb.timeMs) }
@@ -267,7 +252,7 @@ private fun SlotCard(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
+                            .clip(RoundedCornerShape(Radius.Tag))
                             .clickable { viewModel.resetCover(index) }
                             .padding(horizontal = 6.dp, vertical = 4.dp)
                     )
