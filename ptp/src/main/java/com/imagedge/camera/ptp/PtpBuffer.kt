@@ -130,6 +130,8 @@ class PtpBuffer private constructor() {
             writeUInt8(0)
             return this
         }
+        // 长度字段为 u8（含终止符）：超长若裸写会被截断成错误长度，产出损坏数据
+        require(value.length <= 254) { "PTP 字符串超出 254 字符上限：${value.length}" }
         writeUInt8(value.length + 1)
         for (ch in value) writeUInt16(ch.code)
         writeUInt16(0)

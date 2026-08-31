@@ -361,24 +361,39 @@ class LiveTriptychViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 按视频文件缓存的抽帧器：封面候选一次抽 9 帧，原先每帧都新建实例 +
+     * 重新 setDataSource 解析容器，9 倍重复开销。缓存后同一视频只解析一次。
+     * MediaMetadataRetriever 非线程安全：使用方对实例加锁；抽帧异常时移除
+     * 缓存（可能已进入坏状态），下次重建。
+     */
+    private val frameRetrievers = HashMap<String, MediaMetadataRetriever>()
+
+    private fun retrieverFor(video: File): MediaMetadataRetriever = synchronized(frameRetrievers) {
+        frameRetrievers.getOrPut(video.absolutePath) {
+            MediaMetadataRetriever().also { it.setDataSource(video.absolutePath) }
+        }
+    }
+
     /** 抽帧（带 OPTION 参数与宽度限制） */
     private fun extractFrame(video: File, timeMs: Long, option: Int): Bitmap? = try {
-        val retriever = MediaMetadataRetriever()
-        try {
-            retriever.setDataSource(video.absolutePath)
-            retriever.getFrameAtTime(timeMs * 1000, option)?.let { frame ->
-                if (frame.width > 640) {
-                    val scale = 640f / frame.width
-                    Bitmap.createScaledBitmap(frame, 640, (frame.height * scale).toInt().coerceAtLeast(1), true).also {
-                        if (it !== frame) frame.recycle()
-                    }
-                } else frame
-            }
-        } finally {
-            retriever.release()
+        val retriever = retrieverFor(video)
+        val frame = synchronized(retriever) {
+            retriever.getFrameAtTime(timeMs * 1000, option)
+        }
+        frame?.let { f ->
+            if (f.width > 640) {
+                val scale = 640f / f.width
+                Bitmap.createScaledBitmap(f, 640, (f.height * scale).toInt().coerceAtLeast(1), true).also {
+                    if (it !== f) f.recycle()
+                }
+            } else f
         }
     } catch (e: Exception) {
         AppLog.w("triptych", "抽帧失败 @${timeMs}ms：${e.message}")
+        // 抽帧抛异常说明实例可能已进入坏状态：移除缓存，下次重建
+        synchronized(frameRetrievers) { frameRetrievers.remove(video.absolutePath) }
+            ?.let { runCatching { it.release() } }
         null
     }
 
@@ -475,6 +490,10 @@ class LiveTriptychViewModel @Inject constructor(
     private fun cleanup() {
         parsedFiles.forEach { runCatching { it.delete() } }
         parsedFiles.clear()
+        synchronized(frameRetrievers) {
+            frameRetrievers.values.forEach { runCatching { it.release() } }
+            frameRetrievers.clear()
+        }
     }
 
     private fun queryDisplayName(uri: Uri): String? = runCatching {

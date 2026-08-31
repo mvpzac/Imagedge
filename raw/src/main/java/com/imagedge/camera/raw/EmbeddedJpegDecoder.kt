@@ -113,10 +113,14 @@ class EmbeddedJpegDecoder : RawDecoder {
     private fun scanLargestJpeg(bytes: ByteArray): ByteArray? {
         var best: ByteArray? = null
         var i = 0
+        var candidates = 0
         while (i < bytes.size - 3) {
             if (bytes[i] == 0xFF.toByte() && bytes[i + 1] == 0xD8.toByte() &&
                 bytes[i + 2] == 0xFF.toByte()
             ) {
+                // 候选上限：每个假 SOI 都要向后扫全文件找 EOI，大量假阳性时
+                // 复杂度退化为 O(n²)——本路径仅是结构化解析失败的兜底，超限即放弃
+                if (++candidates > 32) break
                 // 找到 SOI，向后找 EOI
                 var j = i + 2
                 while (j < bytes.size - 1) {

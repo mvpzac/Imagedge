@@ -33,7 +33,7 @@ internal fun decodeXmp(bytes: ByteArray): String {
             bytes[1] == 0xFE.toByte() -> Charset.forName("UTF-16LE")
         else -> Charsets.UTF_8
     }
-    return bytes.toString(charset).replace("\u0000", "")
+    return bytes.toString(charset).replace("\uFEFF", "").replace("\u0000", "")
 }
 
 internal fun looksLikeMotionPhotoXmp(xmp: String): Boolean {

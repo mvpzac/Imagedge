@@ -150,12 +150,6 @@
     <string name="edit_lut_group_slog3">S-Log3 滤镜（索尼 Log 灰片）</string>
     <string name="edit_lut_group_empty">暂无，可在「设置 → LUT 管理」导入</string>
     <string name="livephoto_title">视频转 LIVE 图</string>
-    <string name="livephoto_desc">选择一个或多个视频，导出为多品牌手机可播放的动态照片（LIVE 图）</string>
-    <string name="livephoto_pick">选择视频</string>
-    <string name="livephoto_hint">支持 MP4 视频，导出的 LIVE 图保存到系统相册</string>
-    <string name="livephoto_processing">正在导出…</string>
-    <string name="livephoto_result_hint">已保存到系统相册，可在相册中查看动态照片</string>
-    <string name="livephoto_continue">继续导出</string>
     <string name="qr_camera_permission">需要相机权限才能扫描二维码</string>
     <string name="qr_retry">重新扫码</string>
     <string name="qr_connecting">正在连接 %1$s …</string>

@@ -29,4 +29,6 @@ dependencies {
     api(project(":raw"))
 
     implementation(libs.kotlinx.coroutines.android)
+
+    testImplementation(libs.junit)
 }

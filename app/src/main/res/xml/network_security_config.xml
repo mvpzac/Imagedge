@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    明文通信策略（金标安全标准 6.4 的合理例外，集中声明）。
+
+    本应用的全部网络流量都是与相机的局域网连接：
+      - PTP/IP        15740
+      - LiveView      60152
+      - UPnP/SOAP     64321
+      - HTTP 内容下载（相机 DMS）
+    这些协议由相机固件决定为明文 HTTP，无法升级 HTTPS。
+
+    相机 IP 为动态分配（AP 模式固定 192.168.122.1，但也支持手动指定任意私有
+    IP / 基础设施模式），而 network-security-config 的 <domain> 不支持 CIDR 网段，
+    若收窄到个别 IP 会破坏「手动 IP 连接」功能，故 base 放行明文。
+
+    应用没有公网 HTTP 请求（无云服务，图片均经 content:// 读取），明文放行不引入
+    超出相机局域网的额外攻击面。
+-->
+<network-security-config>
+    <!-- 相机局域网连接（动态私有 IP，无法按网段收窄，见文件头注释） -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

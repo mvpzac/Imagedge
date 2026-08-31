@@ -394,6 +394,15 @@ class UpnpClient(
         val factory = DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = false
             isCoalescing = true
+            isXIncludeAware = false
+            isExpandEntityReferences = false
+            // XXE 加固：数据来自相机局域网但仍禁用实体展开，防畸形响应借实体
+            // 读本地文件或发起网络请求（setFeature 在部分解析器上可能不支持，容错处理）
+            runCatching {
+                setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+                setFeature("http://xml.org/sax/features/external-general-entities", false)
+                setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+            }
         }
         val builder = factory.newDocumentBuilder()
         // trim 前导空白，避免 XML 声明前有空格导致解析失败

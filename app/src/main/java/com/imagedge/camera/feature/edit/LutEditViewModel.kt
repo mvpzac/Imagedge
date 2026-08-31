@@ -56,6 +56,15 @@ const val FILTER_NONE = "none"
  */
 private const val LUT_DECODE_MAX_DIM = 1600
 
+/**
+ * 交互式预览的处理上限（最长边，px）。
+ *
+ * 预览/拖强度滑条在 [LUT_PREVIEW_MAX_DIM] 上跑，像素量约为全分辨率
+ * （[LUT_DECODE_MAX_DIM]）的 1/6，单次滤镜应用从 1~2s 降到数百毫秒，拖动滑条
+ * 明显跟手；导出（[LutEditViewModel.save]）时再按全分辨率重算，不牺牲成品清晰度。
+ */
+private const val LUT_PREVIEW_MAX_DIM = 640
+
 data class LutEditState(
     val original: Bitmap? = null,
     val filtered: Bitmap? = null,
@@ -106,6 +115,13 @@ class LutEditViewModel @Inject constructor(
     private var convPixels: IntArray? = null
     private var convRgba: ByteArray? = null
     private var convOutPixels: IntArray? = null
+
+    /**
+     * 预览处理源（降采样副本）。交互式滤镜/强度调整在它上面跑，比全分辨率快约 6 倍；
+     * 全分辨率 [LutEditState.original] 仅用于展示与导出重算。
+     */
+    @Volatile
+    private var previewSource: Bitmap? = null
 
     init {
         loadBuiltins()
@@ -167,6 +183,7 @@ class LutEditViewModel @Inject constructor(
                     _state.update { it.copy(message = "图片解码失败") }
                     return@launch
                 }
+                previewSource = createPreviewSource(bitmap)
                 _state.update { LutEditState(original = bitmap, strength = it.strength) }
                 applyCurrentFilter()
             } catch (e: Exception) {
@@ -194,12 +211,14 @@ class LutEditViewModel @Inject constructor(
 
     private fun applyCurrentFilter() {
         val original = _state.value.original ?: return
+        // 预览源优先：交互式处理在降采样副本上跑，比全分辨率快约 6 倍
+        val processSource = previewSource ?: original
         val option = _filters.value.firstOrNull { it.key == _state.value.selectedKey }
             ?: return
         val lut = option.lut ?: lutCache[option.key]
         applyJob?.cancel()
         if (lut == null) {
-            _state.update { it.copy(filtered = original, processing = false) }
+            _state.update { it.copy(filtered = processSource, processing = false) }
             return
         }
         _state.update { it.copy(processing = true) }
@@ -209,14 +228,14 @@ class LutEditViewModel @Inject constructor(
             applyMutex.withLock {
                 if (!isActive) return@launch
                 try {
-                    val w = original.width
-                    val h = original.height
+                    val w = processSource.width
+                    val h = processSource.height
                     // 复用转换缓冲（P1-9）：强度滑条每 200ms 防抖后都会全图重算，
                     // 原先每次新建 3 个大数组（Int 24MB + Byte 24MB + Int 24MB），
                     // 连续拖动滑条 = GC 疯狂抖动 + 短时峰值逼近 120MB。尺寸不变时直接复用。
                     val size = w * h
                     val pixels = reuseIntArray(convPixels, size) ?: IntArray(size).also { convPixels = it }
-                    original.getPixels(pixels, 0, w, 0, 0, w, h)
+                    processSource.getPixels(pixels, 0, w, 0, 0, w, h)
                     val rgba = reuseByteArray(convRgba, size * 4) ?: ByteArray(size * 4).also { convRgba = it }
                     for (i in 0 until size) {
                         val px = pixels[i]
@@ -258,7 +277,7 @@ class LutEditViewModel @Inject constructor(
 
     /** 导出 JPEG：优先自定义目录（SAF），否则 DCIM/Imagedge */
     fun save() {
-        val filtered = _state.value.filtered ?: return
+        val fullOriginal = _state.value.original ?: return
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val resolver = context.contentResolver
@@ -282,10 +301,19 @@ class LutEditViewModel @Inject constructor(
                     }
                     resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                 } ?: throw IllegalStateException("创建文件失败")
+                // 预览的 filtered 是降采样位图，直接保存会糊：
+                // 用当前 LUT + 强度在全分辨率原图上重算，保证成品清晰度
+                val option = _filters.value.firstOrNull { it.key == _state.value.selectedKey }
+                val lut = option?.lut ?: option?.key?.let { lutCache[it] }
+                val exportBitmap = if (lut == null) {
+                    fullOriginal
+                } else {
+                    applyLutToBitmap(fullOriginal, lut, _state.value.strength)
+                }
                 val outputStream = resolver.openOutputStream(uri)
                     ?: throw IllegalStateException("无法打开目标文件的输出流")
                 outputStream.use {
-                    filtered.compress(Bitmap.CompressFormat.JPEG, 95, it)
+                    exportBitmap.compress(Bitmap.CompressFormat.JPEG, 95, it)
                 }
                 _state.update { it.copy(saved = true, message = "已保存：$name") }
                 // 成功用轻提示（2~3s 自动消失）；失败则留在页面上的红色文字里，
@@ -314,6 +342,51 @@ class LutEditViewModel @Inject constructor(
         }
         val opts = BitmapFactory.Options().apply { inSampleSize = sample }
         return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+    }
+
+    /** 预览处理源：最长边缩到 [LUT_PREVIEW_MAX_DIM] 以内（交互式处理提速约 6 倍） */
+    private fun createPreviewSource(full: Bitmap): Bitmap {
+        val maxSide = maxOf(full.width, full.height)
+        if (maxSide <= LUT_PREVIEW_MAX_DIM) return full
+        val scale = LUT_PREVIEW_MAX_DIM.toFloat() / maxSide
+        return Bitmap.createScaledBitmap(
+            full,
+            (full.width * scale).toInt().coerceAtLeast(1),
+            (full.height * scale).toInt().coerceAtLeast(1),
+            true
+        )
+    }
+
+    /**
+     * 全分辨率应用 LUT（导出重算专用）。
+     * 独立分配缓冲而非复用 [convPixels] 等：导出在 IO 线程，可能与预览处理
+     * （Default 线程 + 互斥锁）并发，复用同一组缓冲会互相践踏。
+     */
+    private suspend fun applyLutToBitmap(src: Bitmap, lut: CubeLut, strength: Int): Bitmap {
+        val w = src.width
+        val h = src.height
+        val size = w * h
+        val pixels = IntArray(size)
+        src.getPixels(pixels, 0, w, 0, 0, w, h)
+        val rgba = ByteArray(size * 4)
+        for (i in 0 until size) {
+            val px = pixels[i]
+            rgba[i * 4] = (px shr 16 and 0xFF).toByte()
+            rgba[i * 4 + 1] = (px shr 8 and 0xFF).toByte()
+            rgba[i * 4 + 2] = (px and 0xFF).toByte()
+            rgba[i * 4 + 3] = (px shr 24 and 0xFF).toByte()
+        }
+        val out = processor.apply(rgba, w, h, lut.data, lut.size, strength)
+        val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val outPixels = IntArray(size)
+        for (i in 0 until size) {
+            outPixels[i] = (out[i * 4 + 3].toInt() and 0xFF) shl 24 or
+                ((out[i * 4].toInt() and 0xFF) shl 16) or
+                ((out[i * 4 + 1].toInt() and 0xFF) shl 8) or
+                (out[i * 4 + 2].toInt() and 0xFF)
+        }
+        result.setPixels(outPixels, 0, w, 0, 0, w, h)
+        return result
     }
 
 }

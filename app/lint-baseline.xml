@@ -1,0 +1,392 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 8.11.2" type="baseline" client="gradle" dependencies="false" name="AGP (8.11.2)" variant="all" version="8.11.2">
+
+    <issue
+        id="DefaultLocale"
+        message="Implicitly using the default locale is a common source of bugs: Use `String.format(Locale, ...)` instead"
+        errorLine1="        String.format(&quot;%.1f GB&quot;, mb / 1024.0)"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/feature/download/DownloadScreen.kt"
+            line="369"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="DefaultLocale"
+        message="Implicitly using the default locale is a common source of bugs: Use `String.format(Locale, ...)` instead"
+        errorLine1="        String.format(&quot;%.1f MB&quot;, mb)"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/feature/download/DownloadScreen.kt"
+            line="371"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="DefaultLocale"
+        message="Implicitly using the default locale is a common source of bugs: Use `String.format(Locale, ...)` instead"
+        errorLine1="        String.format(&quot;%.1f KB&quot;, bytes / 1024.0)"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/feature/download/DownloadScreen.kt"
+            line="373"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 33 (current min is 29): `android.Manifest.permission#NEARBY_WIFI_DEVICES`"
+        errorLine1="            Manifest.permission.NEARBY_WIFI_DEVICES,"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/core/permission/AppPermissions.kt"
+            line="48"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 33 (current min is 29): `android.Manifest.permission#POST_NOTIFICATIONS`"
+        errorLine1="            Manifest.permission.POST_NOTIFICATIONS,"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/core/permission/AppPermissions.kt"
+            line="54"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 31 (current min is 29): `android.Manifest.permission#BLUETOOTH_CONNECT`"
+        errorLine1="            Manifest.permission.BLUETOOTH_CONNECT,"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/core/permission/AppPermissions.kt"
+            line="60"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 31 (current min is 29): `android.Manifest.permission#BLUETOOTH_SCAN`"
+        errorLine1="            Manifest.permission.BLUETOOTH_SCAN,"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/core/permission/AppPermissions.kt"
+            line="66"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedAttribute"
+        message="Attribute `usesPermissionFlags` is only used in API level 31 and higher (current min is 29)"
+        errorLine1="        android:usesPermissionFlags=&quot;neverForLocation&quot; />"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="14"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="ConfigurationScreenWidthHeight"
+        message="Using Configuration.screenWidthDp instead of LocalWindowInfo.current.containerSize"
+        errorLine1="        config.screenWidthDp.toFloat()"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/ui/theme/DesignScale.kt"
+            line="44"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="    modifier: Modifier = Modifier"
+        errorLine2="    ~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/ui/components/Feedback.kt"
+            line="82"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="InsecureBaseConfiguration"
+        message="Insecure Base Configuration"
+        errorLine1="    &lt;base-config cleartextTrafficPermitted=&quot;true&quot; />"
+        errorLine2="                                            ~~~~">
+        <location
+            file="src/main/res/xml/network_security_config.xml"
+            line="21"
+            column="45"/>
+    </issue>
+
+    <issue
+        id="DataExtractionRules"
+        message="The attribute `android:dataExtractionRules` only applies for Android 12 and higher; since `minSdkVersion` is API 29 you should also set `android:fullBackupContent`"
+        errorLine1="        android:dataExtractionRules=&quot;@xml/data_extraction_rules&quot;"
+        errorLine2="                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="54"
+            column="38"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `SDK_INT` is always >= 29"
+        errorLine1="        gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/data/ble/SonyBleShutter.kt"
+            line="310"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="This folder configuration (`v26`) is unnecessary; `minSdkVersion` is 29. Merge all the resources in this folder into `mipmap-anydpi`.">
+        <location
+            file="src/main/res/mipmap-anydpi-v26"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icons should not fill every pixel of their square region; see the design guide for details">
+        <location
+            file="src/main/res/drawable-nodpi/ic_launcher_image.png"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="            val treeUri = Uri.parse(treeUriStr)"
+        errorLine2="                          ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/data/remote/CameraRepository.kt"
+            line="332"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="            val treeUri = Uri.parse(treeUriStr)"
+        errorLine2="                          ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/data/remote/CameraRepository.kt"
+            line="420"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="        val result = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)"
+        errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/feature/edit/ExifFrameViewModel.kt"
+            line="433"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="        val result = Bitmap.createBitmap(w, source.height + barH, Bitmap.Config.ARGB_8888)"
+        errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/feature/edit/ExifFrameViewModel.kt"
+            line="496"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Bitmap.scale` instead?"
+        errorLine1="            Bitmap.createScaledBitmap(it, (it.width * scale).toInt().coerceAtLeast(1), (it.height * scale).toInt().coerceAtLeast(1), true)"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/feature/edit/LiveTriptychViewModel.kt"
+            line="149"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="        val result = Bitmap.createBitmap(cellW, cellH * slots.size, Bitmap.Config.ARGB_8888)"
+        errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/feature/edit/LiveTriptychViewModel.kt"
+            line="306"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Bitmap.scale` instead?"
+        errorLine1="                Bitmap.createScaledBitmap(f, 640, (f.height * scale).toInt().coerceAtLeast(1), true).also {"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/feature/edit/LiveTriptychViewModel.kt"
+            line="387"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="                    val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)"
+        errorLine2="                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/feature/edit/LutEditViewModel.kt"
+            line="248"
+            column="34"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                    val treeUri = Uri.parse(treeUriStr)"
+        errorLine2="                                  ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/feature/edit/LutEditViewModel.kt"
+            line="288"
+            column="35"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Bitmap.scale` instead?"
+        errorLine1="        return Bitmap.createScaledBitmap("
+        errorLine2="               ^">
+        <location
+            file="src/main/java/com/imagedge/camera/feature/edit/LutEditViewModel.kt"
+            line="352"
+            column="16"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="        val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)"
+        errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/feature/edit/LutEditViewModel.kt"
+            line="380"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putString(KEY_DOWNLOAD_TREE, uri.toString()).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/feature/settings/SettingsViewModel.kt"
+            line="125"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().remove(KEY_DOWNLOAD_TREE).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/feature/settings/SettingsViewModel.kt"
+            line="130"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="            &quot;已选择：&quot; + android.provider.DocumentsContract.getTreeDocumentId(Uri.parse(uriStr))"
+        errorLine2="                                                                          ~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/feature/settings/SettingsViewModel.kt"
+            line="140"
+            column="75"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension property `SparseArray.size` instead?"
+        errorLine1="            for (i in 0 until mfg.size()) {"
+        errorLine2="                              ~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/data/ble/SonyBleShutter.kt"
+            line="197"
+            column="31"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putString(KEY_MODE, mode.name).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/ui/theme/ThemeController.kt"
+            line="38"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putBoolean(KEY_DYNAMIC_COLOR, enabled).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/ui/theme/ThemeController.kt"
+            line="51"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putString(KEY_BRAND_COLOR, color.name).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/ui/theme/ThemeController.kt"
+            line="63"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        typePrefs.edit().putString(name, type.name).apply()"
+        errorLine2="        ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/data/lut/UserLutStore.kt"
+            line="41"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        if (ok) typePrefs.edit().remove(name).apply()"
+        errorLine2="                ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/data/lut/UserLutStore.kt"
+            line="78"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Bitmap.scale` instead?"
+        errorLine1="                Bitmap.createScaledBitmap("
+        errorLine2="                ^">
+        <location
+            file="src/main/java/com/imagedge/camera/feature/edit/VideoToLivePhotoViewModel.kt"
+            line="405"
+            column="17"/>
+    </issue>
+
+</issues>

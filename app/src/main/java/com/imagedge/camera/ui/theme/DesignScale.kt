@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Density
 
 /**
@@ -34,7 +35,15 @@ private const val MAX_SCALE = 1.35f
 fun DesignScaleLocked(content: @Composable () -> Unit) {
     val config = LocalConfiguration.current
     val current = LocalDensity.current
-    val scale = (config.screenWidthDp / DESIGN_WIDTH_DP).coerceIn(MIN_SCALE, MAX_SCALE)
+    // Configuration.screenWidthDp 的 insets 行为随 targetSdk 变化且有 dp 取整误差；
+    // 优先取窗口实际容器尺寸换算，异常（首帧可能为 0）时回退
+    val containerWidthPx = LocalWindowInfo.current.containerSize.width
+    val widthDp = if (containerWidthPx > 0) {
+        with(current) { containerWidthPx.toDp().value }
+    } else {
+        config.screenWidthDp.toFloat()
+    }
+    val scale = (widthDp / DESIGN_WIDTH_DP).coerceIn(MIN_SCALE, MAX_SCALE)
     CompositionLocalProvider(
         LocalDensity provides Density(
             density = current.density * scale,

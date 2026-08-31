@@ -17,6 +17,16 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      # 自动缓存 Gradle 依赖与 wrapper（首次慢，后续增量）
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests
+        run: ./gradlew test --stacktrace
+
+      - name: Lint (app)
+        run: ./gradlew :app:lintDebug --stacktrace
+
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
 
@@ -25,3 +35,11 @@ jobs:
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-*.html
+          if-no-files-found: ignore

@@ -47,6 +47,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -337,7 +338,7 @@ private fun FloatingNavBar(
                     val indicatorWidth = itemWidth / 2
                     Box(
                         modifier = Modifier
-                            .offset(x = indicatorOffset + (itemWidth - indicatorWidth) / 2)
+                            .offset { IntOffset((indicatorOffset + (itemWidth - indicatorWidth) / 2).roundToPx(), 0) }
                             .padding(vertical = 11.dp)
                             .height(44.dp)
                             .width(indicatorWidth)
@@ -420,7 +421,7 @@ private fun NavBarIcon(
                 MaterialTheme.colorScheme.onSurfaceVariant
             },
             size = 26.dp,
-            modifier = Modifier.offset(x = shiftAnim.value, y = floatOffset + NavIconExtraShiftY)
+            modifier = Modifier.offset { IntOffset(shiftAnim.value.roundToPx(), (floatOffset + NavIconExtraShiftY).roundToPx()) }
         )
     }
 }

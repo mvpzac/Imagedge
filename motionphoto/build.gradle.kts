@@ -32,4 +32,6 @@ dependencies {
     implementation(libs.media3.transformer)
     implementation(libs.media3.effect)
     implementation(libs.kotlinx.coroutines.android)
+
+    testImplementation(libs.junit)
 }

@@ -1,33 +1,84 @@
 package com.imagedge.camera.motionphoto.internal.format
 
 import com.imagedge.camera.motionphoto.MotionPhotoComposeException
-import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.RandomAccessFile
 
+/**
+ * QuickTime → MP4 品牌重写器（WeChat 兼容路径）。
+ *
+ * **流式实现**：全程堆内只有固定缓冲（8KB 拷贝缓冲 + 16 字节头），
+ * GB 级 iPhone MOV 不会 OOM。原实现 `rebrand(bytes)` 整读整写，
+ * 大视频直接顶爆堆。
+ *
+ * 步骤：替换 ftyp 盒 → 流式拷贝其余字节 → delta 非 0 时用
+ * RandomAccessFile 原地修补 moov 内的 stco/co64 chunk 偏移。
+ */
 internal object QuickTimeMp4Rewriter {
     private val mp4CompatibleBrands = listOf("isom", "mp41", "mp42")
 
-    fun rebrand(sourceBytes: ByteArray): ByteArray {
-        if (sourceBytes.size < 8) {
+    private const val COPY_BUFFER_SIZE = 8 * 1024
+
+    fun rebrand(source: File, target: File) {
+        val sourceLength = source.length()
+        if (sourceLength < 8) {
             throw MotionPhotoComposeException("The QuickTime file is too small to rewrite as MP4.")
         }
-        val originalFtypSize = readBoxSize(sourceBytes, 0, sourceBytes.size).toInt()
-        val originalType = String(sourceBytes, 4, 4, Charsets.US_ASCII)
-        if (originalType != "ftyp" || originalFtypSize <= 8 || originalFtypSize > sourceBytes.size) {
+
+        val originalFtypSize: Long
+        RandomAccessFile(source, "r").use { raf ->
+            val size32 = readUnsignedIntAt(raf, 0)
+            val originalType = readBoxTypeAt(raf, 4)
+            if (originalType != "ftyp") {
+                throw MotionPhotoComposeException(
+                    "The QuickTime file is missing a valid ftyp box, so it cannot be processed with the WeChat-style path.",
+                )
+            }
+            originalFtypSize = when {
+                size32 == 1L && sourceLength >= 16 -> readLongAt(raf, 8)
+                size32 == 0L -> sourceLength
+                else -> size32
+            }
+        }
+        if (originalFtypSize <= 8 || originalFtypSize > sourceLength) {
             throw MotionPhotoComposeException(
                 "The QuickTime file is missing a valid ftyp box, so it cannot be processed with the WeChat-style path.",
             )
         }
 
         val replacementFtyp = buildMp4FtypBox()
-        val delta = replacementFtyp.size - originalFtypSize
-        val output = ByteArrayOutputStream(sourceBytes.size + delta)
-        output.write(replacementFtyp)
-        output.write(sourceBytes, originalFtypSize, sourceBytes.size - originalFtypSize)
-        val rewritten = output.toByteArray()
-        if (delta != 0) {
-            patchChunkOffsets(rewritten, delta.toLong())
+        val delta = replacementFtyp.size.toLong() - originalFtypSize
+
+        // 流式拷贝：替换 ftyp + 逐块搬运其余字节（堆内固定 8KB 缓冲）
+        FileInputStream(source).use { input ->
+            FileOutputStream(target).use { output ->
+                output.write(replacementFtyp)
+                var skipped = 0L
+                while (skipped < originalFtypSize) {
+                    val s = input.skip(originalFtypSize - skipped)
+                    if (s > 0) {
+                        skipped += s
+                        continue
+                    }
+                    if (input.read() == -1) break
+                    skipped += 1
+                }
+                val buffer = ByteArray(COPY_BUFFER_SIZE)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read == -1) break
+                    output.write(buffer, 0, read)
+                }
+            }
         }
-        return rewritten
+
+        if (delta != 0L) {
+            RandomAccessFile(target, "rw").use { raf ->
+                patchChunkOffsets(raf, raf.length(), delta)
+            }
+        }
     }
 
     private fun buildMp4FtypBox(): ByteArray {
@@ -46,136 +97,162 @@ internal object QuickTimeMp4Rewriter {
         return box
     }
 
+    // ── chunk 偏移修补（RandomAccessFile 原地，替代整块载入）──────────
+
     private fun patchChunkOffsets(
-        bytes: ByteArray,
+        raf: RandomAccessFile,
+        limit: Long,
         delta: Long,
     ) {
-        var offset = 0
-        while (offset + 8 <= bytes.size) {
-            val size = readBoxSize(bytes, offset, bytes.size)
-            if (size < 8 || offset + size > bytes.size) {
+        var offset = 0L
+        while (offset + 8 <= limit) {
+            val size = readBoxSize(raf, offset, limit)
+            if (size < 8 || offset + size > limit) {
                 break
             }
-            if (readBoxType(bytes, offset) == "moov") {
-                patchChunkOffsetsInContainer(bytes, offset + 8, (offset + size).toInt(), delta)
+            if (readBoxTypeAt(raf, offset) == "moov") {
+                patchChunkOffsetsInContainer(raf, offset + 8, offset + size, delta)
                 return
             }
-            offset = (offset + size).toInt()
+            offset += size
         }
     }
 
     private fun patchChunkOffsetsInContainer(
-        bytes: ByteArray,
-        start: Int,
-        end: Int,
+        raf: RandomAccessFile,
+        start: Long,
+        end: Long,
         delta: Long,
     ) {
         var offset = start
         while (offset + 8 <= end) {
-            val size = readBoxSize(bytes, offset, end)
+            val size = readBoxSize(raf, offset, end)
             if (size < 8 || offset + size > end) {
                 break
             }
-            when (readBoxType(bytes, offset)) {
-                "stco" -> patchStcoBox(bytes, offset, size.toInt(), delta)
-                "co64" -> patchCo64Box(bytes, offset, size.toInt(), delta)
+            when (readBoxTypeAt(raf, offset)) {
+                "stco" -> patchStcoBox(raf, offset, size, delta)
+                "co64" -> patchCo64Box(raf, offset, size, delta)
                 "moov", "trak", "mdia", "minf", "stbl", "edts", "dinf", "udta", "tref" ->
-                    patchChunkOffsetsInContainer(bytes, offset + 8, (offset + size).toInt(), delta)
+                    patchChunkOffsetsInContainer(raf, offset + 8, offset + size, delta)
                 "meta" ->
-                    patchChunkOffsetsInContainer(bytes, offset + 12, (offset + size).toInt(), delta)
+                    patchChunkOffsetsInContainer(raf, offset + 12, offset + size, delta)
             }
-            offset = (offset + size).toInt()
+            offset += size
         }
     }
 
     private fun patchStcoBox(
-        bytes: ByteArray,
-        boxOffset: Int,
-        boxSize: Int,
+        raf: RandomAccessFile,
+        boxOffset: Long,
+        boxSize: Long,
         delta: Long,
     ) {
         // 畸形/截断的 box（size 8~15）读不到 entry_count，直接跳过防越界
-        if (boxSize < 16 || boxOffset + 16 > bytes.size) return
-        val entryCount = readInt(bytes, boxOffset + 12)
+        if (boxSize < 16 || boxOffset + 16 > raf.length()) return
+        val entryCount = readIntAt(raf, boxOffset + 12)
         var entryOffset = boxOffset + 16
         repeat(entryCount) {
             if (entryOffset + 4 > boxOffset + boxSize) {
                 return
             }
-            val value = readUnsignedInt(bytes, entryOffset)
-            writeInt(bytes, entryOffset, (value + delta).toInt())
+            val value = readUnsignedIntAt(raf, entryOffset)
+            writeIntAt(raf, entryOffset, (value + delta).toInt())
             entryOffset += 4
         }
     }
 
     private fun patchCo64Box(
-        bytes: ByteArray,
-        boxOffset: Int,
-        boxSize: Int,
+        raf: RandomAccessFile,
+        boxOffset: Long,
+        boxSize: Long,
         delta: Long,
     ) {
-        if (boxSize < 16 || boxOffset + 16 > bytes.size) return
-        val entryCount = readInt(bytes, boxOffset + 12)
+        if (boxSize < 16 || boxOffset + 16 > raf.length()) return
+        val entryCount = readIntAt(raf, boxOffset + 12)
         var entryOffset = boxOffset + 16
         repeat(entryCount) {
             if (entryOffset + 8 > boxOffset + boxSize) {
                 return
             }
-            val value = readLong(bytes, entryOffset)
-            writeLong(bytes, entryOffset, value + delta)
+            val value = readLongAt(raf, entryOffset)
+            writeLongAt(raf, entryOffset, value + delta)
             entryOffset += 8
         }
     }
 
+    // ── RandomAccessFile 大端读写助手（MP4 为大端）────────────────────
+
     private fun readBoxSize(
-        bytes: ByteArray,
-        offset: Int,
-        limit: Int,
+        raf: RandomAccessFile,
+        offset: Long,
+        limit: Long,
     ): Long {
         if (offset + 8 > limit) {
             return -1
         }
-        val size32 = readUnsignedInt(bytes, offset)
+        val size32 = readUnsignedIntAt(raf, offset)
         return when {
-            size32 == 1L && offset + 16 <= limit -> readLong(bytes, offset + 8)
-            size32 == 0L -> (limit - offset).toLong()
+            size32 == 1L && offset + 16 <= limit -> readLongAt(raf, offset + 8)
+            size32 == 0L -> limit - offset
             else -> size32
         }
     }
 
-    private fun readBoxType(
-        bytes: ByteArray,
-        offset: Int,
+    private fun readBoxTypeAt(
+        raf: RandomAccessFile,
+        offset: Long,
     ): String {
-        return String(bytes, offset + 4, 4, Charsets.US_ASCII)
-    }
-
-    private fun readInt(
-        bytes: ByteArray,
-        offset: Int,
-    ): Int {
-        return ((bytes[offset].toInt() and 0xFF) shl 24) or
-            ((bytes[offset + 1].toInt() and 0xFF) shl 16) or
-            ((bytes[offset + 2].toInt() and 0xFF) shl 8) or
-            (bytes[offset + 3].toInt() and 0xFF)
-    }
-
-    private fun readUnsignedInt(
-        bytes: ByteArray,
-        offset: Int,
-    ): Long {
-        return readInt(bytes, offset).toLong() and 0xFFFF_FFFFL
-    }
-
-    private fun readLong(
-        bytes: ByteArray,
-        offset: Int,
-    ): Long {
-        var result = 0L
-        repeat(8) { index ->
-            result = (result shl 8) or (bytes[offset + index].toLong() and 0xFF)
+        val type = ByteArray(4)
+        raf.seek(offset)
+        var read = 0
+        while (read < 4) {
+            val n = raf.read(type, read, 4 - read)
+            if (n == -1) return ""
+            read += n
         }
-        return result
+        return String(type, Charsets.US_ASCII)
+    }
+
+    private fun readIntAt(
+        raf: RandomAccessFile,
+        offset: Long,
+    ): Int {
+        raf.seek(offset)
+        return raf.readInt()
+    }
+
+    private fun readUnsignedIntAt(
+        raf: RandomAccessFile,
+        offset: Long,
+    ): Long {
+        return readIntAt(raf, offset).toLong() and 0xFFFF_FFFFL
+    }
+
+    private fun readLongAt(
+        raf: RandomAccessFile,
+        offset: Long,
+    ): Long {
+        raf.seek(offset)
+        return raf.readLong()
+    }
+
+    private fun writeIntAt(
+        raf: RandomAccessFile,
+        offset: Long,
+        value: Int,
+    ) {
+        raf.seek(offset)
+        raf.writeInt(value)
+    }
+
+    private fun writeLongAt(
+        raf: RandomAccessFile,
+        offset: Long,
+        value: Long,
+    ) {
+        raf.seek(offset)
+        raf.writeLong(value)
     }
 
     private fun writeInt(
@@ -187,16 +264,6 @@ internal object QuickTimeMp4Rewriter {
         bytes[offset + 1] = ((value ushr 16) and 0xFF).toByte()
         bytes[offset + 2] = ((value ushr 8) and 0xFF).toByte()
         bytes[offset + 3] = (value and 0xFF).toByte()
-    }
-
-    private fun writeLong(
-        bytes: ByteArray,
-        offset: Int,
-        value: Long,
-    ) {
-        for (index in 7 downTo 0) {
-            bytes[offset + (7 - index)] = ((value ushr (index * 8)) and 0xFF).toByte()
-        }
     }
 
     private fun writeAscii(

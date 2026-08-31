@@ -53,6 +53,11 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    lint {
+        // 存量警告入基线（2026-08-31 生成），之后只对新增问题报警
+        baseline = file("lint-baseline.xml")
+    }
 }
 
 dependencies {

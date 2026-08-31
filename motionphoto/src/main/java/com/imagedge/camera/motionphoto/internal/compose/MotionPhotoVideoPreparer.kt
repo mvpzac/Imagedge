@@ -121,15 +121,15 @@ internal object MotionPhotoVideoPreparer {
         context: Context,
         sourceFile: File,
     ): File {
-        val rewrittenBytes = QuickTimeMp4Rewriter.rebrand(sourceFile.readBytes())
-        return MotionPhotoTempFiles.createWorkingFile(
+        val output = MotionPhotoTempFiles.createWorkingFile(
             cacheDir = context.cacheDir,
             directoryName = "motion-photo-work",
             prefix = "motion-photo-video",
             extension = "mp4",
-        ).apply {
-            writeBytes(rewrittenBytes)
-        }
+        )
+        // 流式重写（堆内固定缓冲）：替代 readBytes 整读，避免大视频 OOM
+        QuickTimeMp4Rewriter.rebrand(sourceFile, output)
+        return output
     }
 
     private fun resolvePresentationTimestampUs(

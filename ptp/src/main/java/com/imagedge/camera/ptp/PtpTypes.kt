@@ -163,6 +163,21 @@ data class DeviceInfo(
     val operationsSupported: List<Int>
 ) {
     companion object {
+        /**
+         * DeviceInfo 各支持列表计数字段的合法上限。
+         * 真实相机不过数百条；畸形大值（流错位时常见，如 0xFFFFFFFF → -1）
+         * 若不校验会让后续 `.map` 装箱分配数亿元素直接 OOM。
+         */
+        private const val MAX_ARRAY_COUNT = 8192
+
+        private fun checkDeviceInfoArrayCount(count: Int, field: String) {
+            if (count < 0 || count > MAX_ARRAY_COUNT) {
+                throw PtpMalformedPacketException(
+                    "DeviceInfo $field 数量非法：$count（上限 $MAX_ARRAY_COUNT）——流可能已错位"
+                )
+            }
+        }
+
         fun parse(buffer: PtpBuffer): DeviceInfo {
             val standardVersion = buffer.readUInt16()
             val vendorExtensionId = buffer.readUInt32()
@@ -171,18 +186,23 @@ data class DeviceInfo(
             val functionalMode = buffer.readUInt16()
 
             val opsCount = buffer.readUInt32().toInt()
+            checkDeviceInfoArrayCount(opsCount, "operationsSupported")
             val operations = (0 until opsCount).map { buffer.readUInt16() }
 
             val eventsCount = buffer.readUInt32().toInt()
+            checkDeviceInfoArrayCount(eventsCount, "eventsSupported")
             repeat(eventsCount) { buffer.readUInt16() }
 
             val propsCount = buffer.readUInt32().toInt()
+            checkDeviceInfoArrayCount(propsCount, "devicePropertiesSupported")
             repeat(propsCount) { buffer.readUInt16() }
 
             val captureCount = buffer.readUInt32().toInt()
+            checkDeviceInfoArrayCount(captureCount, "captureFormats")
             repeat(captureCount) { buffer.readUInt16() }
 
             val imageCount = buffer.readUInt32().toInt()
+            checkDeviceInfoArrayCount(imageCount, "imageFormats")
             repeat(imageCount) { buffer.readUInt16() }
 
             val manufacturer = buffer.readPtpString()
