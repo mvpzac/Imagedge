@@ -19,7 +19,13 @@ import androidx.compose.ui.unit.dp
 import com.imagedge.camera.ui.theme.Radius
 import com.imagedge.camera.ui.theme.Spacing
 
-/** 空态：图标（可选）+ 标题 + 说明 + 可选操作按钮 */
+/**
+ * 空态：图标（可选）+ 标题 + 说明 + 可选操作按钮
+ *
+ * 内容整体垂直居中。组件保持内在尺寸自适应（不内置 fillMaxSize），
+ * 可安全放入 LazyColumn 等无界高度容器；
+ * 需要整屏垂直居中时调用方传入 `Modifier.fillMaxSize()`。
+ */
 @Composable
 fun EmptyState(
     title: String,
@@ -34,7 +40,7 @@ fun EmptyState(
             .fillMaxWidth()
             .padding(vertical = Spacing.XL),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(Spacing.S)
+        verticalArrangement = Arrangement.spacedBy(Spacing.S, Alignment.CenterVertically)
     ) {
         if (icon != null) {
             LucideIcon(icon, contentDescription = null, size = 32.dp, tint = MaterialTheme.colorScheme.onSurfaceVariant)

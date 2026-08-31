@@ -68,6 +68,7 @@ fun AppButton(
             onClick = onClick,
             enabled = enabled,
             shape = shape,
+            contentPadding = PaddingValues(vertical = 14.dp),
             modifier = baseModifier
         ) { content() }
     }
