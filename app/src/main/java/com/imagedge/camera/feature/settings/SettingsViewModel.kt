@@ -10,6 +10,7 @@ import com.imagedge.camera.data.model.ConnectionPhase
 import com.imagedge.camera.data.model.ConnectionState
 import com.imagedge.camera.data.model.ConnectionStateHolder
 import com.imagedge.camera.data.remote.CameraRepository
+import com.imagedge.camera.ui.feedback.Haptics
 import com.imagedge.camera.ui.theme.ThemeController
 import com.imagedge.camera.ui.theme.ThemeMode
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -40,7 +41,8 @@ class SettingsViewModel @Inject constructor(
     private val repository: CameraRepository,
     private val stateHolder: ConnectionStateHolder,
     private val userLutStore: UserLutStore,
-    val themeController: ThemeController
+    val themeController: ThemeController,
+    private val haptics: Haptics
 ) : ViewModel() {
 
     // ── LUT 文件管理 ──
@@ -148,6 +150,12 @@ class SettingsViewModel @Inject constructor(
     val themeMode: StateFlow<ThemeMode> = themeController.mode
 
     fun setThemeMode(mode: ThemeMode) = themeController.setMode(mode)
+
+    val hapticsEnabled: StateFlow<Boolean> = haptics.enabled
+    fun setHapticsEnabled(enabled: Boolean) {
+        haptics.setEnabled(enabled)
+        haptics.click()
+    }
 
     private val _manual = MutableStateFlow(ManualConnectState())
     val manual: StateFlow<ManualConnectState> = _manual.asStateFlow()
