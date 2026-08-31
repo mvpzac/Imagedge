@@ -195,6 +195,8 @@ fun AlbumScreen(
                     title = stringResource(R.string.album_empty_title),
                     desc = stringResource(R.string.album_empty_hint),
                     icon = Lucide.Images,
+                    actionLabel = stringResource(R.string.album_retry),
+                    onAction = { viewModel.loadMedia() },
                     modifier = Modifier.fillMaxSize()
                 )
                 // 筛选后为空：提示切换筛选
