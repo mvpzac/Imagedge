@@ -10,7 +10,6 @@ import com.imagedge.camera.data.model.ConnectionPhase
 import com.imagedge.camera.data.model.ConnectionState
 import com.imagedge.camera.data.model.ConnectionStateHolder
 import com.imagedge.camera.data.remote.CameraRepository
-import com.imagedge.camera.ui.theme.BrandColor
 import com.imagedge.camera.ui.theme.ThemeController
 import com.imagedge.camera.ui.theme.ThemeMode
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -147,16 +146,8 @@ class SettingsViewModel @Inject constructor(
     }
 
     val themeMode: StateFlow<ThemeMode> = themeController.mode
-    val brandColor: StateFlow<BrandColor> = themeController.brandColor
 
     fun setThemeMode(mode: ThemeMode) = themeController.setMode(mode)
-
-    fun setBrandColor(color: BrandColor) = themeController.setBrandColor(color)
-
-    // ── Material You 动态取色（默认关闭，Android 12+ 才生效）──
-    val dynamicColor: StateFlow<Boolean> = themeController.dynamicColor
-
-    fun setDynamicColor(enabled: Boolean) = themeController.setDynamicColor(enabled)
 
     private val _manual = MutableStateFlow(ManualConnectState())
     val manual: StateFlow<ManualConnectState> = _manual.asStateFlow()

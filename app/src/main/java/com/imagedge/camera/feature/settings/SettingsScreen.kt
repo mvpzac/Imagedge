@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Column
@@ -25,8 +24,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
@@ -45,7 +42,6 @@ import androidx.compose.material3.RadioButton
 import com.imagedge.camera.data.lut.LutType
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -54,7 +50,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.BuildConfig
 import com.imagedge.camera.R
 import com.imagedge.camera.ui.components.Lucide
-import com.imagedge.camera.ui.theme.BrandColor
 import com.imagedge.camera.ui.components.LucideIcon
 import com.imagedge.camera.ui.theme.ThemeMode
 
@@ -74,11 +69,6 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
-    val dynamicColor by viewModel.dynamicColor.collectAsStateWithLifecycle()
-    val brandColor by viewModel.brandColor.collectAsStateWithLifecycle()
-    // 动态取色（Material You）需 Android 12+，低版本开关置灰
-    val dynamicColorSupported =
-        android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
 
     Column(
         modifier = Modifier
@@ -92,7 +82,7 @@ fun SettingsScreen(
             style = MaterialTheme.typography.headlineLarge
         )
 
-        // ── 外观：主题模式 + 动态取色（规范：相关元素靠近，成组放进同一张卡片）──
+        // ── 外观：主题模式 ──
         SectionTitle(stringResource(R.string.settings_section_appearance), Lucide.Palette)
         // 放弃卡片形式：外观项直接陈列在页面上（用户定稿）
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -134,59 +124,6 @@ fun SettingsScreen(
                             Text(stringResource(R.string.settings_theme_system))
                         }
                     }
-                }
-
-                // ── 主题颜色：内置色板（动态取色开启时不生效）──
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = stringResource(R.string.settings_brand_color),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        BrandColor.entries.forEach { brand ->
-                            ColorSwatch(
-                                color = brand.lightPrimary,
-                                label = brand.label,
-                                selected = brandColor == brand,
-                                enabled = !dynamicColor,
-                                onClick = { viewModel.setBrandColor(brand) }
-                            )
-                        }
-                    }
-                    if (dynamicColor) {
-                        Text(
-                            text = stringResource(R.string.settings_brand_color_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                // 动态取色（Material You）：默认关闭，开启后主色跟随系统壁纸。
-                // 文案样式与上面的「主题模式」「主题颜色」保持一致（bodyMedium + onSurfaceVariant），
-                // 不再附说明文字；不支持的设备开关置灰即可表意。
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = stringResource(R.string.settings_dynamic_color),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Switch(
-                        checked = dynamicColor,
-                        onCheckedChange = viewModel::setDynamicColor,
-                        enabled = dynamicColorSupported,
-                        // 关闭态强对比：中灰轨道 + 白色滑块（深灰卡片上一眼可辨）；
-                        // 开启态保持主色轨道默认配色
-                        colors = SwitchDefaults.colors(
-                            uncheckedThumbColor = MaterialTheme.colorScheme.surface,
-                            uncheckedTrackColor = MaterialTheme.colorScheme.outline,
-                            uncheckedBorderColor = MaterialTheme.colorScheme.outline
-                        )
-                    )
-                }
                 }
         }
 
@@ -470,42 +407,5 @@ private fun SectionTitle(text: String, icon: Int? = null) {
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.primary
         )
-    }
-}
-
-/** 主题颜色圆形色板：选中态加深色描边 + 对勾 */
-@Composable
-private fun ColorSwatch(
-    color: Color,
-    label: String,
-    selected: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .size(36.dp)
-            .clip(CircleShape)
-            .background(if (enabled) color else color.copy(alpha = 0.35f))
-            .border(
-                width = if (selected) 2.dp else 0.dp,
-                color = if (selected) {
-                    MaterialTheme.colorScheme.onSurface
-                } else {
-                    Color.Transparent
-                },
-                shape = CircleShape
-            )
-            .clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        if (selected) {
-            LucideIcon(
-                Lucide.Check,
-                contentDescription = label,
-                tint = Color.White,
-                size = 16.dp
-            )
-        }
     }
 }

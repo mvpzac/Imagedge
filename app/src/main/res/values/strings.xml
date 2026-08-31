@@ -52,9 +52,6 @@
     <string name="settings_theme_dark">深色</string>
     <string name="settings_theme_system">跟随系统</string>
     <string name="settings_theme_title">主题模式</string>
-    <string name="settings_brand_color">主题颜色</string>
-    <string name="settings_brand_color_hint">动态取色开启时，主题颜色暂不生效</string>
-    <string name="settings_dynamic_color">动态取色</string>
     <string name="settings_ip_label">相机 IP 地址</string>
     <string name="settings_section_download">下载</string>
     <string name="settings_section_lut">LUT 管理</string>
