@@ -70,11 +70,13 @@ import java.time.format.DateTimeFormatter
 /**
  * 下载队列 + 传输记录屏幕
  * @param onBack 返回回调
+ * @param onGoAlbum 空队列时跳回相册选片的回调
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun DownloadScreen(
     onBack: () -> Unit = {},
+    onGoAlbum: () -> Unit = {},
     viewModel: DownloadViewModel = hiltViewModel()
 ) {
     val tasks by viewModel.tasks.collectAsStateWithLifecycle()
@@ -137,9 +139,12 @@ fun DownloadScreen(
                 // 下载队列
                 if (tasks.isEmpty()) {
                     EmptyState(
-                        icon = Lucide.Info,
                         title = stringResource(R.string.download_empty),
-                        description = stringResource(R.string.download_empty_desc)
+                        icon = Lucide.Info,
+                        desc = stringResource(R.string.download_empty_desc),
+                        actionLabel = stringResource(R.string.download_empty_action),
+                        onAction = onGoAlbum,
+                        modifier = Modifier.fillMaxSize()
                     )
                 } else {
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -152,9 +157,10 @@ fun DownloadScreen(
                 // 传输记录
                 if (history.isEmpty()) {
                     EmptyState(
-                        icon = Lucide.Info,
                         title = stringResource(R.string.download_history_empty),
-                        description = stringResource(R.string.download_history_empty_desc)
+                        icon = Lucide.Info,
+                        desc = stringResource(R.string.download_history_empty_desc),
+                        modifier = Modifier.fillMaxSize()
                     )
                 } else {
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {

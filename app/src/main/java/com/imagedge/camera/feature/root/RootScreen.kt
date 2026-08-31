@@ -245,7 +245,19 @@ fun RootScreen(
                     )
                 }
                 composable(Route.DOWNLOAD) {
-                    DownloadScreen(onBack = { navController.popBackStack() })
+                    DownloadScreen(
+                        onBack = { navController.popBackStack() },
+                        onGoAlbum = {
+                            // 空队列「去相册选片」：切到相册 Tab（与底部导航同款切换语义）
+                            navController.navigate(RootDestination.ALBUM.route) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        }
+                    )
                 }
             }
         }
