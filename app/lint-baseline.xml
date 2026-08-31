@@ -8,7 +8,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/imagedge/camera/feature/download/DownloadScreen.kt"
-            line="369"
+            line="375"
             column="9"/>
     </issue>
 
@@ -19,7 +19,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/imagedge/camera/feature/download/DownloadScreen.kt"
-            line="371"
+            line="377"
             column="9"/>
     </issue>
 
@@ -30,7 +30,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/imagedge/camera/feature/download/DownloadScreen.kt"
-            line="373"
+            line="379"
             column="9"/>
     </issue>
 
@@ -107,7 +107,7 @@
         errorLine2="    ~~~~~~~~">
         <location
             file="src/main/java/com/imagedge/camera/ui/components/Feedback.kt"
-            line="82"
+            line="73"
             column="5"/>
     </issue>
 
@@ -129,7 +129,7 @@
         errorLine2="                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/AndroidManifest.xml"
-            line="54"
+            line="57"
             column="38"/>
     </issue>
 
@@ -187,7 +187,7 @@
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/imagedge/camera/feature/edit/ExifFrameViewModel.kt"
-            line="433"
+            line="435"
             column="22"/>
     </issue>
 
@@ -198,8 +198,19 @@
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/imagedge/camera/feature/edit/ExifFrameViewModel.kt"
-            line="496"
+            line="498"
             column="22"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putBoolean(KEY_ENABLED, value).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/ui/feedback/Haptics.kt"
+            line="40"
+            column="9"/>
     </issue>
 
     <issue
@@ -209,7 +220,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/imagedge/camera/feature/edit/LiveTriptychViewModel.kt"
-            line="149"
+            line="151"
             column="13"/>
     </issue>
 
@@ -220,7 +231,7 @@
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/imagedge/camera/feature/edit/LiveTriptychViewModel.kt"
-            line="306"
+            line="308"
             column="22"/>
     </issue>
 
@@ -231,7 +242,7 @@
         errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/imagedge/camera/feature/edit/LiveTriptychViewModel.kt"
-            line="387"
+            line="389"
             column="17"/>
     </issue>
 
@@ -242,7 +253,7 @@
         errorLine2="                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/imagedge/camera/feature/edit/LutEditViewModel.kt"
-            line="248"
+            line="250"
             column="34"/>
     </issue>
 
@@ -253,7 +264,7 @@
         errorLine2="                                  ~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/imagedge/camera/feature/edit/LutEditViewModel.kt"
-            line="288"
+            line="290"
             column="35"/>
     </issue>
 
@@ -264,7 +275,7 @@
         errorLine2="               ^">
         <location
             file="src/main/java/com/imagedge/camera/feature/edit/LutEditViewModel.kt"
-            line="352"
+            line="356"
             column="16"/>
     </issue>
 
@@ -275,7 +286,7 @@
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/imagedge/camera/feature/edit/LutEditViewModel.kt"
-            line="380"
+            line="384"
             column="22"/>
     </issue>
 
@@ -286,7 +297,7 @@
         errorLine2="        ~~~~~~~~~~~~">
         <location
             file="src/main/java/com/imagedge/camera/feature/settings/SettingsViewModel.kt"
-            line="125"
+            line="126"
             column="9"/>
     </issue>
 
@@ -297,7 +308,7 @@
         errorLine2="        ~~~~~~~~~~~~">
         <location
             file="src/main/java/com/imagedge/camera/feature/settings/SettingsViewModel.kt"
-            line="130"
+            line="131"
             column="9"/>
     </issue>
 
@@ -308,7 +319,7 @@
         errorLine2="                                                                          ~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/imagedge/camera/feature/settings/SettingsViewModel.kt"
-            line="140"
+            line="141"
             column="75"/>
     </issue>
 
@@ -330,29 +341,7 @@
         errorLine2="        ~~~~~~~~~~~~">
         <location
             file="src/main/java/com/imagedge/camera/ui/theme/ThemeController.kt"
-            line="38"
-            column="9"/>
-    </issue>
-
-    <issue
-        id="UseKtx"
-        message="Use the KTX extension function `SharedPreferences.edit` instead?"
-        errorLine1="        prefs.edit().putBoolean(KEY_DYNAMIC_COLOR, enabled).apply()"
-        errorLine2="        ~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/imagedge/camera/ui/theme/ThemeController.kt"
-            line="51"
-            column="9"/>
-    </issue>
-
-    <issue
-        id="UseKtx"
-        message="Use the KTX extension function `SharedPreferences.edit` instead?"
-        errorLine1="        prefs.edit().putString(KEY_BRAND_COLOR, color.name).apply()"
-        errorLine2="        ~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/imagedge/camera/ui/theme/ThemeController.kt"
-            line="63"
+            line="37"
             column="9"/>
     </issue>
 
@@ -385,7 +374,7 @@
         errorLine2="                ^">
         <location
             file="src/main/java/com/imagedge/camera/feature/edit/VideoToLivePhotoViewModel.kt"
-            line="405"
+            line="408"
             column="17"/>
     </issue>
 
