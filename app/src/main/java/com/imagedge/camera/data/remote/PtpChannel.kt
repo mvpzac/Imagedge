@@ -463,8 +463,13 @@ class PtpChannel @Inject constructor() : CameraChannel {
             //
             // 每批处理完即回调，让上层**边扫描边渲染**，而不是等上千对象全部枚举完
             // 才一次性返回（否则首屏要等数分钟）。
+            //
+            // **倒序遍历句柄**：索尼相机对象句柄按拍摄顺序递增分配（新照片句柄更大），
+            // 倒序即「最新优先」——让用户先看到最近拍的照片，再逐批补上老照片，
+            // 而不是先灌满整屏老照片、最新的迟迟不出来。
+            // 每批回调后上层会按 captureDate 重排，最终显示顺序不受影响。
             var total = 0
-            handles.chunked(SCAN_BATCH_SIZE).forEach { batch ->
+            handles.asReversed().chunked(SCAN_BATCH_SIZE).forEach { batch ->
                 val batchItems = ptpCall(timeoutMs = SCAN_TIMEOUT_MS, selfHeal = false) {
                     val acc = mutableListOf<MediaItem>()
                     for (handle in batch) {
