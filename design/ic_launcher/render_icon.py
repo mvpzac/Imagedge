@@ -5,6 +5,7 @@ Geometry mirrors res/drawable/ic_launcher_foreground.xml (108dp viewport):
 ring r=23 @ (54,54) stroke 4.0; crescent = circle r=23 @ (54,54) minus
 circle r=23 @ (64.35,61.48). Colors from ui/theme/Color.kt.
 """
+import os
 from PIL import Image, ImageDraw
 
 S = 4  # supersample factor
@@ -48,6 +49,8 @@ def draw_icon(full_bleed: bool) -> Image.Image:
 
 
 if __name__ == "__main__":
-    draw_icon(True).save("/Users/zachary/Desktop/Imagedge-0.1.7/design/ic_launcher/icon-512-play.png")
-    draw_icon(False).save("/Users/zachary/Desktop/Imagedge-0.1.7/design/ic_launcher/icon-512-squircle.png")
+    # 输出到脚本所在目录（相对路径，避免硬编码本机绝对路径泄漏用户名/目录结构）
+    out_dir = os.path.dirname(os.path.abspath(__file__))
+    draw_icon(True).save(os.path.join(out_dir, "icon-512-play.png"))
+    draw_icon(False).save(os.path.join(out_dir, "icon-512-squircle.png"))
     print("done")
