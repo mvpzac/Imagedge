@@ -4,7 +4,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.1.7-1A1B1E?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.1.9-1A1B1E?style=flat-square)
 ![License](https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Android%2010%2B-3DDC84?style=flat-square)
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.2.0-7F52FF?style=flat-square)
