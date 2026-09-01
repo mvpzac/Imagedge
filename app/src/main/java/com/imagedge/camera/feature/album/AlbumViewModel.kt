@@ -259,6 +259,12 @@ class AlbumViewModel @Inject constructor(
             // 整卡：下载进行中不校验（全量枚举与下载争抢 PTP 通道，两者都变慢）
             if (hasActiveDownload.value) return
             if (fullCardVerifyCount >= FULL_CARD_MAX_VERIFY) return
+            // 只在列表为空时补全。
+            // 整卡全量枚举代价极高（上千对象、分批持锁），每一次重扫都在与下载争抢
+            // PTP 通道；实测会触发事务超时自愈（forceClose）——连接一断，已枚举的
+            // 对象句柄全部失效，之后发起的下载统统以 0x2009（无效对象句柄）失败。
+            // 因此只为空列表兜底，列表已有内容时交给用户手动下拉刷新。
+            if (_items.value.isNotEmpty()) return
             fullCardVerifyCount++
         }
         silentRefreshing = true
