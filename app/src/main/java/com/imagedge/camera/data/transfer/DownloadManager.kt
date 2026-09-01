@@ -4,9 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.MediaStore
-import java.io.File
-import java.io.OutputStream
-import java.io.RandomAccessFile
 import com.imagedge.camera.core.common.AppLog
 import com.imagedge.camera.data.model.DownloadState
 import com.imagedge.camera.data.model.DownloadTask
@@ -22,7 +19,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -41,7 +37,7 @@ import javax.inject.Singleton
  *     author : Imagedge Team
  *     time   : 2026/08/27
  *     desc   : 全局下载管理器（串行队列，跨页面存活；前台服务保活 + 通知进度 + Room 持久化）
- *     version: 1.2
+ *     version: 1.3 —— 回归整文件下载（稳定性优先）
  * </pre>
  */
 
@@ -55,16 +51,6 @@ class DownloadManager @Inject constructor(
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    /** 断点续传单块大小（512KB：平衡事务开销与失败重传代价） */
-    private val DOWNLOAD_CHUNK_SIZE = 512 * 1024L
-
-    /** 单块失败后的指数退避基数与上限（1s → 2s → 4s → 8s → 15s 封顶） */
-    private val DOWNLOAD_BACKOFF_BASE_MS = 1_000L
-    private val DOWNLOAD_BACKOFF_MAX_MS = 15_000L
-
-    /** 单块最大连续重试次数（超过判定整体失败） */
-    private val DOWNLOAD_MAX_RETRIES = 5
 
     /** 下载队列（串行消费） */
     private val queue = Channel<MediaItem>(Channel.UNLIMITED)
@@ -239,7 +225,7 @@ class DownloadManager @Inject constructor(
      * 遇到「相机已断开、任务一直转圈」时用户只能杀进程（真机反馈）。
      *
      * - 排队中：标记后由队列消费循环跳过（Channel 内已入队的项无法移除，只能消费时过滤）
-     * - 下载中：取消该任务的协程；[download] 的 finally 负责清理临时文件与 Room 记录。
+     * - 下载中：取消该任务的协程；[download] 的 finally 负责 Room 记录。
      *   注意 PTP 的 socket 读不响应取消，实际中断会等到当前事务超时（≤30s）才生效，
      *   UI 侧会立即移除任务，不等它。
      *
@@ -288,15 +274,24 @@ class DownloadManager @Inject constructor(
             .onFailure { AppLog.w("download", "前台服务启动受限（后台启动被拒）：${it.message}") }
     }
 
-    /** 串行下载单个任务（断点续传：分块落盘临时文件，失败退避重试，完成后提交相册） */
+    /**
+     * 串行下载单个任务（整文件流式下载，直写相册）。
+     *
+     * **为什么不用分块下载（GET_PARTIAL_OBJECT）**：0.1.5 引入分块断点续传后，
+     * 真机（ZV-E10，整卡 ContentsTransfer 模式）实测相机对**每个分块**都返回
+     * `0x2009（无效对象句柄）`——该机型在此模式下不支持分块读取，导致所有下载
+     * 全部失败；而 0.1.3 的整文件下载（GetObject）在同一环境实测可用。
+     * 稳定性优先，回归整文件路径；代价是中断后需整体重下（相机端单文件读取
+     * 25MB RAW 实测 ~6s，可接受）。分块的协议实现保留在 `:ptp` / [CameraRepository]
+     * 中，待确认机型的支持范围后再评估按机型启用。
+     */
     private suspend fun download(item: MediaItem) {
         val taskId = item.thumbKey
         val startTime = System.currentTimeMillis()
         val cameraModel = repository.deviceModel
         updateTask(taskId) { it.copy(state = DownloadState.DOWNLOADING, progress = 0) }
-        // 连接已断开（PTP 会话重建或超时自愈后句柄已失效）：直接失败。
-        // 否则任务会走完 6 次分块重试（退避合计近 1 分钟）才报错，
-        // 而每一次请求都注定拿到 0x2009（无效对象句柄）。
+        // 连接已断开（PTP 会话重建或超时自愈后句柄已失效）：直接失败，
+        // 不发起注定失败的请求，让用户尽快看到「请重新连接」的明确提示。
         if (isCameraDisconnected()) {
             AppLog.w("download", "相机连接已断开，跳过下载：${item.filename}")
             updateTask(taskId) {
@@ -309,36 +304,12 @@ class DownloadManager @Inject constructor(
         }
         var savedUri: Uri? = null
         var success = false
-        // 临时文件：分块随机写落盘，完成后一次性提交到相册
-        // （MediaStore/SAF 的 OutputStream 不支持 seek，无法在下载中途续写）
-        val safeName = item.filename.replace(Regex("[^\\w.\\-]"), "_")
-        val tempName = "imgd_${if (taskId.hashCode() < 0) -taskId.hashCode() else taskId.hashCode()}_$safeName"
-        val tempFile = File(context.cacheDir, tempName)
         try {
-            // 大小未知或 UPnP 通道（不支持分块）走整文件直下
-            if (item.sizeBytes <= 0 || repository.currentChannelType == ChannelType.UPNP) {
-                savedUri = repository.downloadToGallery(item) { loaded, total ->
-                    val p = if (total > 0) (loaded * 100 / total).toInt() else 0
-                    updateTask(taskId) { it.copy(progress = p) }
-                }
-                success = savedUri != null
-            } else {
-                success = downloadResumable(item, tempFile) { loaded, total ->
-                    val p = if (total > 0) (loaded * 100 / total).toInt() else 0
-                    updateTask(taskId) { it.copy(progress = p) }
-                }
-                if (success) {
-                    savedUri = runCatching { repository.commitToGallery(item, tempFile) }.getOrNull()
-                    // 提交相册失败时不能算成功：否则任务标 DONE 且 finally 删掉临时文件，
-                    // 已下载的照片彻底丢失而 UI 报成功（数据丢失）
-                    if (savedUri == null) {
-                        success = false
-                        updateTask(taskId) {
-                            it.copy(errorMessage = "已下载但写入相册失败，请重试")
-                        }
-                    }
-                }
+            savedUri = repository.downloadToGallery(item) { loaded, total ->
+                val p = if (total > 0) (loaded * 100 / total).toInt() else 0
+                updateTask(taskId) { it.copy(progress = p) }
             }
+            success = savedUri != null
             updateTask(taskId) {
                 it.copy(
                     state = if (success) DownloadState.DONE else DownloadState.FAILED,
@@ -359,7 +330,6 @@ class DownloadManager @Inject constructor(
             val cancelled = cancelledIds.remove(taskId)
             // 完成/失败/取消后都从 Room 移除（持久化只存排队中的任务）
             runCatching { taskDao.delete(taskId) }
-            runCatching { tempFile.delete() }
             // 追加传输记录（成功或失败都记，供「传输记录」页长按查看详情）；
             // 用户主动取消不算一次传输，不记
             if (!cancelled) {
@@ -392,83 +362,6 @@ class DownloadManager @Inject constructor(
     private fun isCameraDisconnected(): Boolean {
         if (repository.currentChannelType != ChannelType.PTP_IP) return false
         return repository.connectionState.value == ChannelConnectionState.DISCONNECTED
-    }
-
-    /**
-     * 断点续传核心：把 [item] 分块下载到 [tempFile]，网络中断时从已写字节处续传。
-     * 每块 GET_PARTIAL_OBJECT 请求自带 offset，写盘用 RandomAccessFile 定位到 offset，
-     * 因此即使某块中途失败，已落盘字节不丢失；失败后指数退避重试（最多 [DOWNLOAD_MAX_RETRIES] 次）。
-     * @return 全部字节到齐返回 true；重试耗尽返回 false
-     */
-    private suspend fun downloadResumable(
-        item: MediaItem,
-        tempFile: File,
-        onProgress: (Long, Long) -> Unit
-    ): Boolean {
-        val total = item.sizeBytes
-        val raf = RandomAccessFile(tempFile, "rw")
-        val out = RafOutputStream(raf)
-        return try {
-            var offset = raf.length().coerceAtMost(total)
-            var attempt = 0
-            while (offset < total) {
-                // 连接已断开：对象句柄随会话一起失效（相机回 0x2009），
-                // 再重试只是空转——退避最长 15s × 6 次 ≈ 一分钟后才报错，
-                // 用户只能干等。这里立即失败并给出可行动的原因。
-                if (isCameraDisconnected()) {
-                    AppLog.w("download", "相机连接已断开，放弃重试：${item.filename}")
-                    updateTask(item.thumbKey) {
-                        it.copy(errorMessage = "相机连接已断开，请重新连接后再下载")
-                    }
-                    return false
-                }
-                if (attempt > 0) {
-                    // 指数退避：1s → 2s → 4s → 8s → 15s（封顶），给相机/网络恢复时间
-                    val backoff = (DOWNLOAD_BACKOFF_BASE_MS shl (attempt - 1)).coerceAtMost(DOWNLOAD_BACKOFF_MAX_MS)
-                    AppLog.w("download", "分块下载退避 ${backoff}ms 后重试（$attempt/$DOWNLOAD_MAX_RETRIES）offset=$offset")
-                    delay(backoff)
-                }
-                try {
-                    raf.seek(offset)
-                    val before = raf.filePointer
-                    repository.downloadRange(item, out, offset, DOWNLOAD_CHUNK_SIZE, onProgress)
-                    val after = raf.filePointer
-                    // 零推进守卫：相机可能回 OK 但不带任何 DataPacket（offset 越界、
-                    // 实际字节数少于 GetObjectInfo 报告值、内容集被重建等）。
-                    // downloadRange 返回 Unit，调用方无从得知实际写入量，只能靠文件指针判断。
-                    // 不做这个判断就会以满速无限重发请求——且 attempt 恒为 0，退避永不生效，
-                    // 表现为 CPU 100% + 手机发烫 + 进度卡死。
-                    if (after <= before) {
-                        attempt++
-                        AppLog.w(
-                            "download",
-                            "分块零推进 offset=$offset（$attempt/$DOWNLOAD_MAX_RETRIES）：相机未返回数据"
-                        )
-                    } else {
-                        offset = after
-                        attempt = 0
-                        onProgress(offset, total)
-                    }
-                } catch (e: Exception) {
-                    attempt++
-                    AppLog.w("download", "分块下载失败（offset=$offset，$attempt/$DOWNLOAD_MAX_RETRIES）：${e.message}")
-                }
-                if (attempt > DOWNLOAD_MAX_RETRIES) {
-                    AppLog.e("download", "下载重试耗尽，放弃：${item.filename}（offset=$offset/$total）")
-                    return false
-                }
-            }
-            offset >= total
-        } finally {
-            runCatching { out.close() }
-            runCatching { raf.close() }
-        }
-    }
-
-    /** 把 RandomAccessFile 包装成 OutputStream，写入落到其当前文件指针处（用于分块定位写） */
-    private class RafOutputStream(private val raf: RandomAccessFile) : OutputStream() {
-        override fun write(b: Int) = raf.write(b)
-        override fun write(b: ByteArray, off: Int, len: Int) = raf.write(b, off, len)
     }
 
     /** 把下载返回的 Uri 转成人类可读路径：MediaStore 用 RELATIVE_PATH+DISPLAY_NAME，SAF 回退文档 URI */
