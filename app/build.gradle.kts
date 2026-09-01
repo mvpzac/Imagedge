@@ -1,4 +1,6 @@
 // :app 应用模块（Compose UI，PBF 分包：com.imagedge.camera）
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -6,6 +8,20 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+}
+
+// 签名配置：本地 keystore.properties（勿提交）存在时读取，否则 releaseSigningConfig 为 null
+val keystorePropsFile = rootProject.file("keystore.properties")
+val releaseSigningConfig = if (keystorePropsFile.exists()) {
+    val props = Properties().apply { keystorePropsFile.inputStream().use { load(it) } }
+    android.signingConfigs.create("release") {
+        storeFile = rootProject.file(props["storeFile"] as String)
+        storePassword = props["storePassword"] as String
+        keyAlias = props["keyAlias"] as String
+        keyPassword = props["keyPassword"] as String
+    }
+} else {
+    null
 }
 
 android {
@@ -35,6 +51,9 @@ android {
             // 开源项目决策（2026-08-28）：不做混淆/资源收缩，保证反编译可读、便于社区审查与二次开发
             isMinifyEnabled = false
             isShrinkResources = false
+            // 签名：本地存在 keystore.properties 时用正式密钥（该文件已被 .gitignore 排除），
+            // 其余贡献者无此文件时 release 保持未签名，不影响 CI 构建
+            signingConfig = releaseSigningConfig
         }
     }
 

@@ -22,6 +22,11 @@ android {
     buildFeatures {
         buildConfig = false
     }
+
+    lint {
+        // 存量错误入基线（2026-09-01 生成，56 项，Media3 UnstableApi 等移植代码），之后只对新增问题报警
+        baseline = file("lint-baseline.xml")
+    }
 }
 
 dependencies {

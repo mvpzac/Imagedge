@@ -1,0 +1,16 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>Imagedge 应用图标 · 光蚀 v2</title>
+  <desc>极简黑白：圆环线条（光圈）与月蚀色块（流入的光），主题色取自 Color.kt v5.0；v2 环形缩小至 r=23/108</desc>
+  <defs>
+    <clipPath id="mark"><circle cx="256" cy="256" r="109"/></clipPath>
+  </defs>
+  <!-- 背景：Ink 主色（ic_launcher_background） -->
+  <rect width="512" height="512" rx="120" fill="#1A1B1E"/>
+  <!-- 色块：月蚀（InkDark #E8E9EB） -->
+  <g clip-path="url(#mark)">
+    <circle cx="256" cy="256" r="109" fill="#E8E9EB"/>
+    <circle cx="305.1" cy="291.4" r="109" fill="#1A1B1E"/>
+  </g>
+  <!-- 线条：光圈圆环（OnInkLight #FAFAFB） -->
+  <circle cx="256" cy="256" r="109" fill="none" stroke="#FAFAFB" stroke-width="19"/>
+</svg>

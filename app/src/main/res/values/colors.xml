@@ -2,4 +2,7 @@
 <resources>
     <!-- 窗口首帧背景（与主题 BgLight 对齐，避免启动色温闪烁） -->
     <color name="background_default">#F3F4F5</color>
+
+    <!-- 自适应图标背景：主题 Ink 主色（极简黑白体系），与 Color.kt 的 InkLight 一致 -->
+    <color name="ic_launcher_background">#1A1B1E</color>
 </resources>

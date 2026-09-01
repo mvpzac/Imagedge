@@ -1,0 +1,620 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 8.11.2" type="baseline" client="gradle" dependencies="false" name="AGP (8.11.2)" variant="all" version="8.11.2">
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                val transformer = Transformer.Builder(context)"
+        errorLine2="                    ~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="64"
+            column="21"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                val transformer = Transformer.Builder(context)"
+        errorLine2="                                              ~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="64"
+            column="47"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                    .setVideoMimeType(MimeTypes.VIDEO_H264)"
+        errorLine2="                     ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="65"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                    .setAudioMimeType(MimeTypes.AUDIO_AAC)"
+        errorLine2="                     ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="66"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                    .addListener(object : Transformer.Listener {"
+        errorLine2="                     ~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="67"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                        override fun onCompleted("
+        errorLine2="                                     ~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="68"
+            column="38"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                            composition: Composition,"
+        errorLine2="                                         ~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="69"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                            exportResult: ExportResult,"
+        errorLine2="                                          ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="70"
+            column="43"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                        override fun onError("
+        errorLine2="                                     ~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="75"
+            column="38"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                            composition: Composition,"
+        errorLine2="                                         ~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="76"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                            exportResult: ExportResult,"
+        errorLine2="                                          ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="77"
+            column="43"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                            exportException: ExportException,"
+        errorLine2="                                             ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="78"
+            column="46"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                                        &quot;视频拼接失败：${exportException.errorCodeName} ${exportException.message}&quot;,"
+        errorLine2="                                                                  ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="83"
+            column="67"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                    .build()"
+        errorLine2="                     ~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="89"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                    EditedMediaItem.Builder(mediaItem)"
+        errorLine2="                                    ~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="94"
+            column="37"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                        .setRemoveAudio(!segment.audioOn)"
+        errorLine2="                         ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="95"
+            column="26"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                        .setEffects("
+        errorLine2="                         ~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="96"
+            column="26"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                            Effects(emptyList(), listOf(Presentation.createForHeight(1080)))"
+        errorLine2="                            ~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="97"
+            column="29"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                            Effects(emptyList(), listOf(Presentation.createForHeight(1080)))"
+        errorLine2="                                                                     ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="97"
+            column="70"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                        .build()"
+        errorLine2="                         ~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="99"
+            column="26"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                val sequence = EditedMediaItemSequence.Builder(items).build()"
+        errorLine2="                    ~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="101"
+            column="21"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                val sequence = EditedMediaItemSequence.Builder(items).build()"
+        errorLine2="                                                       ~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="101"
+            column="56"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                val sequence = EditedMediaItemSequence.Builder(items).build()"
+        errorLine2="                                                                      ~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="101"
+            column="71"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                val composition = Composition.Builder(sequence).build()"
+        errorLine2="                    ~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="102"
+            column="21"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                val composition = Composition.Builder(sequence).build()"
+        errorLine2="                                              ~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="102"
+            column="47"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                val composition = Composition.Builder(sequence).build()"
+        errorLine2="                                                                ~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="102"
+            column="65"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                        runCatching { transformer.cancel() }"
+        errorLine2="                                                  ~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="106"
+            column="51"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                transformer.start(composition, output.absolutePath)"
+        errorLine2="                            ~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoStitcher.kt"
+            line="111"
+            column="29"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                val builder = Transformer.Builder(context)"
+        errorLine2="                    ~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="96"
+            column="21"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                val builder = Transformer.Builder(context)"
+        errorLine2="                                          ~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="96"
+            column="43"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                    .setVideoMimeType(MimeTypes.VIDEO_H264)"
+        errorLine2="                     ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="97"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                if (audioOn) builder.setAudioMimeType(MimeTypes.AUDIO_AAC)"
+        errorLine2="                                     ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="98"
+            column="38"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                val transformer = builder"
+        errorLine2="                    ~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="99"
+            column="21"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                    .addListener(object : Transformer.Listener {"
+        errorLine2="                     ~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="100"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                        override fun onCompleted("
+        errorLine2="                                     ~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="101"
+            column="38"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                            composition: androidx.media3.transformer.Composition,"
+        errorLine2="                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="102"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                            exportResult: ExportResult,"
+        errorLine2="                                          ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="103"
+            column="43"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                        override fun onError("
+        errorLine2="                                     ~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="108"
+            column="38"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                            composition: androidx.media3.transformer.Composition,"
+        errorLine2="                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="109"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                            exportResult: ExportResult,"
+        errorLine2="                                          ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="110"
+            column="43"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                            exportException: ExportException,"
+        errorLine2="                                             ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="111"
+            column="46"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                                        &quot;视频裁剪失败：${exportException.errorCodeName} ${exportException.message}&quot;,"
+        errorLine2="                                                                  ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="116"
+            column="67"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                    .build()"
+        errorLine2="                     ~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="122"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                        add(androidx.media3.effect.Crop(cropLTRB[0], cropLTRB[1], cropLTRB[2], cropLTRB[3]))"
+        errorLine2="                                                   ~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="137"
+            column="52"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                            Presentation.createForWidthAndHeight(targetW, targetH, Presentation.LAYOUT_SCALE_TO_FIT)"
+        errorLine2="                                         ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="141"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                            Presentation.createForWidthAndHeight(targetW, targetH, Presentation.LAYOUT_SCALE_TO_FIT)"
+        errorLine2="                                                                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="141"
+            column="84"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                            Presentation.createForWidthAndHeight(targetW, targetH, Presentation.LAYOUT_SCALE_TO_FIT)"
+        errorLine2="                                                                                                ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="141"
+            column="97"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                            Presentation.createForShortSide(TARGET_SHORT_SIDE)"
+        errorLine2="                                         ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="143"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                val editedItem = EditedMediaItem.Builder(mediaItem)"
+        errorLine2="                    ~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="147"
+            column="21"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                val editedItem = EditedMediaItem.Builder(mediaItem)"
+        errorLine2="                                                 ~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="147"
+            column="50"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                    .setRemoveAudio(!audioOn)"
+        errorLine2="                     ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="148"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                    .setEffects(Effects(emptyList(), videoEffects))"
+        errorLine2="                     ~~~~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="149"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                    .setEffects(Effects(emptyList(), videoEffects))"
+        errorLine2="                                ~~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="149"
+            column="33"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                    .build()"
+        errorLine2="                     ~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="150"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                        runCatching { transformer.cancel() }"
+        errorLine2="                                                  ~~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="156"
+            column="51"/>
+    </issue>
+
+    <issue
+        id="UnsafeOptInUsageError"
+        message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
+        errorLine1="                transformer.start(editedItem, output.absolutePath)"
+        errorLine2="                            ~~~~~">
+        <location
+            file="src/main/java/com/imagedge/camera/motionphoto/internal/compose/VideoTrimmer.kt"
+            line="162"
+            column="29"/>
+    </issue>
+
+</issues>

@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Changed / 变更（UX 极简黑白改版）
 
+- **New launcher icon「光蚀」**: minimal abstract mark — a light ring (aperture) with an eclipse color block — built strictly from the theme palette (Ink `#1A1B1E` background, `#E8E9EB` block, `#FAFAFB` ring); reimplemented as a vector adaptive icon (solid-color background + drawable foreground, monochrome layer redrawn to match), replacing the full-bleed bitmap; design sources & previews in `design/ic_launcher/`
 - **Minimal black-and-white theme**: light-gray background + near-black primary, dark mode retained; the 6-tier brand color picker and dynamic color extraction are removed — the appearance section now only has the theme mode switch (light / dark / system). Default theme for new installs is light
 - **Soft rounded-corner scale**: 8 / 12 / 16 / 20 / 28 dp + capsules across the whole app; every hard-coded corner, right-angle grid cell and stray `CircleShape` removed
 - **Shared component layer** (`ui/components`): `AppButton` (primary/secondary/text), `IconBadge`, `EntryCard`, `EmptyState`, `ProcessingView`, `ResultMessage`, `StatusBanner`, `StepsGuideCard` — replaces 20+ duplicated style assemblies across album / download / control / edit screens
@@ -15,6 +16,7 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Fixed / 修复（全量代码审查，27 项）
 
+- **Lint**: `:motionphoto` 的 56 项存量错误（Media3 `UnstableApi` 未标注等，移植代码固有）入 lint baseline，与 `:app` 既有约定一致；根任务 `lint` 恢复全绿
 - **Data loss**: a resume-download that finished but failed to commit to the gallery no longer reports success and deletes the temp file — the task is marked failed and retryable
 - **LUT editor concurrency**: non-cancellable filter jobs were trampling shared pixel buffers; processing is now serialised with a `Mutex`, state writes are atomic (`update {}`), and exporting re-renders at full resolution while the interactive preview runs at ~640 px
 - **Motion Photo packaging**: MPF entry size now includes the MPF segment, UltraHDR XMP merge targets the correct segment, top-level JPEG EOI is located by marker structure instead of a raw `FFD9` scan, large MOVs are rewritten with bounded memory, temp directories are cleaned up, and the OPlus timestamp follows the user-selected cover

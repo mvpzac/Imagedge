@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    自适应图标前景「光蚀」：圆环线条（光圈）+ 月蚀色块（流入的光）。
+    视口 108dp，标记全部收敛在中心安全圆（r=33dp）内，任何蒙版裁切无风险。
+    颜色取自 ui/theme/Color.kt：底色由 ic_launcher_background 提供（Ink #1A1B1E），
+    色块 InkDark #E8E9EB，线条 OnInkLight #FAFAFB。
+    v2：环形与色块等比缩小至 r=23（占安全区 70%），负空间更大、远观更轻。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M 72.11,39.82 A 23,23 0 1,0 46.24,75.65 A 23,23 0 0,1 72.11,39.82 Z"
+        android:fillColor="#E8E9EB" />
+    <path
+        android:pathData="M 31,54 a 23,23 0 1,0 46,0 a 23,23 0 1,0 -46,0"
+        android:strokeColor="#FAFAFB"
+        android:strokeWidth="4"
+        android:fillColor="#00000000" />
+</vector>
