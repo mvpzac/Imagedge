@@ -101,6 +101,8 @@ class AlbumViewModel @Inject constructor(
     fun enter(mode: BrowseMode) {
         if (_browseMode.value == mode && _items.value.isNotEmpty()) return
         _browseMode.value = mode
+        // 重新进入（或切换通道）时重置整卡补全校验计数，让本次会话重新获得补全机会
+        fullCardVerifyCount = 0
         _thumbnails.value = emptyMap()
         // 跨页面共享的缩略图缓存一并清空：否则整卡↔选片集来回切换时，
         // 两个模式的缩略图会一直堆积在单例缓存里（这正是 OOM 的来源）
@@ -217,22 +219,48 @@ class AlbumViewModel @Inject constructor(
     }
 
     /**
+     * 整卡模式下已执行的「补全校验」次数。
+     *
+     * 整卡（ContentsTransfer）首次枚举时相机 SD 卡索引往往尚未就绪，GetObjectHandles
+     * 会先返回一小部分（甚至为空），要过一段时间才逐步给全。原先整卡是「一次性快照、
+     * 不轮询」，拿到残缺列表后永远不自愈，用户只能反复手动点重试（真机反馈）。
+     * 改为进入整卡后做有限次静默补全校验，次数用尽即恢复快照语义，
+     * 避免持续全量扫描拖垮 PTP 通道。
+     */
+    private var fullCardVerifyCount = 0
+
+    /** 整卡补全校验次数上限与间隔（间隔更长：整卡枚举代价远高于选片集） */
+    private val FULL_CARD_MAX_VERIFY = 4
+    private val FULL_CARD_VERIFY_INTERVAL_MS = 8_000L
+
+    /**
      * 相册页轮询（相机端选片驱动：用户在相机上选择照片后自动显示，与 Creators' App 交互一致）。
      * 静默刷新：不触发 loading 状态，内容无变化时不更新列表（避免网格闪烁）。
      * 由 UI 层 repeatOnLifecycle(STARTED) 驱动：退后台自动取消，回前台自动恢复
      * （金标功耗标准 4.2：后台禁止非必要的持续网络活动）。
+     *
+     * 整卡模式节奏不同：间隔更长，且只做有限次补全校验（见 [fullCardVerifyCount]）。
      */
     suspend fun pollLoop() {
         while (currentCoroutineContext().isActive) {
-            delay(4_000L)
+            val fullCard = _browseMode.value == BrowseMode.FULL_CARD
+            // 整卡：校验次数用尽即停止轮询（回到一次性快照语义）
+            if (fullCard && fullCardVerifyCount >= FULL_CARD_MAX_VERIFY) return
+            delay(if (fullCard) FULL_CARD_VERIFY_INTERVAL_MS else 4_000L)
             if (silentRefreshing) continue
             silentRefresh()
         }
     }
 
-    /** 单次静默刷新（轮询节拍与内容事件共用；异常静默，不打断用户；整卡模式为快照不轮询） */
+    /** 单次静默刷新（轮询节拍与内容事件共用；异常静默，不打断用户） */
     private suspend fun silentRefresh() {
-        if (_browseMode.value != BrowseMode.SELECTION) return
+        val fullCard = _browseMode.value == BrowseMode.FULL_CARD
+        if (fullCard) {
+            // 整卡：下载进行中不校验（全量枚举与下载争抢 PTP 通道，两者都变慢）
+            if (hasActiveDownload.value) return
+            if (fullCardVerifyCount >= FULL_CARD_MAX_VERIFY) return
+            fullCardVerifyCount++
+        }
         silentRefreshing = true
         try {
             if (repository.isConnected) {

@@ -374,8 +374,16 @@ class PtpChannel @Inject constructor() : CameraChannel {
     }
 
     private suspend fun scanMedia(c: PtpIpClient): List<MediaItem> {
-        // 静默期：不枚举（相机正在写卡，避免 PTP 命令干扰）
-        if (isSilenced()) return emptyList()
+        // 静默期（相机正在写卡）：**等待**其结束再枚举，而不是直接返回空列表。
+        // 直接返回空会让整卡页显示「没有照片」，而整卡是快照语义、不会自动补全，
+        // 用户只能反复手动点重试（真机反馈：进整卡经常要重试好几次才出图）。
+        if (isSilenced()) {
+            val remaining = silenceUntil - System.currentTimeMillis()
+            if (remaining > 0) {
+                AppLog.i(TAG, "扫描命中 PTP 静默期（相机写卡中），等待 ${remaining}ms 后继续枚举")
+                delay(remaining)
+            }
+        }
         try {
             val items = mutableListOf<MediaItem>()
             // 获取真实存储 ID（ContentsTransfer 模式下为 0x10001 等，非硬编码 0xF10001）
@@ -388,10 +396,15 @@ class PtpChannel @Inject constructor() : CameraChannel {
             // 枚举所有存储的句柄（CokeeZVE：GetObjectHandles(storageId, 0, 0)）
             var handles = enumerateAll(c, storageIds)
             var retry = 0
-            while (handles.isEmpty() && retry < 2) {
+            // 刚切到整卡（ContentsTransfer）时相机的 SD 卡索引可能仍在建立，
+            // 首次 GetObjectHandles 常返回空。原先只重试 2 次（2s / 4s），等待窗口
+            // 偏短，索引慢的相机会一直空着；放宽为 3 次（2s / 3s / 5s，合计约 10s）。
+            val emptyRetryDelays = longArrayOf(2_000L, 3_000L, 5_000L)
+            while (handles.isEmpty() && retry < emptyRetryDelays.size) {
+                val wait = emptyRetryDelays[retry]
                 retry++
-                AppLog.w(TAG, "内容集为空，${retry * 2}s 后重试 $retry/2")
-                delay(2000L * retry)
+                AppLog.w(TAG, "内容集为空，${wait}ms 后重试 $retry/${emptyRetryDelays.size}")
+                delay(wait)
                 storageIds = ptpCall { c.getStorageIds() }.ifEmpty { storageIds }
                 handles = enumerateAll(c, storageIds)
             }

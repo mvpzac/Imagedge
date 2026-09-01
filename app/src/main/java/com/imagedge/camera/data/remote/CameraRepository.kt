@@ -173,9 +173,22 @@ class CameraRepository @Inject constructor(
     /** 延迟退出整卡的挂起任务（新的显式切换会取消它） */
     private var pendingFullCardExit: kotlinx.coroutines.Job? = null
 
+    /** 是否已登记「退出整卡」请求（等待下载空闲期间为真） */
+    @Volatile
+    var fullCardExitRequested: Boolean = false
+        private set
+
+    /** 退出整卡前轮询等待下载空闲的节拍 */
+    private val FULL_CARD_EXIT_POLL_MS = 2_000L
+
+    /** 等待下载队列空闲的上限（超时兜底：避免用户长时间挂起导致整卡模式迟迟不退） */
+    private val FULL_CARD_EXIT_WAIT_TIMEOUT_MS = 10 * 60 * 1000L
+
     suspend fun switchFunctionMode(mode: Int): Boolean {
         pendingFullCardExit?.cancel()
         pendingFullCardExit = null
+        // 显式切换（含重新进入整卡）即撤销待处理的退出请求
+        fullCardExitRequested = false
         val ok = withContext(Dispatchers.IO) {
             ptpChannel.switchFunctionMode(mode)
         }
@@ -184,15 +197,37 @@ class CameraRepository @Inject constructor(
     }
 
     /**
-     * 延迟退出整卡读取（相册页在整卡模式下直接返回时调用）。
+     * 延迟退出整卡读取（相册页在整卡模式下离开时调用）。
      * 给相机 5 秒完成当前操作后再切回选片集模式；期间用户重新进入相册
      * 或显式切换模式会取消本任务（switchFunctionMode 入口统一取消）。
+     *
+     * **必须等下载队列空闲后再切换**（真机 P0）：
+     * [switchFunctionMode] 会断开并重连 PTP 会话，会话重建后原内容集的对象句柄
+     * 全部失效——相机对分块下载回 `0x2009（无效对象句柄）`，正在进行的下载瞬间
+     * 失败且无法续传（用户感知：「刚开始下载，相机就退出整卡模式，任务全部失败」）。
+     * 与 [setDownloadActive] 的活跃状态联动：队列一空闲就继续退出流程，
+     * 无需用户回到整卡页。
      */
     fun exitFullCardDelayed(delayMs: Long = 5_000) {
         if (currentFunctionMode != 1) return
+        fullCardExitRequested = true
         pendingFullCardExit?.cancel()
         pendingFullCardExit = repoScope.launch {
             kotlinx.coroutines.delay(delayMs)
+            // 下载进行中：等待队列空闲（PTP 会话切换会让所有进行中的对象句柄失效）
+            var waited = 0L
+            while (downloadActive && waited < FULL_CARD_EXIT_WAIT_TIMEOUT_MS) {
+                if (waited == 0L) {
+                    AppLog.i(TAG, "整卡退出已挂起：等待下载队列空闲后再切回选片集")
+                }
+                kotlinx.coroutines.delay(FULL_CARD_EXIT_POLL_MS)
+                waited += FULL_CARD_EXIT_POLL_MS
+            }
+            if (waited >= FULL_CARD_EXIT_WAIT_TIMEOUT_MS) {
+                AppLog.w(TAG, "等待下载空闲超时（${FULL_CARD_EXIT_WAIT_TIMEOUT_MS}ms），强制退出整卡模式")
+            } else if (waited > 0) {
+                AppLog.i(TAG, "下载队列已空闲（等待 ${waited}ms），继续退出整卡模式")
+            }
             if (currentFunctionMode == 1) {
                 // 先清引用：否则下方 switchFunctionMode 会 cancel 掉当前任务自己，
                 // 导致 withContext 在挂起点被取消、切换失败（整卡返回未切回的根因）
@@ -201,6 +236,7 @@ class CameraRepository @Inject constructor(
                     .onSuccess { AppLog.i("album", "整卡模式已延迟退出（切回选片集）") }
                     .onFailure { AppLog.w("album", "延迟退出整卡失败：${it.message}") }
             }
+            fullCardExitRequested = false
         }
     }
 
