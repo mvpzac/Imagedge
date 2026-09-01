@@ -38,6 +38,16 @@ class DownloadViewModel @Inject constructor(
         downloadManager.clearFinished()
     }
 
+    /** 取消单个任务（排队中或下载中） */
+    fun cancel(task: DownloadTask) {
+        downloadManager.cancel(task.id)
+    }
+
+    /** 取消全部进行中的任务（排队中 + 下载中） */
+    fun cancelAllActive() {
+        downloadManager.cancelAllActive()
+    }
+
     fun clearHistory() {
         viewModelScope.launch { historyDao.clearAll() }
     }

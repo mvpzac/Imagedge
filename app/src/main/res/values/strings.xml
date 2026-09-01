@@ -171,6 +171,8 @@
     <!-- 下载队列 -->
     <string name="download_title">下载</string>
     <string name="download_clear">清空</string>
+    <string name="download_cancel">取消任务</string>
+    <string name="download_cancel_all">全部取消</string>
     <string name="download_empty">没有下载任务</string>
     <string name="download_empty_desc">在相册里长按选择照片后点「下载」，任务会出现在这里</string>
     <string name="download_empty_action">去相册选片</string>

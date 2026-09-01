@@ -18,6 +18,7 @@ import com.imagedge.camera.data.remote.ChannelType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -29,6 +30,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -65,6 +68,18 @@ class DownloadManager @Inject constructor(
     /** 下载队列（串行消费） */
     private val queue = Channel<MediaItem>(Channel.UNLIMITED)
 
+    /**
+     * 用户已取消、但尚未被消费循环回收的任务 ID。
+     *
+     * Channel 无法移除已入队的单项，只能在消费时过滤；排队中的任务靠此集合跳过。
+     * 下载中的任务也先进这里，供 [download] 的 finally 判断「是取消还是失败」。
+     */
+    private val cancelledIds = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+
+    /** 当前正在下载的任务协程（用户手动取消时用） */
+    @Volatile
+    private var currentDownloadJob: Job? = null
+
     private val _tasks = MutableStateFlow<List<DownloadTask>>(emptyList())
     val tasks: StateFlow<List<DownloadTask>> = _tasks.asStateFlow()
 
@@ -84,7 +99,18 @@ class DownloadManager @Inject constructor(
         scope.launch {
             restorePendingTasks()
             for (item in queue) {
-                download(item)
+                // 排队期间被用户取消：跳过本次下载（Channel 内已入队的项无法移除）
+                if (cancelledIds.contains(item.thumbKey)) {
+                    cancelledIds.remove(item.thumbKey)
+                    AppLog.i("download", "任务已取消，跳过：${item.filename}")
+                    continue
+                }
+                // 用可取消的子协程承载单次下载，用户取消时只中断这一个任务，
+                // 不影响队列消费循环（download 内部会吞掉 CancellationException）
+                val job = scope.launch { download(item) }
+                currentDownloadJob = job
+                job.join()
+                if (currentDownloadJob === job) currentDownloadJob = null
             }
         }
     }
@@ -206,6 +232,48 @@ class DownloadManager @Inject constructor(
     }
 
     /**
+     * 取消任务（用户手动关闭）。
+     *
+     * 原先只有 [clearFinished]（清已完成/失败），排队中与下载中的任务**无法关闭**——
+     * 遇到「相机已断开、任务一直转圈」时用户只能杀进程（真机反馈）。
+     *
+     * - 排队中：标记后由队列消费循环跳过（Channel 内已入队的项无法移除，只能消费时过滤）
+     * - 下载中：取消该任务的协程；[download] 的 finally 负责清理临时文件与 Room 记录。
+     *   注意 PTP 的 socket 读不响应取消，实际中断会等到当前事务超时（≤30s）才生效，
+     *   UI 侧会立即移除任务，不等它。
+     *
+     * 取消的任务不写入传输历史（它不是一次失败的传输）。
+     */
+    fun cancel(taskId: String) {
+        val task = _tasks.value.firstOrNull { it.id == taskId } ?: return
+        if (!task.state.isActive) return
+        when (task.state) {
+            DownloadState.QUEUED -> {
+                cancelledIds.add(taskId)
+                _tasks.update { list -> list.filterNot { it.id == taskId } }
+                scope.launch { runCatching { taskDao.delete(taskId) } }
+                AppLog.i("download", "已取消排队任务：${task.filename}")
+            }
+            DownloadState.DOWNLOADING -> {
+                // 先标记：download() 的 finally 据此判断是取消还是失败
+                cancelledIds.add(taskId)
+                _tasks.update { list -> list.filterNot { it.id == taskId } }
+                currentDownloadJob?.cancel()
+                scope.launch { runCatching { taskDao.delete(taskId) } }
+                AppLog.i("download", "已取消下载中任务：${task.filename}")
+            }
+            else -> Unit
+        }
+    }
+
+    /** 取消全部进行中的任务（排队中 + 下载中） */
+    fun cancelAllActive() {
+        val ids = _tasks.value.filter { it.state.isActive }.map { it.id }
+        for (id in ids) cancel(id)
+        if (ids.isNotEmpty()) AppLog.i("download", "已取消全部进行中任务：${ids.size} 个")
+    }
+
+    /**
      * 启动下载前台服务（保活 + 通知进度；队列空闲时服务自动停止）。
      *
      * Android 12+ 从后台启动前台服务会抛 `ForegroundServiceStartNotAllowedException`，
@@ -265,24 +333,35 @@ class DownloadManager @Inject constructor(
                 )
             }
         } catch (e: Exception) {
-            updateTask(taskId) { it.copy(state = DownloadState.FAILED, errorMessage = e.message ?: "下载失败") }
+            // 用户取消：任务已从列表移除，不再标失败。
+            // 这里必须吞掉 CancellationException——否则它会经 job.join() 抛给队列
+            // 消费循环，导致后续所有任务都不再出队（整个下载队列停摆）。
+            if (e is kotlinx.coroutines.CancellationException) {
+                AppLog.i("download", "下载已取消：${item.filename}")
+            } else {
+                updateTask(taskId) { it.copy(state = DownloadState.FAILED, errorMessage = e.message ?: "下载失败") }
+            }
         } finally {
-            // 完成/失败后从 Room 移除（持久化只存排队中的任务）
+            val cancelled = cancelledIds.remove(taskId)
+            // 完成/失败/取消后都从 Room 移除（持久化只存排队中的任务）
             runCatching { taskDao.delete(taskId) }
             runCatching { tempFile.delete() }
-            // 追加传输记录（成功或失败都记，供「传输记录」页长按查看详情）
-            runCatching {
-                historyDao.insert(
-                    DownloadHistoryEntity(
-                        filename = item.filename,
-                        savedPath = uriToReadablePath(savedUri),
-                        startTime = startTime,
-                        endTime = System.currentTimeMillis(),
-                        cameraModel = cameraModel,
-                        sizeBytes = item.sizeBytes,
-                        success = success
+            // 追加传输记录（成功或失败都记，供「传输记录」页长按查看详情）；
+            // 用户主动取消不算一次传输，不记
+            if (!cancelled) {
+                runCatching {
+                    historyDao.insert(
+                        DownloadHistoryEntity(
+                            filename = item.filename,
+                            savedPath = uriToReadablePath(savedUri),
+                            startTime = startTime,
+                            endTime = System.currentTimeMillis(),
+                            cameraModel = cameraModel,
+                            sizeBytes = item.sizeBytes,
+                            success = success
+                        )
                     )
-                )
+                }
             }
         }
     }

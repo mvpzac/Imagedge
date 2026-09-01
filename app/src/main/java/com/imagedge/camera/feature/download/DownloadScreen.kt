@@ -49,6 +49,7 @@ import com.imagedge.camera.R
 import com.imagedge.camera.ui.theme.Radius
 import com.imagedge.camera.data.model.DownloadState
 import com.imagedge.camera.data.model.DownloadTask
+import com.imagedge.camera.data.model.isActive
 import com.imagedge.camera.data.transfer.DownloadHistoryEntity
 import com.imagedge.camera.ui.components.EmptyState
 import com.imagedge.camera.ui.components.Lucide
@@ -85,6 +86,8 @@ fun DownloadScreen(
     var detail by remember { mutableStateOf<DownloadHistoryEntity?>(null) }
 
     val hasFinished = tasks.any { it.state == DownloadState.DONE || it.state == DownloadState.FAILED }
+    // 有进行中（排队/下载中）任务时提供「全部取消」：断链时不必逐个取消或杀进程
+    val hasActive = tasks.any { it.state.isActive }
 
     Scaffold(
         topBar = {
@@ -93,6 +96,11 @@ fun DownloadScreen(
                 onBack = onBack,
                 actions = {
                     if (tab == 0) {
+                        if (hasActive) {
+                            TextButton(onClick = { viewModel.cancelAllActive() }) {
+                                Text(stringResource(R.string.download_cancel_all))
+                            }
+                        }
                         if (hasFinished) {
                             TextButton(onClick = { viewModel.clearFinished() }) {
                                 Text(stringResource(R.string.download_clear))
@@ -149,7 +157,7 @@ fun DownloadScreen(
                 } else {
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(tasks, key = { it.id }) { task ->
-                            DownloadTaskRow(task)
+                            DownloadTaskRow(task, onCancel = { viewModel.cancel(it) })
                         }
                     }
                 }
@@ -184,9 +192,10 @@ fun DownloadScreen(
 
 /**
  * 单个下载任务行
+ * @param onCancel 取消该任务（仅进行中的任务会显示取消按钮）
  */
 @Composable
-private fun DownloadTaskRow(task: DownloadTask) {
+private fun DownloadTaskRow(task: DownloadTask, onCancel: (DownloadTask) -> Unit = {}) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -253,6 +262,22 @@ private fun DownloadTaskRow(task: DownloadTask) {
                 else -> MaterialTheme.colorScheme.onSurfaceVariant
             }
         )
+
+        // 取消按钮：仅进行中（排队/下载中）可关闭。
+        // 原先只能等它跑完或杀进程——相机断链时任务会一直卡在「下载中」，
+        // 用户没有任何办法把它从队列里拿掉（真机反馈）。
+        if (task.state.isActive) {
+            androidx.compose.material3.IconButton(
+                onClick = { onCancel(task) },
+                modifier = Modifier.size(32.dp)
+            ) {
+                LucideIcon(
+                    lucide = Lucide.X,
+                    contentDescription = stringResource(R.string.download_cancel),
+                    size = 16.dp
+                )
+            }
+        }
     }
 }
 
