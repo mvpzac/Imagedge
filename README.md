@@ -31,7 +31,6 @@ A third-party, open-source Android app for wireless transfer and remote control 
 **Transfer (Wi-Fi)**
 - **Selection-driven album** — pick photos on the camera, they appear on the phone automatically (event-driven instant refresh + 4 s polling fallback)
 - Thumbnail grid, fullscreen photo viewer with paging, batch download with a serial queue
-- Resumable chunked download (512 KiB blocks, exponential backoff, up to 5 retries per block)
 - **RAW (ARW)** — embedded full-size JPEG preview extracted on-device for instant large view
 - Downloads land in the system gallery (`DCIM/Imagedge/` by default) or any user-picked SAF directory, registered in MediaStore
 
