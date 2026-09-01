@@ -27,3 +27,6 @@ github-upload/
 
 # 头脑风暴视觉稿（本地工具数据，勿提交）
 .superpowers/
+
+# AI 规划文档（本地工具数据，勿提交）
+docs/superpowers/
