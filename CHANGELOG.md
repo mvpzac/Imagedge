@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.1.9] - 2026-09-01
+
+### Changed / 变更
+
+- **整卡照片按最新优先加载**：对象句柄枚举改为倒序，进入整卡后先显示最近拍的照片、老照片逐批补上，不再先灌满整屏老照片、最新的迟迟不出来（显示顺序仍按拍摄时间倒序排列）
+
 ## [0.1.8] - 2026-09-01
 
 ### Changed / 变更（下载回归稳定路径）
