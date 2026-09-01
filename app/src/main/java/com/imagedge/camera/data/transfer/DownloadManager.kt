@@ -14,6 +14,7 @@ import com.imagedge.camera.data.model.MediaItem
 import com.imagedge.camera.data.model.MediaSessionCache
 import com.imagedge.camera.data.model.isActive
 import com.imagedge.camera.data.remote.CameraRepository
+import com.imagedge.camera.data.remote.ChannelConnectionState
 import com.imagedge.camera.data.remote.ChannelType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -293,6 +294,19 @@ class DownloadManager @Inject constructor(
         val startTime = System.currentTimeMillis()
         val cameraModel = repository.deviceModel
         updateTask(taskId) { it.copy(state = DownloadState.DOWNLOADING, progress = 0) }
+        // 连接已断开（PTP 会话重建或超时自愈后句柄已失效）：直接失败。
+        // 否则任务会走完 6 次分块重试（退避合计近 1 分钟）才报错，
+        // 而每一次请求都注定拿到 0x2009（无效对象句柄）。
+        if (isCameraDisconnected()) {
+            AppLog.w("download", "相机连接已断开，跳过下载：${item.filename}")
+            updateTask(taskId) {
+                it.copy(
+                    state = DownloadState.FAILED,
+                    errorMessage = "相机连接已断开，请重新连接后再下载"
+                )
+            }
+            return
+        }
         var savedUri: Uri? = null
         var success = false
         // 临时文件：分块随机写落盘，完成后一次性提交到相册
@@ -367,6 +381,20 @@ class DownloadManager @Inject constructor(
     }
 
     /**
+     * 相机连接是否已断开（**仅 PTP 通道可信**）。
+     *
+     * PTP 事务超时自愈（forceClose）或保活失败都会把连接状态置为 DISCONNECTED，
+     * 而此时会话中的对象句柄已全部失效——继续下载只会拿到 0x2009。
+     *
+     * 注意 UPnP 通道没有状态跟踪，`connectionState` 恒为 DISCONNECTED，
+     * 不排除它的话会把 UPnP 通道下的所有下载误判为断连。
+     */
+    private fun isCameraDisconnected(): Boolean {
+        if (repository.currentChannelType != ChannelType.PTP_IP) return false
+        return repository.connectionState.value == ChannelConnectionState.DISCONNECTED
+    }
+
+    /**
      * 断点续传核心：把 [item] 分块下载到 [tempFile]，网络中断时从已写字节处续传。
      * 每块 GET_PARTIAL_OBJECT 请求自带 offset，写盘用 RandomAccessFile 定位到 offset，
      * 因此即使某块中途失败，已落盘字节不丢失；失败后指数退避重试（最多 [DOWNLOAD_MAX_RETRIES] 次）。
@@ -384,6 +412,16 @@ class DownloadManager @Inject constructor(
             var offset = raf.length().coerceAtMost(total)
             var attempt = 0
             while (offset < total) {
+                // 连接已断开：对象句柄随会话一起失效（相机回 0x2009），
+                // 再重试只是空转——退避最长 15s × 6 次 ≈ 一分钟后才报错，
+                // 用户只能干等。这里立即失败并给出可行动的原因。
+                if (isCameraDisconnected()) {
+                    AppLog.w("download", "相机连接已断开，放弃重试：${item.filename}")
+                    updateTask(item.thumbKey) {
+                        it.copy(errorMessage = "相机连接已断开，请重新连接后再下载")
+                    }
+                    return false
+                }
                 if (attempt > 0) {
                     // 指数退避：1s → 2s → 4s → 8s → 15s（封顶），给相机/网络恢复时间
                     val backoff = (DOWNLOAD_BACKOFF_BASE_MS shl (attempt - 1)).coerceAtMost(DOWNLOAD_BACKOFF_MAX_MS)
