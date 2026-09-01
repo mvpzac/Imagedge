@@ -162,6 +162,18 @@ class CameraRepository @Inject constructor(
     }
 
     /**
+     * 增量浏览全部媒体：分批回调，边扫描边返回。
+     *
+     * 整卡模式下一性枚举上千对象会长时间占用 PTP 通道、且首屏空白数分钟；
+     * 相册页据此边收到边渲染。回调在 IO 线程执行，更新 StateFlow 是线程安全的。
+     *
+     * @return 返回的总条数
+     */
+    suspend fun listMediaIncremental(onBatch: suspend (List<MediaItem>) -> Unit): Int {
+        return activeChannel?.listMediaIncremental(onBatch) ?: 0
+    }
+
+    /**
      * 切换功能模式并重连 PTP：0=RemoteControl（选片集），1=ContentsTransfer（整卡）。
      * @return 是否成功（未连接/同模式返回 false）
      */

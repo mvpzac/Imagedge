@@ -26,6 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
+import java.util.Date
 import javax.inject.Inject
 
 /** 相册浏览模式：选片集（PTP 内容集） / 整卡（UPnP 整张 SD 卡） */
@@ -181,7 +182,18 @@ class AlbumViewModel @Inject constructor(
                         }
                         return@withLock
                     }
-                    _items.value = repository.listMedia().also { sessionCache.update(it) }
+                    // 增量扫描：边枚举边渲染。整卡上千对象时，一次性枚举会让首屏
+                    // 空白数分钟；改为每批回调就更新列表，首批（约 20 张）到达即切到网格。
+                    val acc = mutableListOf<MediaItem>()
+                    repository.listMediaIncremental { batch ->
+                        acc.addAll(batch)
+                        _items.value = acc.sortedByDescending { it.captureDate ?: Date(0) }
+                        sessionCache.update(_items.value)
+                        // 首批到达即结束骨架屏，让网格立刻显示已有内容
+                        if (_loading.value) _loading.value = false
+                    }
+                    // 空整卡兜底：什么都没回调到时也结束骨架屏，走到空态
+                    if (acc.isEmpty()) _loading.value = false
                 }
             } catch (e: Exception) {
                 AppLog.e("album", "加载媒体失败：${e::class.simpleName}: ${e.message}")
@@ -256,8 +268,6 @@ class AlbumViewModel @Inject constructor(
     private suspend fun silentRefresh() {
         val fullCard = _browseMode.value == BrowseMode.FULL_CARD
         if (fullCard) {
-            // 整卡：下载进行中不校验（全量枚举与下载争抢 PTP 通道，两者都变慢）
-            if (hasActiveDownload.value) return
             if (fullCardVerifyCount >= FULL_CARD_MAX_VERIFY) return
             // 只在列表为空时补全。
             // 整卡全量枚举代价极高（上千对象、分批持锁），每一次重扫都在与下载争抢
@@ -267,6 +277,10 @@ class AlbumViewModel @Inject constructor(
             if (_items.value.isNotEmpty()) return
             fullCardVerifyCount++
         }
+        // 下载进行中：任何模式都不做轮询扫描。
+        // 扫描会与下载争抢 PTP 通道（整卡尤其昂贵），触发事务超时自愈后连接断开、
+        // 句柄失效，正在传的任务会全部以 0x2009 失败。下载结束会自动恢复轮询。
+        if (hasActiveDownload.value) return
         silentRefreshing = true
         try {
             if (repository.isConnected) {

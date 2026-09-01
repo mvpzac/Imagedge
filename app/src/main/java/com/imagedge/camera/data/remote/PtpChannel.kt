@@ -57,6 +57,16 @@ private const val SCAN_BATCH_SIZE = 20
 private const val DOWNLOAD_TIMEOUT_MS = 600_000L
 
 /**
+ * 对象枚举超时（用于整卡的 GetObjectHandles）。
+ *
+ * 整卡（ContentsTransfer）下相机要遍历整张 SD 卡建立索引，上千对象时单次调用
+ * 就可能超过默认的 30s；用默认超时会被判成「相机忙」并触发 forceClose 自愈——
+ * 连接一断，刚枚举到的句柄全部作废，之后的下载统统返回 0x2009。
+ * 这里给足余量，让慢的枚举也能完整跑完。
+ */
+private const val ENUMERATE_TIMEOUT_MS = 120_000L
+
+/**
  * 索尼「内容传输虚拟存储」：GetStorageIDs 返回的 15794177 = 0xF10001 即此虚拟存储
  * （参考 Sony-ZV-E10-RX 实现）。相机端选片集合挂在它下面。
  * 注意：枚举的 association 参数必须用 0x0（全枚举）——参考实现硬编码的 0x10 是
@@ -316,6 +326,17 @@ class PtpChannel @Inject constructor() : CameraChannel {
     }
 
     /**
+     * 是否为「等锁超时」——即通道正被别的长事务（整卡枚举 / 大文件下载）占用，
+     * 而非连接本身出了问题。
+     *
+     * [ptpCall] 超时时统一抛 `IOException("PTP 事务超时（相机可能正在忙）")`，
+     * 即使是 `selfHeal = false` 的调用方（如保活）拿到的也是这个类型，
+     * 因此按消息区分：超时视为「忙」，其余 IO 异常才视为真断连。
+     */
+    private fun isBusyTimeout(e: Throwable): Boolean =
+        e is IOException && e.message?.contains("PTP 事务超时") == true
+
+    /**
      * PTP 会话保活：相机 ~30s 无活动会主动断开连接（实测多次）。
      * 每 10s 发一次 GetDeviceInfo 复位相机的闲置计时器；失败即停止（下次连接重建）。
      * keepAlivePaused=true 时暂停 ping（App 退后台且无活跃下载时由 CameraRepository 置位，
@@ -340,9 +361,16 @@ class PtpChannel @Inject constructor() : CameraChannel {
                 }
                 // 保活不得触发 forceClose：它等的是别的业务持有的锁，超时只说明「通道正忙」，
                 // 不代表通道已死。原先这里会强关 socket，把进行中的下载/扫描一起杀掉。
-                runCatching { ptpCall(selfHeal = false) { newClient.getDeviceInfo() } }.onFailure {
+                runCatching { ptpCall(selfHeal = false) { newClient.getDeviceInfo() } }.onFailure { e ->
+                    // 等待锁超时 ≠ 连接断开。整卡枚举这类长事务会独占通道数十秒，
+                    // 保活等不到锁就会超时；此时若判为断连并停掉保活协程，相机在
+                    // 30s 无活动后会真的把我们踢掉——于是「扫描越久越容易断线」。
+                    if (isBusyTimeout(e)) {
+                        AppLog.d(TAG, "保活本轮跳过（通道正忙，等锁超时）：${e.message}")
+                        return@onFailure
+                    }
                     if (!failureLogged) {
-                        AppLog.w(TAG, "PTP 保活失败（相机可能已断开，停止保活）：${it.message}")
+                        AppLog.w(TAG, "PTP 保活失败（相机可能已断开，停止保活）：${e.message}")
                         failureLogged = true
                     }
                     _connectionState.value = ChannelConnectionState.DISCONNECTED
@@ -353,10 +381,22 @@ class PtpChannel @Inject constructor() : CameraChannel {
     }
 
     override suspend fun listMedia(): List<MediaItem> = withContext(Dispatchers.IO) {
+        val acc = mutableListOf<MediaItem>()
+        listMediaIncremental { batch -> acc.addAll(batch) }
+        acc.sortedByDescending { it.captureDate ?: Date(0) }
+    }
+
+    override suspend fun listMediaIncremental(
+        onBatch: suspend (List<MediaItem>) -> Unit
+    ): Int = withContext(Dispatchers.IO) {
         val c = client ?: throw IllegalStateException("未连接相机")
         try {
-            scanMedia(c)
+            scanMedia(c, onBatch)
         } catch (e: Exception) {
+            // 只是等锁超时（通道正被长事务占用）：**不要重连**。
+            // 重建会话会让已枚举的对象句柄全部失效，正在下载的任务随即 0x2009；
+            // 而通道忙是暂时状态，直接抛出让上层稍后重试即可。
+            if (isBusyTimeout(e)) throw e
             // 连接类异常（相机第二次发送时重置会话/内容库、或事务超时已 forceClose）
             // → 自动重连一次再扫描：用户无需手动重连，新照片下一轮轮询即可出现
             val recoverable = e is IOException || e is PtpResponseException
@@ -369,11 +409,14 @@ class PtpChannel @Inject constructor() : CameraChannel {
                     throw e
                 }
             AppLog.i(TAG, "自动重连成功（${deviceModel}），重新扫描")
-            scanMedia(client ?: throw e)
+            scanMedia(client ?: throw e, onBatch)
         }
     }
 
-    private suspend fun scanMedia(c: PtpIpClient): List<MediaItem> {
+    private suspend fun scanMedia(
+        c: PtpIpClient,
+        onBatch: suspend (List<MediaItem>) -> Unit
+    ): Int {
         // 静默期（相机正在写卡）：**等待**其结束再枚举，而不是直接返回空列表。
         // 直接返回空会让整卡页显示「没有照片」，而整卡是快照语义、不会自动补全，
         // 用户只能反复手动点重试（真机反馈：进整卡经常要重试好几次才出图）。
@@ -384,10 +427,12 @@ class PtpChannel @Inject constructor() : CameraChannel {
                 delay(remaining)
             }
         }
+        // 扫描全程 selfHeal = false：扫描是**只读**操作，超时了重试即可，
+        // 不需要杀掉连接。而 forceClose 的代价极高——连接一断，会话里的对象句柄
+        // 全部失效，之后每个下载都回 0x2009（正是「所有图片下载失败」的来源）。
         try {
-            val items = mutableListOf<MediaItem>()
             // 获取真实存储 ID（ContentsTransfer 模式下为 0x10001 等，非硬编码 0xF10001）
-            var storageIds = ptpCall { c.getStorageIds() }
+            var storageIds = ptpCall(selfHeal = false) { c.getStorageIds() }
             AppLog.i(TAG, "GetStorageIDs = [${storageIds.joinToString { "0x${it.toString(16)}" }}]")
             if (storageIds.isEmpty()) {
                 AppLog.w(TAG, "存储列表为空，回退硬编码 0xF10001")
@@ -405,7 +450,7 @@ class PtpChannel @Inject constructor() : CameraChannel {
                 retry++
                 AppLog.w(TAG, "内容集为空，${wait}ms 后重试 $retry/${emptyRetryDelays.size}")
                 delay(wait)
-                storageIds = ptpCall { c.getStorageIds() }.ifEmpty { storageIds }
+                storageIds = ptpCall(selfHeal = false) { c.getStorageIds() }.ifEmpty { storageIds }
                 handles = enumerateAll(c, storageIds)
             }
             AppLog.i(TAG, "内容集扫描：${handles.size} 个对象（存储 ${storageIds.joinToString { "0x${it.toString(16)}" }}）")
@@ -415,8 +460,13 @@ class PtpChannel @Inject constructor() : CameraChannel {
             // 超时触发 forceClose，把扫描自己的 socket 关掉 → 只返回残缺列表（真机 P0）。
             // 分批后单批持锁约 4s（20×200ms），保活/下载可在批间插队，互不掐断；
             // 代价是批与批之间相机内容可能变化——对相册浏览场景可接受（下一轮轮询会修正）。
+            //
+            // 每批处理完即回调，让上层**边扫描边渲染**，而不是等上千对象全部枚举完
+            // 才一次性返回（否则首屏要等数分钟）。
+            var total = 0
             handles.chunked(SCAN_BATCH_SIZE).forEach { batch ->
-                ptpCall(SCAN_TIMEOUT_MS) {
+                val batchItems = ptpCall(timeoutMs = SCAN_TIMEOUT_MS, selfHeal = false) {
+                    val acc = mutableListOf<MediaItem>()
                     for (handle in batch) {
                         val info = runCatching { c.getObjectInfo(handle) }
                             .onFailure { AppLog.w(TAG, "GetObjectInfo($handle) 失败：${it.message}") }
@@ -428,7 +478,7 @@ class PtpChannel @Inject constructor() : CameraChannel {
                             )
                             continue
                         }
-                        items.add(
+                        acc.add(
                             MediaItem(
                                 handle = handle,
                                 channelKey = handle.toString(),
@@ -439,22 +489,33 @@ class PtpChannel @Inject constructor() : CameraChannel {
                             )
                         )
                     }
+                    acc
+                }
+                if (batchItems.isNotEmpty()) {
+                    total += batchItems.size
+                    onBatch(batchItems)
                 }
             }
-            AppLog.i(TAG, "相册扫描完成：${items.size} 个媒体项")
-            AppLog.d(TAG, "扫描明细：${items.joinToString(prefix = "[", postfix = "]") { "${it.handle}:${it.filename}" }}")
-            return items.sortedByDescending { it.captureDate ?: Date(0) }
+            AppLog.i(TAG, "相册扫描完成：$total 个媒体项")
+            return total
         } catch (e: Exception) {
             AppLog.e(TAG, "相册列表获取失败：${e::class.simpleName}: ${e.message}")
             throw e
         }
     }
 
-    /** 枚举所有存储的句柄（parent=0x0，CokeeZVE 实测） */
+    /**
+     * 枚举所有存储的句柄（parent=0x0，CokeeZVE 实测）。
+     *
+     * 用 [ENUMERATE_TIMEOUT_MS] 而非默认事务超时：整卡下这一调用本身就可能耗时
+     * 数十秒，按默认 30s 判定会在它**正常执行中**被自己的超时打断并 forceClose。
+     */
     private suspend fun enumerateAll(c: PtpIpClient, storageIds: List<Long>): List<Long> {
         val all = mutableListOf<Long>()
         for (sid in storageIds) {
-            val handles = ptpCall { c.getObjectHandles(sid, 0x0) }
+            val handles = ptpCall(timeoutMs = ENUMERATE_TIMEOUT_MS, selfHeal = false) {
+                c.getObjectHandles(sid, 0x0)
+            }
             AppLog.i(TAG, "存储 0x${sid.toString(16)} → ${handles.size} 个句柄")
             all += handles
         }

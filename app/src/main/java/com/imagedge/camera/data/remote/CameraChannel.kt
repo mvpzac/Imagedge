@@ -56,6 +56,21 @@ interface CameraChannel {
     /** 浏览全部媒体 */
     suspend fun listMedia(): List<MediaItem>
 
+    /**
+     * 增量浏览媒体：分批回调，边枚举边返回。
+     *
+     * 整卡模式下一次性枚举上千个对象会长时间占用 PTP 通道、且 UI 全程空白，
+     * 故提供分批回调能力，让上层边收到边渲染。
+     *
+     * @param onBatch 每枚举完一批调用一次（批次大小由实现决定，约 20）
+     * @return 返回的总条数
+     */
+    suspend fun listMediaIncremental(onBatch: suspend (List<MediaItem>) -> Unit): Int {
+        val items = listMedia()
+        if (items.isNotEmpty()) onBatch(items)
+        return items.size
+    }
+
     /** 获取缩略图（无缩略图返回 null） */
     suspend fun getThumbnail(item: MediaItem): ByteArray?
 
