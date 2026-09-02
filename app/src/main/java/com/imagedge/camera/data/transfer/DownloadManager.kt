@@ -314,7 +314,9 @@ class DownloadManager @Inject constructor(
                 it.copy(
                     state = if (success) DownloadState.DONE else DownloadState.FAILED,
                     progress = if (success) 100 else it.progress,
-                    errorMessage = if (success) null else (it.errorMessage ?: "下载失败")
+                    errorMessage = if (success) null else (it.errorMessage ?: "下载失败"),
+                    // 成功时记下相册 Uri —— 分享环节据此打开原图（仅内存流转，不落库）
+                    savedUri = if (success) savedUri else null
                 )
             }
         } catch (e: Exception) {

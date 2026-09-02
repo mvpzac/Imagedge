@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.0-alpha01] - 2026-09-03
+
+> **Alpha 测试版**：一站式闭环（连接-传输-编辑-分享）的首个迭代，新增「分享」环节。功能可能变动，不建议作为日常主力版本使用。改动前已建立完整备份（`Imagedge-backup-2026-09-03-alpha`）。
+
+### Added / 新增
+
+- **分享（新模块 `:share`）**：已下载的照片可导出并分享到任意应用——补齐一站式闭环的最后一环
+  - 尺寸档位：原图 / 2048px / 1080px / 2M（与 Sony 官方「2M 传输」同档）
+  - 输出格式：JPEG / PNG / WebP（PNG 无 EXIF 容器，界面会明确提示）
+  - **EXIF 隐私策略**：保留全部 / 仅清除 GPS 位置 / 清除全部信息（默认「仅清除位置」）
+  - 画质调节（60–100）
+  - 走系统 Sharesheet，不集成第三方 SDK、不申请新权限
+- **方向归一化**：按源图 EXIF Orientation 把像素转正后再导出，相机竖拍照片分享出去不会躺着
+- 下载完成的任务记录相册 Uri（仅内存流转），作为分享入口
+
+### Changed / 变更
+
+- 下载队列：已完成的任务新增「分享」按钮
+
 ## [0.1.9] - 2026-09-01
 
 ### Changed / 变更

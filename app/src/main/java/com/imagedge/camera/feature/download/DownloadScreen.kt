@@ -51,6 +51,8 @@ import com.imagedge.camera.data.model.DownloadState
 import com.imagedge.camera.data.model.DownloadTask
 import com.imagedge.camera.data.model.isActive
 import com.imagedge.camera.data.transfer.DownloadHistoryEntity
+import com.imagedge.camera.feature.share.ExportSettingsSheet
+import com.imagedge.camera.feature.share.ShareViewModel
 import com.imagedge.camera.ui.components.EmptyState
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.LucideIcon
@@ -84,6 +86,9 @@ fun DownloadScreen(
     val history by viewModel.history.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) } // 0=下载队列 1=传输记录
     var detail by remember { mutableStateOf<DownloadHistoryEntity?>(null) }
+    // 分享（一站式闭环最后一环）：已完成的任务可导出并分享
+    val shareViewModel: ShareViewModel = hiltViewModel()
+    var showShareSheet by remember { mutableStateOf(false) }
 
     val hasFinished = tasks.any { it.state == DownloadState.DONE || it.state == DownloadState.FAILED }
     // 有进行中（排队/下载中）任务时提供「全部取消」：断链时不必逐个取消或杀进程
@@ -157,7 +162,16 @@ fun DownloadScreen(
                 } else {
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(tasks, key = { it.id }) { task ->
-                            DownloadTaskRow(task, onCancel = { viewModel.cancel(it) })
+                            DownloadTaskRow(
+                                task = task,
+                                onCancel = { viewModel.cancel(it) },
+                                onShare = { target ->
+                                    target.savedUri?.let { uri ->
+                                        shareViewModel.prepare(listOf(uri))
+                                        showShareSheet = true
+                                    }
+                                }
+                            )
                         }
                     }
                 }
@@ -188,14 +202,27 @@ fun DownloadScreen(
     detail?.let { record ->
         HistoryDetailDialog(record = record, onDismiss = { detail = null })
     }
+
+    // 分享：导出设置 → 系统分享面板
+    if (showShareSheet) {
+        ExportSettingsSheet(
+            viewModel = shareViewModel,
+            onDismiss = { showShareSheet = false }
+        )
+    }
 }
 
 /**
  * 单个下载任务行
  * @param onCancel 取消该任务（仅进行中的任务会显示取消按钮）
+ * @param onShare 分享该任务（仅已完成且拿到相册 Uri 的任务会显示）
  */
 @Composable
-private fun DownloadTaskRow(task: DownloadTask, onCancel: (DownloadTask) -> Unit = {}) {
+private fun DownloadTaskRow(
+    task: DownloadTask,
+    onCancel: (DownloadTask) -> Unit = {},
+    onShare: (DownloadTask) -> Unit = {}
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -275,6 +302,18 @@ private fun DownloadTaskRow(task: DownloadTask, onCancel: (DownloadTask) -> Unit
                     lucide = Lucide.X,
                     contentDescription = stringResource(R.string.download_cancel),
                     size = 16.dp
+                )
+            }
+        }
+
+        // 分享入口：已完成且已拿到相册 Uri 的任务。
+        // 这是一站式闭环的最后一环——传完的照片可以直接导出分享出去，
+        // 不必先退出 App 再打开相册或第三方工具。
+        if (task.state == DownloadState.DONE && task.savedUri != null) {
+            androidx.compose.material3.TextButton(onClick = { onShare(task) }) {
+                Text(
+                    text = stringResource(R.string.share_action),
+                    style = MaterialTheme.typography.bodySmall
                 )
             }
         }
