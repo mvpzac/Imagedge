@@ -1,5 +1,6 @@
 package com.imagedge.camera.feature.download
 
+import android.net.Uri
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -51,6 +52,7 @@ import com.imagedge.camera.data.model.DownloadState
 import com.imagedge.camera.data.model.DownloadTask
 import com.imagedge.camera.data.model.isActive
 import com.imagedge.camera.data.transfer.DownloadHistoryEntity
+import com.imagedge.camera.feature.edit.BasicEditScreen
 import com.imagedge.camera.feature.share.ExportSettingsSheet
 import com.imagedge.camera.feature.share.ShareViewModel
 import com.imagedge.camera.ui.components.EmptyState
@@ -89,6 +91,8 @@ fun DownloadScreen(
     // 分享（一站式闭环最后一环）：已完成的任务可导出并分享
     val shareViewModel: ShareViewModel = hiltViewModel()
     var showShareSheet by remember { mutableStateOf(false) }
+    // 编辑（闭环第三环）：已完成的任务可进入基础调整
+    var editTarget by remember { mutableStateOf<Uri?>(null) }
 
     val hasFinished = tasks.any { it.state == DownloadState.DONE || it.state == DownloadState.FAILED }
     // 有进行中（排队/下载中）任务时提供「全部取消」：断链时不必逐个取消或杀进程
@@ -170,6 +174,9 @@ fun DownloadScreen(
                                         shareViewModel.prepare(listOf(uri))
                                         showShareSheet = true
                                     }
+                                },
+                                onEdit = { target ->
+                                    target.savedUri?.let { editTarget = it }
                                 }
                             )
                         }
@@ -210,18 +217,28 @@ fun DownloadScreen(
             onDismiss = { showShareSheet = false }
         )
     }
+
+    // 编辑：基础调整（覆盖当前页，返回即回到下载队列）
+    editTarget?.let { uri ->
+        BasicEditScreen(
+            sourceUri = uri,
+            onBack = { editTarget = null }
+        )
+    }
 }
 
 /**
  * 单个下载任务行
  * @param onCancel 取消该任务（仅进行中的任务会显示取消按钮）
  * @param onShare 分享该任务（仅已完成且拿到相册 Uri 的任务会显示）
+ * @param onEdit 编辑该任务（同上，进入基础调整）
  */
 @Composable
 private fun DownloadTaskRow(
     task: DownloadTask,
     onCancel: (DownloadTask) -> Unit = {},
-    onShare: (DownloadTask) -> Unit = {}
+    onShare: (DownloadTask) -> Unit = {},
+    onEdit: (DownloadTask) -> Unit = {}
 ) {
     Row(
         modifier = Modifier
@@ -306,10 +323,16 @@ private fun DownloadTaskRow(
             }
         }
 
-        // 分享入口：已完成且已拿到相册 Uri 的任务。
-        // 这是一站式闭环的最后一环——传完的照片可以直接导出分享出去，
+        // 已完成且拿到相册 Uri 的任务：提供「编辑」与「分享」。
+        // 这是一站式闭环的后两环——传完的照片可以直接调整并分享出去，
         // 不必先退出 App 再打开相册或第三方工具。
         if (task.state == DownloadState.DONE && task.savedUri != null) {
+            androidx.compose.material3.TextButton(onClick = { onEdit(task) }) {
+                Text(
+                    text = stringResource(R.string.edit_action),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
             androidx.compose.material3.TextButton(onClick = { onShare(task) }) {
                 Text(
                     text = stringResource(R.string.share_action),
