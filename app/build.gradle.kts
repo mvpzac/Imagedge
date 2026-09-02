@@ -91,6 +91,7 @@ dependencies {
     implementation(project(":lut"))
     implementation(project(":motionphoto"))
     implementation(project(":share"))
+    implementation(project(":image"))
 
     // AndroidX
     implementation(libs.androidx.core.ktx)

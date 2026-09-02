@@ -177,6 +177,18 @@
     <string name="download_empty_desc">在相册里长按选择照片后点「下载」，任务会出现在这里</string>
     <string name="download_empty_action">去相册选片</string>
 
+    <!-- 基础调整（编辑环节） -->
+    <string name="edit_basic_title">基础调整</string>
+    <string name="edit_brightness">亮度</string>
+    <string name="edit_contrast">对比度</string>
+    <string name="edit_saturation">饱和度</string>
+    <string name="edit_temperature">色温</string>
+    <string name="edit_rotate">旋转</string>
+    <string name="edit_reset">重置</string>
+    <string name="edit_finish">完成</string>
+    <string name="edit_processing">处理中…</string>
+    <string name="edit_action">编辑</string>
+
     <!-- 分享 / 导出 -->
     <string name="share_action">分享</string>
     <string name="share_settings_title">导出设置</string>
