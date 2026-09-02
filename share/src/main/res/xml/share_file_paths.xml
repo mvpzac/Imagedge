@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 导出副本只写缓存目录：可被系统回收，不占用用户相册空间 -->
+    <cache-path name="share_export" path="share_export/" />
+</paths>

@@ -177,6 +177,20 @@
     <string name="download_empty_desc">在相册里长按选择照片后点「下载」，任务会出现在这里</string>
     <string name="download_empty_action">去相册选片</string>
 
+    <!-- 分享 / 导出 -->
+    <string name="share_action">分享</string>
+    <string name="share_settings_title">导出设置</string>
+    <string name="share_size">尺寸</string>
+    <string name="share_format">格式</string>
+    <string name="share_privacy">元数据与隐私</string>
+    <string name="share_quality">画质</string>
+    <string name="share_export_action">导出并分享</string>
+    <string name="share_exporting">导出中…</string>
+    <string name="share_failed">导出失败，请重试</string>
+    <string name="share_png_no_exif">PNG 不支持 EXIF，元数据设置对该格式不生效</string>
+    <string name="share_strip_location_hint">清除 GPS 坐标，保留光圈、快门、ISO 等拍摄参数</string>
+    <string name="share_strip_all_hint">清除全部拍摄信息，适合发到公开平台</string>
+
     <!-- 传输记录 -->
     <string name="download_queue_tab">下载队列</string>
     <string name="download_history_tab">传输记录</string>

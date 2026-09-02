@@ -32,8 +32,10 @@ android {
         applicationId = "com.imagedge.camera"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1009
-        versionName = "0.1.9"
+        // 0.2.0-alpha01：一站式闭环的首个 alpha（新增分享/导出环节）
+        // 该版本为内部测试用途，功能可能变动，不建议作为日常主力版本
+        versionCode = 1010
+        versionName = "0.2.0-alpha01"
 
         // 仅支持 64 位设备（项目决策 2026-08-29）：排除 32 位 ABI
         ndk {
@@ -88,6 +90,7 @@ dependencies {
     implementation(project(":raw"))
     implementation(project(":lut"))
     implementation(project(":motionphoto"))
+    implementation(project(":share"))
 
     // AndroidX
     implementation(libs.androidx.core.ktx)
