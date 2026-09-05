@@ -24,6 +24,9 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -159,55 +162,50 @@ fun RootScreen(
     // 二级页面（相册子分区/查看器/遥控等）不显示底部导航，保持层级清晰
     val showBottomBar = currentDestination?.route in RootDestination.entries.map { it.route }
 
-    // 液态玻璃：页面内容渲染进离屏图层作为「背景源」，悬浮导航在其上折射。
+    // 液态玻璃（双背景源，各管一层，互不包含故无递归）：
+    // - pageBackdrop：采集「页面背景层」（光晕），供页面内卡片/按钮/开关折射
+    // - navBackdrop：采集「NavHost 页面内容」，供悬浮导航栏折射 —— 滚动时内容从
+    //   导航栏底下滑过并透出，才是真正的悬浮玻璃（而不是折射一张静态背景）
     // 仅在玻璃可用时才做图层采集——离屏渲染有固定开销，不支持的设备不该白付。
     val glassLevel = rememberGlassLevel()
-    val backdrop = rememberLayerBackdrop()
+    val pageBackdrop = rememberLayerBackdrop()
+    val navBackdrop = rememberLayerBackdrop()
     val captureBackdrop = glassLevel.warrantsBackdropCapture()
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // 玻璃背景层：位于所有页面内容之下，是页面内玻璃控件与导航栏共同引用的背景源。
-        // 它只含背景（不含任何玻璃控件），因此不会出现自引用递归。
-        GlassBackdropLayer(backdrop = if (captureBackdrop) backdrop else null)
+        // 页面背景层（光晕）：采集给 pageBackdrop，供页面内玻璃控件折射
+        GlassBackdropLayer(backdrop = if (captureBackdrop) pageBackdrop else null)
 
-        Scaffold(
-            // 启用玻璃时背景必须透明，否则会盖住上面的渐变层（玻璃就无从折射）
-            containerColor = if (captureBackdrop) {
-                Color.Transparent
-            } else {
-                MaterialTheme.colorScheme.background
-            },
-            bottomBar = {
-                if (showBottomBar) {
-                    FloatingNavBar(
-                        backdrop = if (captureBackdrop) backdrop else null,
-                        glassLevel = glassLevel,
-                        selectedRoute = currentDestination?.route,
-                        onSelect = { destination ->
-                            navController.navigate(destination.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        }
-                    )
-                }
-            }
-        ) { innerPadding ->
-            // 把背景源下发给所有子页面：按钮、卡片等组件可直接取用，无需逐层传参
+        // 内容区填满全屏（含状态栏高度，但不预留导航栏高度）—— 这样滚动时
+        // 列表项才能真正从底部导航栏底下滑过，被悬浮玻璃折射出来。
+        // 之前放在 Scaffold 的 bottomBar 里会让 Scaffold 自动让出导航栏高度，
+        // 内容就被顶在导航栏上方，"文字不出现于导航栏下方"。
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    if (captureBackdrop) Color.Transparent
+                    else MaterialTheme.colorScheme.background
+                )
+                .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
+        ) {
+            // 页面内玻璃控件引用 pageBackdrop（背景层，不含任何玻璃控件，无递归）
             androidx.compose.runtime.CompositionLocalProvider(
-                LocalGlassBackdrop provides if (captureBackdrop) backdrop else null
+                LocalGlassBackdrop provides if (captureBackdrop) pageBackdrop else null
             ) {
             NavHost(
                 navController = navController,
                 startDestination = RootDestination.HOME.route,
-                // 注意：这里**不能**标记 layerBackdrop。
-                // 页面内的玻璃控件（卡片等）会引用背景源，若它们同时又被采集，
-                // 就会形成「玻璃引用自己所在图层」的渲染递归 → RenderThread 栈溢出。
-                // 背景源统一由下方 GlassBackdropLayer 提供。
-                modifier = Modifier.padding(innerPadding)
+                modifier = Modifier
+                    .fillMaxSize()
+                    // 采集页面内容，供悬浮导航栏折射（NavHost 不含导航栏自身）
+                    .then(
+                        if (captureBackdrop) {
+                            Modifier.layerBackdrop(navBackdrop)
+                        } else {
+                            Modifier
+                        }
+                    )
             ) {
                 composable(RootDestination.HOME.route) {
                     HomeScreen(
@@ -297,6 +295,25 @@ fun RootScreen(
             }
             }
         }
+        // 悬浮玻璃导航栏：叠在外层 Box 底部（**不**放进 Scaffold bottomBar），
+        // 这样页面内容才能真正延伸到导航栏下方——滚动时列表项从底下穿过、被玻璃折射。
+        if (showBottomBar) {
+            FloatingNavBar(
+                backdrop = if (captureBackdrop) navBackdrop else null,
+                glassLevel = glassLevel,
+                selectedRoute = currentDestination?.route,
+                onSelect = { destination ->
+                    navController.navigate(destination.route) {
+                        popUpTo(navController.graph.findStartDestination().id) {
+                            saveState = true
+                        }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
+        }
         // 顶部弹窗：从屏幕顶部滑入，2 秒后滑回
         TopBanner(
             message = bannerMessage,
@@ -349,13 +366,14 @@ private fun FloatingNavBar(
     backdrop: LayerBackdrop?,
     glassLevel: GlassLevel,
     selectedRoute: String?,
-    onSelect: (RootDestination) -> Unit
+    onSelect: (RootDestination) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val destinations = RootDestination.entries
     // 玻璃自带投影，仅在降级（普通表面）时才需要外层阴影，避免双重投影
     val useGlass = glassLevel.warrantsBackdropCapture() && backdrop != null
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
             .padding(horizontal = 16.dp)

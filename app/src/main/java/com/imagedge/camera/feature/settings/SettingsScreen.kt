@@ -43,6 +43,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.BuildConfig
 import com.imagedge.camera.ui.components.IconBadge
+import com.imagedge.camera.ui.components.AppButton
+import com.imagedge.camera.ui.components.AppButtonType
 import com.imagedge.camera.ui.glass.GlassSwitch
 import com.imagedge.camera.ui.glass.glassDialog
 import com.imagedge.camera.ui.glass.glassDialogContainerColor
@@ -73,7 +75,7 @@ fun SettingsScreen(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(24.dp),
+            .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
@@ -206,9 +208,11 @@ fun SettingsScreen(
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { lutImportLauncher.launch(arrayOf("*/*")) }) {
-                Text(stringResource(R.string.settings_lut_import))
-            }
+            AppButton(
+                text = stringResource(R.string.settings_lut_import),
+                onClick = { lutImportLauncher.launch(arrayOf("*/*")) },
+                type = AppButtonType.PRIMARY
+            )
         }
         lutMessage?.let {
             Text(

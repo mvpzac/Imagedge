@@ -5,6 +5,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -39,6 +45,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.R
 import com.imagedge.camera.data.model.ConnectionPhase
 import com.imagedge.camera.ui.components.Lucide
+import com.imagedge.camera.ui.glass.GlassCard
+import com.imagedge.camera.ui.glass.LocalGlassBackdrop
+import com.imagedge.camera.ui.glass.rememberGlassLevel
+import com.imagedge.camera.ui.glass.warrantsBackdropCapture
+import com.imagedge.camera.ui.theme.Radius
 import com.imagedge.camera.ui.theme.SmileySansFamily
 import com.imagedge.camera.ui.components.LucideIcon
 import com.imagedge.camera.ui.components.StepsGuideCard
@@ -78,7 +89,9 @@ fun HomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(24.dp),
+            // 底部 96dp 为悬浮玻璃导航栏让位：内容延伸到底（滚动时穿过导航栏被其折射），
+            // 但最后一项能停在导航栏上方，不被永久遮挡
+            .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 96.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // Hero 品牌字：得意黑 + primary 色（与底部磁吸指示条同源）
@@ -99,7 +112,7 @@ fun HomeScreen(
         )
 
         // 状态卡
-        Card(
+        GlassCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 48.dp)
@@ -239,7 +252,7 @@ fun HomeScreen(
 
         // 遥控拍摄子分区入口（传输已连接时显示，实际功能在二级页）
         if (state.phase == ConnectionPhase.CONNECTED) {
-            Card(
+            GlassCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 16.dp),
@@ -292,7 +305,14 @@ private fun channelLabel(type: com.imagedge.camera.data.remote.ChannelType): Str
 
 /**
  * 主页大按钮：标题 + 说明两行，高度增高，作为主页主/次 CTA。
- * @param filled true 用实心 Button（主按钮），false 用 OutlinedButton（次按钮）
+ *
+ * **玻璃路径**：完全绕开 M3 Button（实测在主页位置会渲染为黑底白字，
+ * 与 liquid glass 的「透明透出背后」完全相反）。改为 Box + clip + border +
+ * clickable：filled=true 是「主色描边 + 主色文字」（强调靠文字与边线），
+ * filled=false 是「透明 + outline 描边」（次级按钮）。
+ * 降级（非玻璃场景）保持原 M3 Button / OutlinedButton 行为。
+ *
+ * @param filled true 主按钮（描边用 primary），false 次按钮（描边用 outline）
  */
 @Composable
 private fun HomeBigButton(
@@ -303,7 +323,17 @@ private fun HomeBigButton(
     modifier: Modifier = Modifier,
     filled: Boolean = true
 ) {
-    val content: @Composable () -> Unit = {
+    val shape = RoundedCornerShape(Radius.Control)
+    val backdrop = LocalGlassBackdrop.current
+    val glassLevel = rememberGlassLevel()
+    val useGlass = backdrop != null && glassLevel.warrantsBackdropCapture()
+
+    val titleColor = if (filled) MaterialTheme.colorScheme.primary
+                      else MaterialTheme.colorScheme.onSurface
+    val descColor = if (filled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                     else MaterialTheme.colorScheme.onSurfaceVariant
+
+    val body: @Composable () -> Unit = {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -312,33 +342,49 @@ private fun HomeBigButton(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (icon != null) {
-                    LucideIcon(icon, contentDescription = null, size = 20.dp)
+                    LucideIcon(icon, contentDescription = null, size = 20.dp, tint = titleColor)
                     Spacer(Modifier.width(8.dp))
                 }
-                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(title, style = MaterialTheme.typography.titleMedium, color = titleColor)
             }
             Text(
                 text = desc,
                 style = MaterialTheme.typography.labelSmall,
-                color = if (filled) {
-                    MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                }
+                color = descColor
             )
         }
     }
+
+    // 玻璃路径：透明 + 描边（与 AppButton 同样原理，避开 drawBackdrop 黑块）
+    if (useGlass) {
+        val borderStroke = if (filled) {
+            BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+        } else {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+        }
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .border(borderStroke.width, borderStroke.brush, shape)
+                .clickable { onClick() },
+            contentAlignment = Alignment.Center
+        ) { body() }
+        return
+    }
+
+    // 降级：保持 M3 Button / OutlinedButton 行为
     if (filled) {
         Button(
             onClick = onClick,
             modifier = modifier.fillMaxWidth(),
             contentPadding = PaddingValues(0.dp)
-        ) { content() }
+        ) { body() }
     } else {
         OutlinedButton(
             onClick = onClick,
             modifier = modifier.fillMaxWidth(),
             contentPadding = PaddingValues(0.dp)
-        ) { content() }
+        ) { body() }
     }
 }
