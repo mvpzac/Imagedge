@@ -1,11 +1,14 @@
 package com.imagedge.camera.ui.glass
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.LayerBackdrop
@@ -19,33 +22,38 @@ import com.imagedge.camera.ui.theme.PillShape
 /**
  * 玻璃参数（集中在此，方便真机调优）。
  *
- * 取值偏保守：Imagedge 是极简黑白风格，玻璃应当像一层薄雾——
- * 能看出背后内容的轮廓与折射，而不是把背景糊成一片色块。
+ * 目标观感接近 iOS 26 Liquid Glass：**通透 + 强边缘折射**。
+ * 通透靠低模糊 + 低表面色实现；「玻璃感」主要来自 lens 在边缘的
+ * 放大式折射与色差——而不是把背景糊掉（那只是磨砂，不是玻璃）。
  */
 object GlassSpec {
-    /** 背景模糊半径：够柔但不至于完全看不清背后 */
-    val BlurRadius = 18.dp
+    /**
+     * 背景模糊半径。
+     * 注意不要过大：iOS 玻璃的模糊偏轻（保留背后内容的剪影），
+     * 真正让它区别于「半透明板」的是边缘折射而非模糊。
+     */
+    val BlurRadius = 14.dp
 
-    /** 折射带高度（边缘到内部多宽的区域发生折射） */
-    val RefractionHeight = 14.dp
+    /** 折射带高度（从边缘向内多宽的区域发生折射） */
+    val RefractionHeight = 24.dp
 
-    /** 折射强度（越大边缘扭曲越明显） */
-    val RefractionAmount = 26.dp
+    /** 折射强度：正值让边缘把背后画面向中心放大，是「玻璃凸透镜」感的关键 */
+    val RefractionAmount = 46.dp
 
     /**
-     * 玻璃表面色（叠在模糊结果之上）。
-     * 越淡越通透：0 是纯玻璃，1 是不透明色块。
+     * 玻璃表面色不透明度。
+     * 越低越通透（能看到背后画面），iOS 观感约 0.1–0.25。
      */
-    const val SurfaceAlpha = 0.42f
+    const val SurfaceAlpha = 0.2f
 
-    /**
-     * 是否启用 vibrancy（把背后内容饱和度 ×1.5，令玻璃下的画面更鲜活）。
-     *
-     * 这是 backdrop 2.0 相对 1.0.x 新增的效果，也是本次升级的主要收益点。
-     * 默认**关闭**：Imagedge 是极简黑白风格，增艳会让照片在中性界面里显得跳脱。
-     * 若你想要更「满」的玻璃观感（例如玻璃浮在彩色照片上时），可将其打开。
-     */
-    const val Vibrancy = false
+    /** 背后内容饱和度增益（vibrancy），提升玻璃下画面的鲜活度 */
+    const val Vibrancy = true
+
+    /** 玻璃深度效果：边缘出现白亮的内发光（近真实玻璃的厚度感） */
+    const val DepthEffect = true
+
+    /** 色差：边缘折射带出轻微 RGB 分离（玻璃的最标志性细节） */
+    const val ChromaticAberration = true
 }
 
 /**
@@ -78,6 +86,7 @@ fun Modifier.glassSurface(
     }
 
     val tint = surfaceColor.copy(alpha = GlassSpec.SurfaceAlpha)
+    val specular = surfaceColor.luminance() < 0.5f
     return this.drawBackdrop(
         backdrop = backdrop,
         shape = { shape },
@@ -87,11 +96,28 @@ fun Modifier.glassSurface(
             // lens 需要 AGSL（API 33+），且只支持圆角形状——
             // 低版本由分级挡在门外，这里无需再判断版本
             if (level == GlassLevel.FULL) {
-                lens(refractionHeight.toPx(), refractionAmount.toPx())
+                lens(
+                    refractionHeight.toPx(),
+                    refractionAmount.toPx(),
+                    depthEffect = GlassSpec.DepthEffect,
+                    chromaticAberration = GlassSpec.ChromaticAberration
+                )
             }
         },
         onDrawSurface = {
+            // 表面色越淡越通透
             drawRect(tint)
+        }
+    ).then(
+        // iOS 玻璃的边缘细描边：沿形状走线（比在 draw 内部画矩形描边更贴合圆角）
+        if (level == GlassLevel.FULL) {
+            Modifier.border(
+                width = androidx.compose.ui.unit.Dp.Hairline,
+                color = if (specular) Color.White.copy(alpha = 0.25f) else Color.Black.copy(alpha = 0.14f),
+                shape = shape
+            )
+        } else {
+            Modifier
         }
     )
 }
