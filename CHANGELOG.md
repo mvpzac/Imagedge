@@ -2,6 +2,30 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.0-alpha03] - 2026-09-05
+
+> **Alpha 测试版**。液态玻璃视觉全面铺开 + 交互细节打磨。
+
+### Added / 新增（液态玻璃全覆盖）
+
+- **悬浮导航栏真正悬浮**：从 Scaffold 移出改为 Box 叠加，内容可滚动穿过导航栏并被其折射；双背景源（页面背景层供卡片 / NavHost 内容层供导航栏），保持无渲染递归
+- **玻璃背景光晕**：页面背景铺低饱和多色径向光斑（青蓝/紫/暖橙/青绿），玻璃终于有内容可折射；明暗主题各自适配
+- **玻璃质感强化**：更低模糊 + 更强边缘折射 + depthEffect + 色差（RGB 分离）+ vibrancy；沿形状的 iOS 式 hairline 描边
+- **GlassCard / GlassSwitch / GlassDialog**：替换裸 Material3 容器为玻璃实现
+- **所有按钮统一走 AppButton**（含自定义内容槽）：主页大按钮、设置「导入 .cube」等一次修改全部生效
+- **二级/三级页返回钮玻璃化**（PageHeader 统一改动）
+
+### Changed / 变更
+
+- HUB 图标选中**不再上浮**（指示条 + 主色已表达选中）
+- 权限使用说明页标题**不再悬浮**，随内容滚动
+- 相册页、编辑中枢、视频转 Live 补齐滚动——所有页面支持滑动（遥控实时取景页除外）
+
+### Fixed / 修复
+
+- 页面内玻璃元素引发 RenderThread 栈溢出的递归问题（背景层/内容层分离解决）
+- AppButton 玻璃路径在部分设备渲染为黑色实心块（弃用 M3 Button + drawBackdrop，改透明 + 描边实现）
+
 ## [0.2.0-alpha02] - 2026-09-05
 
 > **Alpha 测试版**。工具链整体升级 + 液态玻璃视觉。

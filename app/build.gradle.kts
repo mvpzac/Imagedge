@@ -31,10 +31,9 @@ android {
         applicationId = "com.imagedge.camera"
         minSdk = 29
         targetSdk = 36
-        // 0.2.0-alpha02：工具链升级（AGP 9.4 / Kotlin 2.3.21 / compileSdk 37）
-        // + 液态玻璃 backdrop 2.0.1（底部导航栏玻璃化；页面内元素待分层后启用）
-        versionCode = 1011
-        versionName = "0.2.0-alpha02"
+        // 0.2.0-alpha03：液态玻璃全覆盖（导航/卡片/按钮/开关/弹窗/返回钮）+ 全页可滑动
+        versionCode = 1012
+        versionName = "0.2.0-alpha03"
 
         // 仅支持 64 位设备（项目决策 2026-08-29）：排除 32 位 ABI
         ndk {
