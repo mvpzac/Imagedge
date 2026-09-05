@@ -23,6 +23,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.ui.graphics.Color
+import com.imagedge.camera.ui.glass.LocalGlassBackdrop
+import com.imagedge.camera.ui.glass.glassSurface
+import com.imagedge.camera.ui.glass.rememberGlassLevel
+import com.imagedge.camera.ui.glass.warrantsBackdropCapture
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -39,7 +45,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -580,13 +585,32 @@ fun QrScanDialog(
     snackbarController: SnackbarController? = null,
     viewModel: QrScanViewModel = hiltViewModel()
 ) {
+    // 玻璃弹窗：Sheet 容器透明，内容底下铺玻璃（引用页面背景层，无递归风险）
+    val backdrop = LocalGlassBackdrop.current
+    val glassLevel = rememberGlassLevel()
+    val useGlass = backdrop != null && glassLevel.warrantsBackdropCapture()
+    val sheetShape = RoundedCornerShape(topStart = Radius.Sheet, topEnd = Radius.Sheet)
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         // 内容高度固定 40%，禁用半展开中间态：确保下滑只走 dismiss，
         // 不会停在 half-expanded 锚点导致内容被裁剪或产生相对位移
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = RoundedCornerShape(topStart = Radius.Sheet, topEnd = Radius.Sheet)
+        shape = sheetShape,
+        containerColor = if (useGlass) {
+            Color.Transparent
+        } else {
+            BottomSheetDefaults.ContainerColor
+        }
     ) {
+        Box(
+            modifier = Modifier.glassSurface(
+                backdrop = backdrop,
+                level = glassLevel,
+                shape = sheetShape,
+                surfaceColor = MaterialTheme.colorScheme.surfaceContainerLow
+            )
+        ) {
         // 高度用父约束的 40%（而非 LocalConfiguration）：UI 锁定缩放下
         // Configuration 的 dp 值不随 density 缩放，约束值才是缩放一致的
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
@@ -600,6 +624,7 @@ fun QrScanDialog(
                     snackbarController = snackbarController,
                     viewModel = viewModel
                 )
+            }
             }
         }
     }

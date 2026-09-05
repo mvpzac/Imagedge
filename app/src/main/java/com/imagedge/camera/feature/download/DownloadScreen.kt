@@ -56,6 +56,8 @@ import com.imagedge.camera.feature.edit.BasicEditScreen
 import com.imagedge.camera.feature.share.ExportSettingsSheet
 import com.imagedge.camera.feature.share.ShareViewModel
 import com.imagedge.camera.ui.components.EmptyState
+import com.imagedge.camera.ui.glass.glassDialog
+import com.imagedge.camera.ui.glass.glassDialogContainerColor
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.LucideIcon
 import com.imagedge.camera.ui.components.PageHeader
@@ -386,6 +388,9 @@ private fun HistoryRow(record: DownloadHistoryEntity, onOpen: () -> Unit) {
 private fun HistoryDetailDialog(record: DownloadHistoryEntity, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        // 玻璃弹窗：容器透明 + 玻璃底层（引用页面背景层，无递归风险）
+        modifier = Modifier.glassDialog(),
+        containerColor = glassDialogContainerColor(),
         title = {
             Text(
                 text = record.filename,

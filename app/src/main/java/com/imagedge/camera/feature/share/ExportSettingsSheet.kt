@@ -3,6 +3,7 @@ package com.imagedge.camera.feature.share
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,8 +23,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import com.imagedge.camera.ui.glass.LocalGlassBackdrop
+import com.imagedge.camera.ui.glass.glassSurface
+import com.imagedge.camera.ui.glass.rememberGlassLevel
+import com.imagedge.camera.ui.glass.warrantsBackdropCapture
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -59,11 +65,31 @@ fun ExportSettingsSheet(
         }
     }
 
+    // 玻璃弹窗：Sheet 自身容器设为透明，内容底下铺一层玻璃。
+    // 玻璃引用的是页面背景层（弹窗在 Popup 中，不会被该图层采集）→ 无递归。
+    val backdrop = LocalGlassBackdrop.current
+    val glassLevel = rememberGlassLevel()
+    val useGlass = backdrop != null && glassLevel.warrantsBackdropCapture()
+    val sheetShape = androidx.compose.material3.BottomSheetDefaults.ExpandedShape
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = androidx.compose.material3.BottomSheetDefaults.ExpandedShape
+        shape = sheetShape,
+        containerColor = if (useGlass) {
+            Color.Transparent
+        } else {
+            androidx.compose.material3.BottomSheetDefaults.ContainerColor
+        }
     ) {
+        Box(
+            modifier = Modifier.glassSurface(
+                backdrop = backdrop,
+                level = glassLevel,
+                shape = sheetShape,
+                surfaceColor = MaterialTheme.colorScheme.surfaceContainerLow
+            )
+        ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -169,6 +195,7 @@ fun ExportSettingsSheet(
                 } else {
                     Text(stringResource(R.string.share_export_action))
                 }
+            }
             }
         }
     }

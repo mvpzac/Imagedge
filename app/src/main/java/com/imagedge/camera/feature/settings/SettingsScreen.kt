@@ -43,6 +43,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.BuildConfig
 import com.imagedge.camera.ui.components.IconBadge
+import com.imagedge.camera.ui.glass.GlassSwitch
+import com.imagedge.camera.ui.glass.glassDialog
+import com.imagedge.camera.ui.glass.glassDialogContainerColor
 import com.imagedge.camera.R
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.LucideIcon
@@ -140,7 +143,7 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Switch(
+                GlassSwitch(
                     checked = hapticsEnabled,
                     onCheckedChange = { viewModel.setHapticsEnabled(it) }
                 )
@@ -219,6 +222,9 @@ fun SettingsScreen(
         deleteTarget?.let { name ->
             AlertDialog(
                 onDismissRequest = { deleteTarget = null },
+                // 玻璃弹窗：Dialog 容器透明，由 modifier 铺一层玻璃
+                modifier = Modifier.glassDialog(),
+                containerColor = glassDialogContainerColor(),
                 title = { Text(stringResource(R.string.settings_lut_delete_confirm_title)) },
                 text = {
                     Text(
@@ -253,6 +259,9 @@ fun SettingsScreen(
             var selected by remember(name) { mutableStateOf(suggested) }
             AlertDialog(
                 onDismissRequest = { viewModel.dismissLutType() },
+                // 玻璃弹窗（同上方删除确认）
+                modifier = Modifier.glassDialog(),
+                containerColor = glassDialogContainerColor(),
                 title = { Text(stringResource(R.string.lut_type_dialog_title)) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

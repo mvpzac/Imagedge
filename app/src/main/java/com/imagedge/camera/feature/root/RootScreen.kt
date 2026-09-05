@@ -408,9 +408,13 @@ private fun FloatingNavBar(
                             .padding(vertical = 11.dp)
                             .height(44.dp)
                             .width(indicatorWidth)
-                            .background(
-                                color = MaterialTheme.colorScheme.primary,
-                                shape = PillShape
+                            // 磁吸指示器也改成玻璃：与主胶囊同样折射页面背景，
+                            // 但用主色着色，于是呈现为「被点亮的一小块玻璃」。
+                            // 它引用的是页面背景层（不含导航栏本体），不会产生自引用递归。
+                            .glassPill(
+                                backdrop = backdrop,
+                                level = glassLevel,
+                                surfaceColor = MaterialTheme.colorScheme.primary
                             )
                     )
                     Row(

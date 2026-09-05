@@ -14,6 +14,7 @@ import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import com.imagedge.camera.ui.theme.Radius
+import com.imagedge.camera.ui.theme.PillShape
 
 /**
  * 玻璃参数（集中在此，方便真机调优）。
@@ -94,6 +95,35 @@ fun Modifier.glassSurface(
         }
     )
 }
+
+/**
+ * 玻璃弹窗（AlertDialog / Dialog）的容器色。
+ *
+ * 启用玻璃时返回透明——让弹窗自身的容器让位，露出底下的玻璃层；
+ * 否则沿用 Material3 默认容器色，与改造前一致。
+ */
+@Composable
+fun glassDialogContainerColor(default: Color = androidx.compose.material3.AlertDialogDefaults.containerColor): Color {
+    val backdrop = LocalGlassBackdrop.current
+    val level = rememberGlassLevel()
+    return if (backdrop != null && level.warrantsBackdropCapture()) Color.Transparent else default
+}
+
+/**
+ * 玻璃弹窗的玻璃底层，配合 [glassDialogContainerColor] 使用。
+ *
+ * 弹窗位于 Popup 之中，不会被页面背景层采集，因此引用背景层是安全的（无递归）。
+ */
+@Composable
+fun Modifier.glassDialog(
+    shape: Shape = RoundedCornerShape(Radius.Container),
+    surfaceColor: Color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerHigh
+): Modifier = glassSurface(
+    backdrop = LocalGlassBackdrop.current,
+    level = rememberGlassLevel(),
+    shape = shape,
+    surfaceColor = surfaceColor
+)
 
 /**
  * 胶囊形玻璃（底部导航、Chip、状态标签用）。

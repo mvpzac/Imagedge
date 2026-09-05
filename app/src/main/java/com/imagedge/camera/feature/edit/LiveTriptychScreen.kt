@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.ui.components.AppButton
+import com.imagedge.camera.ui.glass.GlassSwitch
 import com.imagedge.camera.ui.components.AppButtonType
 import com.imagedge.camera.ui.components.EmptyState
 import com.imagedge.camera.ui.components.Lucide
@@ -262,7 +263,7 @@ private fun SlotCard(
             // ── 声音 + 对齐 ──
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("声音", style = MaterialTheme.typography.bodySmall)
-                Switch(
+                GlassSwitch(
                     checked = slot.audioOn,
                     onCheckedChange = { viewModel.setAudioOn(index, it) },
                     modifier = Modifier.padding(horizontal = 4.dp)
