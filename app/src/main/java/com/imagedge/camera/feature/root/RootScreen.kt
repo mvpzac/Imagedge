@@ -472,13 +472,9 @@ private fun NavBarIcon(
     selected: Boolean,
     modifier: Modifier = Modifier
 ) {
-    // 图标上浮
-    val floatOffset by animateDpAsState(
-        targetValue = if (selected) (-3).dp else 0.dp,
-        animationSpec = Motion.springSnappyDp,
-        label = "navFloat"
-    )
-    // 磁吸偏移：选中瞬间从来向拉入
+    // 磁吸偏移：选中瞬间从来向拉入（横向回弹，营造「被吸住」的触感）。
+    // 注意：选中状态**不**做垂直上浮——指示条与主色已足够表达选中，
+    // 图标上浮会让胶囊内视觉重心不稳（用户定稿去掉）。
     val shiftAnim = remember { Animatable(0.dp, Dp.VectorConverter) }
     val lastIndex = remember { mutableIntStateOf(-1) }
     val myIndex = RootDestination.entries.indexOf(destination)
@@ -509,7 +505,7 @@ private fun NavBarIcon(
                 MaterialTheme.colorScheme.onSurfaceVariant
             },
             size = 26.dp,
-            modifier = Modifier.offset { IntOffset(shiftAnim.value.roundToPx(), (floatOffset + NavIconExtraShiftY).roundToPx()) }
+            modifier = Modifier.offset { IntOffset(shiftAnim.value.roundToPx(), NavIconExtraShiftY.roundToPx()) }
         )
     }
 }

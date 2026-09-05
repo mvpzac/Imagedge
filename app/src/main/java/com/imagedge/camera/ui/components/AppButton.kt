@@ -44,14 +44,17 @@ fun AppButton(
     type: AppButtonType = AppButtonType.PRIMARY,
     enabled: Boolean = true,
     leadingIcon: Int? = null,
-    fullWidth: Boolean = true
+    fullWidth: Boolean = true,
+    // 自定义内容槽：传入后替代默认的「图标 + 单行文字」布局
+    //（供 HomeBigButton 这类需要双行/富内容的按钮复用同一套玻璃样式）
+    content: (@Composable () -> Unit)? = null
 ) {
     val shape = RoundedCornerShape(Radius.Control)
     val backdrop = LocalGlassBackdrop.current
     val glassLevel = rememberGlassLevel()
     val useGlass = backdrop != null && glassLevel.warrantsBackdropCapture()
 
-    val content: @Composable () -> Unit = {
+    val defaultContent: @Composable () -> Unit = {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
@@ -63,6 +66,7 @@ fun AppButton(
             Text(text, style = MaterialTheme.typography.labelLarge)
         }
     }
+    val body: @Composable () -> Unit = { (content ?: defaultContent)() }
     val baseModifier = if (fullWidth) modifier.fillMaxWidth() else modifier
 
     // ===== 玻璃路径 =====
@@ -102,7 +106,7 @@ fun AppButton(
             contentAlignment = Alignment.Center
         ) {
             CompositionLocalProvider(LocalContentColor provides textColor) {
-                content()
+                body()
             }
         }
         return
@@ -115,7 +119,7 @@ fun AppButton(
             enabled = enabled,
             shape = shape,
             modifier = baseModifier
-        ) { content() }
+        ) { body() }
         AppButtonType.PRIMARY -> Box(
             modifier = baseModifier
                 .background(MaterialTheme.colorScheme.primary, shape)
@@ -124,7 +128,7 @@ fun AppButton(
             contentAlignment = Alignment.Center
         ) {
             CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onPrimary) {
-                content()
+                body()
             }
         }
         AppButtonType.SECONDARY -> Box(
@@ -135,7 +139,7 @@ fun AppButton(
             contentAlignment = Alignment.Center
         ) {
             CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
-                content()
+                body()
             }
         }
     }

@@ -1,6 +1,8 @@
 package com.imagedge.camera.feature.album
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -40,10 +42,13 @@ fun AlbumHubScreen(
     val hasActiveDownload by albumViewModel.hasActiveDownload.collectAsStateWithLifecycle()
     val fullCardBusyHint = stringResource(R.string.hub_full_card_busy_hint)
 
+    // 横屏可用滚动：内容超高时能上下滑（竖屏内容通常一屏放下，无滚动感觉）。
+    // 底部 96dp 为悬浮玻璃导航栏让位（与 Home/Settings 的 Tab 页约定一致）。
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .verticalScroll(rememberScrollState())
+            .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text(

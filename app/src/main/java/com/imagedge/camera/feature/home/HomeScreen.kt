@@ -27,6 +27,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.size
@@ -44,6 +45,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.R
 import com.imagedge.camera.data.model.ConnectionPhase
+import com.imagedge.camera.ui.components.AppButton
+import com.imagedge.camera.ui.components.AppButtonType
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.glass.GlassCard
 import com.imagedge.camera.ui.glass.LocalGlassBackdrop
@@ -304,15 +307,11 @@ private fun channelLabel(type: com.imagedge.camera.data.remote.ChannelType): Str
 }
 
 /**
- * 主页大按钮：标题 + 说明两行，高度增高，作为主页主/次 CTA。
+ * 主页大按钮：标题 + 说明两行。**直接复用 AppButton**（带自定义内容槽），
+ * 这样玻璃样式只需在 AppButton 维护一处——本按钮、设置页「导入 .cube」、
+ * 以及所有 AppButton 调用点同时生效，不再各自实现。
  *
- * **玻璃路径**：完全绕开 M3 Button（实测在主页位置会渲染为黑底白字，
- * 与 liquid glass 的「透明透出背后」完全相反）。改为 Box + clip + border +
- * clickable：filled=true 是「主色描边 + 主色文字」（强调靠文字与边线），
- * filled=false 是「透明 + outline 描边」（次级按钮）。
- * 降级（非玻璃场景）保持原 M3 Button / OutlinedButton 行为。
- *
- * @param filled true 主按钮（描边用 primary），false 次按钮（描边用 outline）
+ * @param filled true 主按钮（PRIMARY），false 次按钮（SECONDARY）
  */
 @Composable
 private fun HomeBigButton(
@@ -323,68 +322,29 @@ private fun HomeBigButton(
     modifier: Modifier = Modifier,
     filled: Boolean = true
 ) {
-    val shape = RoundedCornerShape(Radius.Control)
-    val backdrop = LocalGlassBackdrop.current
-    val glassLevel = rememberGlassLevel()
-    val useGlass = backdrop != null && glassLevel.warrantsBackdropCapture()
-
-    val titleColor = if (filled) MaterialTheme.colorScheme.primary
-                      else MaterialTheme.colorScheme.onSurface
-    val descColor = if (filled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
-                     else MaterialTheme.colorScheme.onSurfaceVariant
-
-    val body: @Composable () -> Unit = {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 14.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (icon != null) {
-                    LucideIcon(icon, contentDescription = null, size = 20.dp, tint = titleColor)
-                    Spacer(Modifier.width(8.dp))
+    AppButton(
+        text = title,
+        onClick = onClick,
+        modifier = modifier,
+        type = if (filled) AppButtonType.PRIMARY else AppButtonType.SECONDARY,
+        content = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (icon != null) {
+                        LucideIcon(icon, contentDescription = null, size = 20.dp)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(title, style = MaterialTheme.typography.titleMedium)
                 }
-                Text(title, style = MaterialTheme.typography.titleMedium, color = titleColor)
+                Text(
+                    text = desc,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LocalContentColor.current.copy(alpha = 0.72f)
+                )
             }
-            Text(
-                text = desc,
-                style = MaterialTheme.typography.labelSmall,
-                color = descColor
-            )
         }
-    }
-
-    // 玻璃路径：透明 + 描边（与 AppButton 同样原理，避开 drawBackdrop 黑块）
-    if (useGlass) {
-        val borderStroke = if (filled) {
-            BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
-        } else {
-            BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-        }
-        Box(
-            modifier = modifier
-                .fillMaxWidth()
-                .clip(shape)
-                .border(borderStroke.width, borderStroke.brush, shape)
-                .clickable { onClick() },
-            contentAlignment = Alignment.Center
-        ) { body() }
-        return
-    }
-
-    // 降级：保持 M3 Button / OutlinedButton 行为
-    if (filled) {
-        Button(
-            onClick = onClick,
-            modifier = modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(0.dp)
-        ) { body() }
-    } else {
-        OutlinedButton(
-            onClick = onClick,
-            modifier = modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(0.dp)
-        ) { body() }
-    }
+    )
 }
