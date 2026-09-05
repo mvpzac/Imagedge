@@ -57,6 +57,7 @@ import com.imagedge.camera.R
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.LucideIcon
 import com.imagedge.camera.ui.feedback.SnackbarController
+import com.imagedge.camera.ui.glass.GlassBackdropLayer
 import com.imagedge.camera.ui.glass.GlassLevel
 import com.imagedge.camera.ui.glass.LocalGlassBackdrop
 import com.imagedge.camera.ui.glass.glassPill
@@ -165,7 +166,17 @@ fun RootScreen(
     val captureBackdrop = glassLevel.warrantsBackdropCapture()
 
     Box(modifier = Modifier.fillMaxSize()) {
+        // 玻璃背景层：位于所有页面内容之下，是页面内玻璃控件与导航栏共同引用的背景源。
+        // 它只含背景（不含任何玻璃控件），因此不会出现自引用递归。
+        GlassBackdropLayer(backdrop = if (captureBackdrop) backdrop else null)
+
         Scaffold(
+            // 启用玻璃时背景必须透明，否则会盖住上面的渐变层（玻璃就无从折射）
+            containerColor = if (captureBackdrop) {
+                Color.Transparent
+            } else {
+                MaterialTheme.colorScheme.background
+            },
             bottomBar = {
                 if (showBottomBar) {
                     FloatingNavBar(
@@ -192,10 +203,11 @@ fun RootScreen(
             NavHost(
                 navController = navController,
                 startDestination = RootDestination.HOME.route,
-                modifier = Modifier
-                    .padding(innerPadding)
-                    // 把页面内容登记为玻璃的背景源（降级模式下不加，省去离屏采集）
-                    .then(if (captureBackdrop) Modifier.layerBackdrop(backdrop) else Modifier)
+                // 注意：这里**不能**标记 layerBackdrop。
+                // 页面内的玻璃控件（卡片等）会引用背景源，若它们同时又被采集，
+                // 就会形成「玻璃引用自己所在图层」的渲染递归 → RenderThread 栈溢出。
+                // 背景源统一由下方 GlassBackdropLayer 提供。
+                modifier = Modifier.padding(innerPadding)
             ) {
                 composable(RootDestination.HOME.route) {
                     HomeScreen(

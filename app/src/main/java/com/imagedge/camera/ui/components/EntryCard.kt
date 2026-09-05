@@ -18,6 +18,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.imagedge.camera.ui.glass.LocalGlassBackdrop
+import com.imagedge.camera.ui.glass.glassSurface
+import com.imagedge.camera.ui.glass.rememberGlassLevel
 import com.imagedge.camera.ui.theme.PillShape
 import com.imagedge.camera.ui.theme.Radius
 import com.imagedge.camera.ui.theme.Spacing
@@ -52,17 +55,28 @@ fun EntryCard(
     modifier: Modifier = Modifier,
     iconTint: Color = MaterialTheme.colorScheme.primary
 ) {
-    // ⚠️ 不做玻璃化（真机 Redmi/Android16 实测）：EntryCard 位于 NavHost 的
-    // layerBackdrop 采集范围内部，drawBackdrop 引用祖先图层的同时又被该图层
-    // 采集，形成渲染递归 → RenderThread 栈溢出（SIGSEGV）。
-    // 导航栏（Scaffold.bottomBar）不在采集范围内，所以玻璃安全；
-    // 页面内元素要做玻璃，必须先把页面拆成「背景层 + 玻璃控件层」。
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(Radius.Card),
-        color = MaterialTheme.colorScheme.surface,
-        modifier = modifier.fillMaxWidth()
+    // 玻璃底层 + 透明 Surface：Surface 保留点击涟漪与内容色语义，玻璃只负责折射。
+    //
+    // 前提：背景源由页面的 GlassBackdropLayer 提供，卡片**不在**该图层采集范围内
+    // （若卡片被采集就会形成自引用 —— 渲染递归 → RenderThread 栈溢出，真机实测过）。
+    // 降级（不支持/省电/低内存）时 glassSurface 直接返回普通背景，观感与原来一致。
+    val shape = RoundedCornerShape(Radius.Card)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .glassSurface(
+                backdrop = LocalGlassBackdrop.current,
+                level = rememberGlassLevel(),
+                shape = shape,
+                surfaceColor = MaterialTheme.colorScheme.surface
+            )
     ) {
+        Surface(
+            onClick = onClick,
+            shape = shape,
+            color = Color.Transparent,
+            modifier = Modifier.fillMaxWidth()
+        ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -85,6 +99,7 @@ fun EntryCard(
                 size = 18.dp,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            }
         }
     }
 }
