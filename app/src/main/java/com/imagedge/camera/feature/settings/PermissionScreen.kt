@@ -70,27 +70,25 @@ fun PermissionScreen(onBack: () -> Unit = {}) {
         AppPermissions.normal.filter { it.appliesTo(Build.VERSION.SDK_INT) }
     }
 
-    Scaffold(
-        topBar = {
-            PageHeader(
-                title = stringResource(R.string.permission_title),
-                onBack = onBack
-            )
-        }
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(innerPadding)
-                .padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text(
-                text = stringResource(R.string.permission_intro),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+    // 标题**不悬浮**：PageHeader 与正文在同一个可滚 Column 里，
+    // 下滑时标题随内容一起移出（用户要求取消权限页标题的固定效果）
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp)
+            .padding(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        PageHeader(
+            title = stringResource(R.string.permission_title),
+            onBack = onBack
+        )
+        Text(
+            text = stringResource(R.string.permission_intro),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
             PermissionSectionTitle(stringResource(R.string.permission_section_runtime))
             runtimePermissions.forEach { (entry, granted) ->
@@ -114,7 +112,6 @@ fun PermissionScreen(onBack: () -> Unit = {}) {
                     onClick = null
                 )
             }
-        }
     }
 }
 
