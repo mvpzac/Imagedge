@@ -23,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.imagedge.camera.R
+import com.imagedge.camera.ui.glass.glassReactive
 
 /**
  * 二级页统一标题栏。
@@ -65,7 +66,8 @@ fun PageHeader(
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
                         shape = CircleShape
                     )
-                    .clickable(onClick = onBack),
+                    // 液态玻璃返回钮：glassReactive 处理按压缩放 + 拖动位移 + 点击
+                    .glassReactive(onClick = onBack),
                 contentAlignment = Alignment.Center
             ) {
                 LucideIcon(

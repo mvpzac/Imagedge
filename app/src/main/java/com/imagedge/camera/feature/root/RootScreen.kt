@@ -62,6 +62,7 @@ import com.imagedge.camera.ui.components.LucideIcon
 import com.imagedge.camera.ui.feedback.SnackbarController
 import com.imagedge.camera.ui.glass.GlassBackdropLayer
 import com.imagedge.camera.ui.glass.GlassLevel
+import com.imagedge.camera.ui.glass.glassReactive
 import com.imagedge.camera.ui.glass.LocalGlassBackdrop
 import com.imagedge.camera.ui.glass.glassPill
 import com.imagedge.camera.ui.glass.rememberGlassLevel
@@ -448,10 +449,9 @@ private fun FloatingNavBar(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxHeight()
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null
-                                    ) { onSelect(destination) }
+                                    .glassReactive(
+                                        onClick = { onSelect(destination) }
+                                    )
                             )
                         }
                     }

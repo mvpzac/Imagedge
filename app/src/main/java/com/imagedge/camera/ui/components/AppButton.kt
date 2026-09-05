@@ -25,6 +25,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.imagedge.camera.ui.glass.LocalGlassBackdrop
+import com.imagedge.camera.ui.glass.glassReactive
 import com.imagedge.camera.ui.glass.rememberGlassLevel
 import com.imagedge.camera.ui.glass.warrantsBackdropCapture
 import com.imagedge.camera.ui.theme.Radius
@@ -101,7 +102,7 @@ fun AppButton(
                 .clip(shape)
                 .background(bg, shape)
                 .border(border.width, border.brush, shape)
-                .clickable(enabled = enabled) { onClick() }
+                .glassReactive(onClick = onClick, enabled = enabled)
                 .padding(ButtonContentPadding),
             contentAlignment = Alignment.Center
         ) {

@@ -1,6 +1,5 @@
 package com.imagedge.camera.ui.glass
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -36,7 +35,13 @@ fun GlassCard(
                 shape = shape,
                 surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest
             )
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+            .then(
+                if (onClick != null) {
+                    Modifier.glassReactive(onClick = onClick)
+                } else {
+                    Modifier
+                }
+            )
     ) {
         Surface(
             color = Color.Transparent,
