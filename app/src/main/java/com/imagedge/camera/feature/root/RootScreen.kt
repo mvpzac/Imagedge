@@ -57,6 +57,14 @@ import com.imagedge.camera.R
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.LucideIcon
 import com.imagedge.camera.ui.feedback.SnackbarController
+import com.imagedge.camera.ui.glass.GlassLevel
+import com.imagedge.camera.ui.glass.LocalGlassBackdrop
+import com.imagedge.camera.ui.glass.glassPill
+import com.imagedge.camera.ui.glass.rememberGlassLevel
+import com.imagedge.camera.ui.glass.warrantsBackdropCapture
+import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.imagedge.camera.ui.theme.Motion
 import com.imagedge.camera.ui.theme.PillShape
 import com.imagedge.camera.ui.theme.Radius
@@ -150,11 +158,19 @@ fun RootScreen(
     // 二级页面（相册子分区/查看器/遥控等）不显示底部导航，保持层级清晰
     val showBottomBar = currentDestination?.route in RootDestination.entries.map { it.route }
 
+    // 液态玻璃：页面内容渲染进离屏图层作为「背景源」，悬浮导航在其上折射。
+    // 仅在玻璃可用时才做图层采集——离屏渲染有固定开销，不支持的设备不该白付。
+    val glassLevel = rememberGlassLevel()
+    val backdrop = rememberLayerBackdrop()
+    val captureBackdrop = glassLevel.warrantsBackdropCapture()
+
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             bottomBar = {
                 if (showBottomBar) {
                     FloatingNavBar(
+                        backdrop = if (captureBackdrop) backdrop else null,
+                        glassLevel = glassLevel,
                         selectedRoute = currentDestination?.route,
                         onSelect = { destination ->
                             navController.navigate(destination.route) {
@@ -169,10 +185,17 @@ fun RootScreen(
                 }
             }
         ) { innerPadding ->
+            // 把背景源下发给所有子页面：按钮、卡片等组件可直接取用，无需逐层传参
+            androidx.compose.runtime.CompositionLocalProvider(
+                LocalGlassBackdrop provides if (captureBackdrop) backdrop else null
+            ) {
             NavHost(
                 navController = navController,
                 startDestination = RootDestination.HOME.route,
-                modifier = Modifier.padding(innerPadding)
+                modifier = Modifier
+                    .padding(innerPadding)
+                    // 把页面内容登记为玻璃的背景源（降级模式下不加，省去离屏采集）
+                    .then(if (captureBackdrop) Modifier.layerBackdrop(backdrop) else Modifier)
             ) {
                 composable(RootDestination.HOME.route) {
                     HomeScreen(
@@ -260,6 +283,7 @@ fun RootScreen(
                     )
                 }
             }
+            }
         }
         // 顶部弹窗：从屏幕顶部滑入，2 秒后滑回
         TopBanner(
@@ -310,10 +334,14 @@ private fun TopBanner(message: String?, modifier: Modifier = Modifier) {
  */
 @Composable
 private fun FloatingNavBar(
+    backdrop: LayerBackdrop?,
+    glassLevel: GlassLevel,
     selectedRoute: String?,
     onSelect: (RootDestination) -> Unit
 ) {
     val destinations = RootDestination.entries
+    // 玻璃自带投影，仅在降级（普通表面）时才需要外层阴影，避免双重投影
+    val useGlass = glassLevel.warrantsBackdropCapture() && backdrop != null
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -324,11 +352,17 @@ private fun FloatingNavBar(
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .shadow(
-                    elevation = 12.dp,
-                    shape = PillShape,
-                    ambientColor = NavShadowAmbient,
-                    spotColor = NavShadowSpot
+                .then(
+                    if (useGlass) {
+                        Modifier
+                    } else {
+                        Modifier.shadow(
+                            elevation = 12.dp,
+                            shape = PillShape,
+                            ambientColor = NavShadowAmbient,
+                            spotColor = NavShadowSpot
+                        )
+                    }
                 )
         ) {
             val itemWidth = maxWidth / destinations.size
@@ -343,10 +377,15 @@ private fun FloatingNavBar(
                 label = "navIndicator"
             )
 
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                shape = PillShape,
-                modifier = Modifier.fillMaxWidth()
+            // 胶囊容器：玻璃表面（降级时自动退回与普通 Surface 一致的观感）
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .glassPill(
+                        backdrop = backdrop,
+                        level = glassLevel,
+                        surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                    )
             ) {
                 Box(modifier = Modifier.fillMaxWidth()) {
                     // 指示条：与图标等宽的竖长药丸，随索引磁吸滑动

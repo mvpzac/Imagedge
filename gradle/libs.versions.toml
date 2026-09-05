@@ -1,25 +1,25 @@
 # 版本目录（统一管理，规范第 6 条：版本统一规范）
 [versions]
-agp = "8.11.2"
-# Kotlin 2.2.0：KSP 明确提供 2.2.0-2.0.2 与之对应（2.2.10/2.2.21 均无配套 KSP）。
-# 不能上 2.3.x —— 2.3 需要 Hilt ≥2.59，而 2.59+ 改用 AGP 9 的 ScopedArtifact API，
-# 与本项目 AGP 8.11.2 冲突（会报 ScopedArtifact$POST_COMPILATION_CLASSES 找不到）。
-# 该组合已足以支撑 Compose BOM 2026.04.01（material3 1.4.0）。
-kotlin = "2.2.0"
-ksp = "2.2.0-2.0.2"
+# AGP 9.4.0：backdrop 2.0.1 依赖 Compose 1.12+，要求 compileSdk 37 与 AGP 9.1+。
+# 升级 AGP 9 的连带要求：Gradle 9.7.1（wrapper）、Kotlin 2.3.x（Hilt 2.59+ 的元数据格式）、
+# KSP 2.3.x、Hilt 2.60.1（AGP 9 的 ScopedArtifact API）。
+agp = "9.4.0"
+# Kotlin 2.3.21：随 AGP 9 一并升级（Hilt 2.59+ 需要 2.3 元数据格式）
+kotlin = "2.3.21"
+# KSP 2.3.11：与 Kotlin 2.3.21 配套
+ksp = "2.3.11"
 # core-ktx 1.19.0 要求 AGP ≥9.1 且 compileSdk ≥37，本项目 AGP 8.11.2 故维持 1.16.0
 coreKtx = "1.16.0"
 activityCompose = "1.11.0"
 # Compose BOM 2026.04.01 → material3 1.4.0 / compose 1.11.x（Material 3 Expressive，Android 16 适配）
-composeBom = "2026.04.01"
+composeBom = "2026.08.00"
 lifecycle = "2.9.0"
 navigationCompose = "2.9.0"
-# Hilt 2.56.2 是当前真实存在的最新稳定版（Maven Central 上 2.57+ 并不存在）。
-# 它能覆盖 Kotlin 2.2 的元数据格式，且仍兼容 AGP 8.x。
-hilt = "2.56.2"
+# Hilt 2.60.1：2.59+ 起改用 AGP 9 的 ScopedArtifact API，与 AGP 9.4.0 配套
+hilt = "2.60.1"
 hiltNavigationCompose = "1.2.0"
-# Room 2.7+ 才支持 KSP2（2.6.1 用旧 KSP API，会报 unexpected jvm signature）
-room = "2.7.2"
+# Room 2.8.4：随 KSP 2.3.x 一并升级（KSP2 兼容；2.7.x 与 KSP 2.3 不匹配）
+room = "2.8.4"
 coroutines = "1.9.0"
 serialization = "1.7.3"
 okhttp = "4.12.0"
@@ -27,6 +27,7 @@ ktor = "3.0.3"
 xmlutil = "0.91.1"
 coil = "2.7.0"
 media3 = "1.9.3"
+backdrop = "2.0.1"
 junit = "4.13.2"
 androidxJunit = "1.2.1"
 espresso = "3.6.1"
@@ -72,6 +73,9 @@ xmlutil-serialization = { group = "io.github.pdvrieze.xmlutil", name = "serializ
 
 # 图片
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
+
+# Liquid Glass 效果（Compose Multiplatform，Apache-2.0）
+backdrop = { group = "io.github.kyant0", name = "backdrop", version.ref = "backdrop" }
 
 # 视频播放（Media3 ExoPlayer）
 media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }

@@ -52,6 +52,11 @@ fun EntryCard(
     modifier: Modifier = Modifier,
     iconTint: Color = MaterialTheme.colorScheme.primary
 ) {
+    // ⚠️ 不做玻璃化（真机 Redmi/Android16 实测）：EntryCard 位于 NavHost 的
+    // layerBackdrop 采集范围内部，drawBackdrop 引用祖先图层的同时又被该图层
+    // 采集，形成渲染递归 → RenderThread 栈溢出（SIGSEGV）。
+    // 导航栏（Scaffold.bottomBar）不在采集范围内，所以玻璃安全；
+    // 页面内元素要做玻璃，必须先把页面拆成「背景层 + 玻璃控件层」。
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(Radius.Card),

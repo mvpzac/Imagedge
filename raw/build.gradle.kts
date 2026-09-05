@@ -2,13 +2,12 @@
 // M0 骨架：先声明 Android library；NDK/libraw 接入在 M2 落地
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.serialization)
 }
 
 android {
     namespace = "com.imagedge.camera.raw"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         minSdk = 29

@@ -2,12 +2,11 @@
 // 移植自 SuoxingTech/MotionPhotoLab（MIT License），核心为 Media3 MuxerUtil + 多厂商 XMP 对齐
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
 }
 
 android {
     namespace = "com.imagedge.camera.motionphoto"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         minSdk = 29

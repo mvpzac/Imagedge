@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.0-alpha02] - 2026-09-05
+
+> **Alpha 测试版**。工具链整体升级 + 液态玻璃视觉。
+
+### Changed / 变更（工具链升级）
+
+- **AGP 8.11.2 → 9.4.0**（连带 Gradle 8.13 → 9.7.1）：AGP 9 内置 Kotlin 支持，各模块已移除 `kotlin-android` 插件
+- **Kotlin 2.2.0 → 2.3.21**（KSP 2.2.0-2.0.2 → 2.3.11）：Hilt 2.59+ 的元数据格式要求
+- **Hilt 2.56.2 → 2.60.1**：2.59+ 起使用 AGP 9 的 ScopedArtifact API
+- **Compose BOM 2026.04.01 → 2026.08.00**、**Room 2.7.2 → 2.8.4**、**compileSdk 36 → 37**（全部模块）
+
+### Added / 新增（液态玻璃）
+
+- **`io.github.kyant0:backdrop 2.0.1`**（Apache-2.0）：iOS 26 风格的液态玻璃效果（背景模糊 + 边缘折射 + vibrancy）
+- 底部悬浮导航改为玻璃胶囊（背后是页面内容，真实折射）
+- 动态降级：API 33+ 完整玻璃 / 31–32 仅模糊 / 更低或省电模式、低内存设备退回普通表面（观感与改造前一致）
+
+### Fixed / 修复
+
+- **真机崩溃（Redmi/Android 16 实测）**：页面内元素（EntryCard）的玻璃效果会引发 RenderThread 栈溢出（SIGSEGV）——`drawBackdrop` 引用了 `layerBackdrop` 采集范围内的祖先图层，形成渲染递归。已回退页面内玻璃，仅保留导航栏（位于 `bottomBar`，不在采集范围内，架构安全）；页面内玻璃待「背景层/内容层」分层重构后再启用
+
 ## [0.2.0-alpha01] - 2026-09-03
 
 > **Alpha 测试版**：一站式闭环（连接-传输-编辑-分享）的首个迭代，新增「分享」环节。功能可能变动，不建议作为日常主力版本使用。改动前已建立完整备份（`Imagedge-backup-2026-09-03-alpha`）。

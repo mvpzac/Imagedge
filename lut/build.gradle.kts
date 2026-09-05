@@ -2,12 +2,11 @@
 // M0 骨架：先声明 Android library；Vulkan NDK 在 M3 落地
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
 }
 
 android {
     namespace = "com.imagedge.camera.lut"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         minSdk = 29

@@ -3,7 +3,6 @@ import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
@@ -26,16 +25,16 @@ val releaseSigningConfig = if (keystorePropsFile.exists()) {
 
 android {
     namespace = "com.imagedge.camera"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.imagedge.camera"
         minSdk = 29
         targetSdk = 36
-        // 0.2.0-alpha01：一站式闭环的首个 alpha（新增分享/导出环节）
-        // 该版本为内部测试用途，功能可能变动，不建议作为日常主力版本
-        versionCode = 1010
-        versionName = "0.2.0-alpha01"
+        // 0.2.0-alpha02：工具链升级（AGP 9.4 / Kotlin 2.3.21 / compileSdk 37）
+        // + 液态玻璃 backdrop 2.0.1（底部导航栏玻璃化；页面内元素待分层后启用）
+        versionCode = 1011
+        versionName = "0.2.0-alpha02"
 
         // 仅支持 64 位设备（项目决策 2026-08-29）：排除 32 位 ABI
         ndk {
@@ -123,6 +122,9 @@ dependencies {
     // 协程 / 序列化
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
+
+    // Liquid Glass 效果（可行性验证：仅加依赖，尚未接入任何 UI）
+    implementation(libs.backdrop)
 
     // 图片
     implementation(libs.coil.compose)
