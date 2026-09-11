@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    # alpha 是当前主力开发分支（0.2.0-alpha0x 在此迭代），必须纳入 CI 把关
+    branches: [ main, alpha ]
   pull_request:
 
 jobs:
@@ -26,6 +27,11 @@ jobs:
 
       - name: Lint (app)
         run: ./gradlew :app:lintDebug --stacktrace
+
+      # Release 构建：验证签名配置检测、R8/资源处理路径与 debug 不同，
+      # 避免「debug 能过、release 挂了」直到发版才发现
+      - name: Build release APK
+        run: ./gradlew :app:assembleRelease --stacktrace
 
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
