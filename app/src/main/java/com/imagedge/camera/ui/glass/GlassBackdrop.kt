@@ -1,6 +1,7 @@
 package com.imagedge.camera.ui.glass
 
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.staticCompositionLocalOf
 import com.kyant.backdrop.backdrops.LayerBackdrop
 
 /**
@@ -14,3 +15,16 @@ import com.kyant.backdrop.backdrops.LayerBackdrop
  * 组件取到 null 时应当回落到普通表面。
  */
 val LocalGlassBackdrop = compositionLocalOf<LayerBackdrop?> { null }
+
+/**
+ * 全局玻璃能力等级（由 `RootScreen` 计算一次后下发）。
+ *
+ * 为什么要下发而不是各组件自己算：`rememberGlassLevel()` 会查 PowerManager 并
+ * **注册一个省电模式广播接收器**。一屏有 5~10 个玻璃元素，每个都注册一次 =
+ * 每次进页面 5~10 次 Binder 调用 + 同样次数的反注册，这是切页卡顿的固定开销之一。
+ * 等级是全局状态，算一次就够。
+ *
+ * 默认值取 [GlassLevel.NONE]：万一有组件在 Provider 之外被组合（弹窗预览、测试），
+ * 它会安全地退回普通表面，而不是在没有背景源时白付离屏渲染。
+ */
+val LocalGlassLevel = staticCompositionLocalOf { GlassLevel.NONE }

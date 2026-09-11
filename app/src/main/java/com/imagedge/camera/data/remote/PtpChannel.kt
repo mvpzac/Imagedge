@@ -8,6 +8,7 @@ import com.imagedge.camera.ptp.PtpResponseException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -106,6 +107,15 @@ class PtpChannel @Inject constructor() : CameraChannel {
      * 不受 soTimeout 管辖——相机一旦在持锁期间不响应，轮询/保活全部无限挂死（真机实测）。
      */
     private val ptpMutex = Mutex()
+
+    /**
+     * 会话级后台协程作用域（保活 + 事件监听）。
+     *
+     * 原先两处都用裸 `CoroutineScope(Dispatchers.IO).launch {}`：作用域本身无父级、
+     * 无 SupervisorJob，既不受应用生命周期约束，失败语义也不明确（P0）。
+     * 统一到本作用域，逐个 Job 在 [disconnect] 中取消。
+     */
+    private val sessionScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _connectionState = MutableStateFlow(ChannelConnectionState.DISCONNECTED)
     override val connectionState: StateFlow<ChannelConnectionState> = _connectionState.asStateFlow()
@@ -251,7 +261,7 @@ class PtpChannel @Inject constructor() : CameraChannel {
      */
     private fun startEventMonitor(newClient: PtpIpClient) {
         eventJob?.cancel()
-        eventJob = CoroutineScope(Dispatchers.IO).launch {
+        eventJob = sessionScope.launch {
             // P2-5：外层重试循环。原先监听协程一旦读异常就 break 静默死亡，
             // 相机事件（选片推送/拍摄完成/参数变化）从此永久失效，且没有任何自愈——
             // 用户感知是「相机上选了片，手机相册永远不刷新」，只能重连。
@@ -347,7 +357,7 @@ class PtpChannel @Inject constructor() : CameraChannel {
 
     private fun startKeepAlive(newClient: PtpIpClient) {
         keepAliveJob?.cancel()
-        keepAliveJob = CoroutineScope(Dispatchers.IO).launch {
+        keepAliveJob = sessionScope.launch {
             var failureLogged = false
             while (isActive) {
                 // 后台暂停保活：轻量等待（2s 轮询标志位，无网络开销），回前台/下载开始即恢复
@@ -374,6 +384,11 @@ class PtpChannel @Inject constructor() : CameraChannel {
                         failureLogged = true
                     }
                     _connectionState.value = ChannelConnectionState.DISCONNECTED
+                    // P0：判死时必须把底层 socket 一起回收。原先只改状态、
+                    // 不清 socket，死连接会一直占着两个 fd（命令 + 事件）直到下次
+                    // connect/disconnect；反复「连上→保活失败」会逐步耗尽进程 fd。
+                    // forceClose 后 PtpIoException 属 IOException，上层仍可走自动重连路径。
+                    runCatching { newClient.forceClose() }
                     return@launch
                 }
             }

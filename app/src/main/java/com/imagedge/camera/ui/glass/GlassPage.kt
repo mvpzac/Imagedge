@@ -39,17 +39,17 @@ fun GlassBackdropLayer(
     // 光晕色板：按主题取柔和低饱和色相（右上→左下逆时针分布，避免与内容抢视觉）
     val glows = if (isLight) {
         listOf(
-            Glow(Color(0xFF8FB8DE), 0.22f, 0.16f, 0.5f),  // 青蓝 · 左上
-            Glow(Color(0xFFC3B0EC), 0.20f, 0.84f, 0.4f),  // 紫 · 右上
-            Glow(Color(0xFFF0C79B), 0.18f, 0.72f, 1.0f),  // 暖 · 底部
-            Glow(Color(0xFF9ED0BC), 0.18f, 0.06f, 0.86f)  // 青绿 · 左下
+            Glow(Color(0xFF7FB0E0), 0.34f, 0.14f, 0.46f), // 青蓝 · 左上
+            Glow(Color(0xFFB79BEA), 0.32f, 0.86f, 0.36f), // 紫 · 右上
+            Glow(Color(0xFFF2BE86), 0.28f, 0.72f, 1.02f), // 暖 · 底部
+            Glow(Color(0xFF8ACDB4), 0.28f, 0.04f, 0.88f)  // 青绿 · 左下
         )
     } else {
         listOf(
-            Glow(Color(0xFF31507A), 0.55f, 0.16f, 0.5f),
-            Glow(Color(0xFF514085), 0.50f, 0.84f, 0.4f),
-            Glow(Color(0xFF7A5426), 0.48f, 0.72f, 1.0f),
-            Glow(Color(0xFF285A46), 0.48f, 0.06f, 0.86f)
+            Glow(Color(0xFF3A5F8F), 0.62f, 0.14f, 0.46f),
+            Glow(Color(0xFF5C4896), 0.58f, 0.86f, 0.36f),
+            Glow(Color(0xFF8A5F2A), 0.55f, 0.72f, 1.02f),
+            Glow(Color(0xFF2C6A52), 0.55f, 0.04f, 0.88f)
         )
     }
     val base = if (isLight) Color(0xFFF2F3F5) else Color(0xFF0E0F13)
@@ -76,8 +76,9 @@ private class Glow(
         val w = scope.size.width
         val h = scope.size.height
         val center = Offset(w * centerX, h * centerY)
-        // 半径取最长边的 ~65%，保证光晕边缘始终超出屏幕（弥散到底，无硬边）
-        val radius = scope.size.maxDimension * 0.65f
+        // 半径取最长边的 ~55%：比之前收紧一档——玻璃变轻之后，
+        // 背景需要更明显的明暗过渡才折射得出层次（但仍在离屏外弥散，无硬边）
+        val radius = scope.size.maxDimension * 0.55f
         scope.drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(color.copy(alpha = alpha), color.copy(alpha = 0f)),

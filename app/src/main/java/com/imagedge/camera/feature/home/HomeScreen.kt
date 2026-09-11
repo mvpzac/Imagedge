@@ -25,7 +25,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
@@ -45,8 +44,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.R
 import com.imagedge.camera.data.model.ConnectionPhase
+import com.imagedge.camera.ui.components.AppButtonAlign
 import com.imagedge.camera.ui.components.AppButton
 import com.imagedge.camera.ui.components.AppButtonType
+import com.imagedge.camera.ui.components.AppLink
+import com.imagedge.camera.ui.components.AppTextField
+import com.imagedge.camera.ui.theme.Spacing
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.glass.GlassCard
 import com.imagedge.camera.ui.glass.LocalGlassBackdrop
@@ -198,57 +201,64 @@ fun HomeScreen(
             )
         }
 
-        // 主 CTA：已连接 → 断开；未连接 → 扫码连接（主）+ 手动连接（次要）
-        if (state.phase == ConnectionPhase.CONNECTED) {
-            HomeBigButton(
-                icon = null,
-                title = stringResource(R.string.home_btn_disconnect),
-                desc = stringResource(R.string.home_btn_disconnect_desc),
-                onClick = { viewModel.disconnect() },
-                modifier = Modifier.padding(top = 32.dp)
-            )
-        } else {
-            HomeBigButton(
-                icon = Lucide.QrCode,
-                title = stringResource(R.string.home_btn_qr),
-                desc = stringResource(R.string.home_btn_qr_desc),
-                onClick = { showQrSheet = true },
-                modifier = Modifier.padding(top = 32.dp)
-            )
-            HomeBigButton(
-                icon = Lucide.Keyboard,
-                title = stringResource(R.string.home_btn_manual),
-                desc = stringResource(R.string.home_btn_manual_desc),
-                onClick = { showManual = !showManual },
-                modifier = Modifier.padding(top = 12.dp),
-                filled = false
-            )
-            if (showManual) {
-                OutlinedTextField(
-                    value = manualIp,
-                    onValueChange = { manualIp = it },
-                    label = { Text(stringResource(R.string.settings_ip_label)) },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp)
+        // ── 主操作区 ──
+        // 规范：一屏只有一个主按钮。未连接时主操作 = 扫码连接；
+        // 已连接时主操作在「遥控拍摄」卡片上，断开只是次级动作（所以用 SECONDARY）。
+        //
+        // 按钮一律走 AppButton 的**内置双行/箭头能力**（subtitle + align + trailingIcon），
+        // 不再用自定义内容槽拼 Column —— 那会让内边距、对齐与文字层级各写一套。
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = Spacing.XXL),
+            verticalArrangement = Arrangement.spacedBy(Spacing.M)
+        ) {
+            if (state.phase == ConnectionPhase.CONNECTED) {
+                AppButton(
+                    text = stringResource(R.string.home_btn_disconnect),
+                    subtitle = stringResource(R.string.home_btn_disconnect_desc),
+                    onClick = { viewModel.disconnect() },
+                    type = AppButtonType.SECONDARY,
+                    leadingIcon = null,
+                    align = AppButtonAlign.START
                 )
-                Text(
-                    text = stringResource(R.string.home_manual_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                AppButton(
+                    text = stringResource(R.string.home_btn_qr),
+                    subtitle = stringResource(R.string.home_btn_qr_desc),
+                    onClick = { showQrSheet = true },
+                    leadingIcon = Lucide.QrCode,
+                    align = AppButtonAlign.START,
+                    trailingIcon = Lucide.ChevronRight
                 )
-                // 规范：一屏只保留 1 个主按钮（扫码连接）。
-                // 这里的「连接」是展开面板内的次级动作，用 FilledTonal 降一级，
-                // 既比 Outlined 更明确，又不与上面的主按钮抢视觉焦点。
-                FilledTonalButton(
-                    onClick = { viewModel.connect(manualIp.ifBlank { null }) },
-                    enabled = state.phase != ConnectionPhase.CONNECTING,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp)
-                ) {
-                    Text(stringResource(R.string.home_manual_connect))
+                AppButton(
+                    text = stringResource(R.string.home_btn_manual),
+                    subtitle = stringResource(R.string.home_btn_manual_desc),
+                    onClick = { showManual = !showManual },
+                    type = AppButtonType.SECONDARY,
+                    leadingIcon = Lucide.Keyboard,
+                    align = AppButtonAlign.START,
+                    // 展开态用箭头方向表达（不额外画图标，避免多一套视觉语言）
+                    trailingIcon = if (showManual) Lucide.ArrowUp else Lucide.ArrowDown
+                )
+                if (showManual) {
+                    AppTextField(
+                        value = manualIp,
+                        onValueChange = { manualIp = it },
+                        label = stringResource(R.string.settings_ip_label)
+                    )
+                    Text(
+                        text = stringResource(R.string.home_manual_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    // 展开面板内的次级动作（规范：不与上面的主按钮同级）
+                    AppButton(
+                        text = stringResource(R.string.home_manual_connect),
+                        onClick = { viewModel.connect(manualIp.ifBlank { null }) },
+                        enabled = state.phase != ConnectionPhase.CONNECTING,
+                        type = AppButtonType.SECONDARY
+                    )
                 }
             }
         }
@@ -278,9 +288,10 @@ fun HomeScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    TextButton(onClick = onOpenRemote) {
-                        Text(stringResource(R.string.remote_entry_open))
-                    }
+                    AppLink(
+                        text = stringResource(R.string.remote_entry_open),
+                        onClick = onOpenRemote
+                    )
                 }
             }
         }
@@ -306,45 +317,3 @@ private fun channelLabel(type: com.imagedge.camera.data.remote.ChannelType): Str
     com.imagedge.camera.data.remote.ChannelType.UPNP -> "UPnP"
 }
 
-/**
- * 主页大按钮：标题 + 说明两行。**直接复用 AppButton**（带自定义内容槽），
- * 这样玻璃样式只需在 AppButton 维护一处——本按钮、设置页「导入 .cube」、
- * 以及所有 AppButton 调用点同时生效，不再各自实现。
- *
- * @param filled true 主按钮（PRIMARY），false 次按钮（SECONDARY）
- */
-@Composable
-private fun HomeBigButton(
-    icon: Int?,
-    title: String,
-    desc: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    filled: Boolean = true
-) {
-    AppButton(
-        text = title,
-        onClick = onClick,
-        modifier = modifier,
-        type = if (filled) AppButtonType.PRIMARY else AppButtonType.SECONDARY,
-        content = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (icon != null) {
-                        LucideIcon(icon, contentDescription = null, size = 20.dp)
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    Text(title, style = MaterialTheme.typography.titleMedium)
-                }
-                Text(
-                    text = desc,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = LocalContentColor.current.copy(alpha = 0.72f)
-                )
-            }
-        }
-    )
-}

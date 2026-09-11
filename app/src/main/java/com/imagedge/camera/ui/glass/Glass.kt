@@ -1,10 +1,17 @@
 package com.imagedge.camera.ui.glass
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.PowerManager
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 
 /**
@@ -52,11 +59,35 @@ fun glassLevel(context: Context): GlassLevel {
     }
 }
 
-/** 在组合中记住当前玻璃等级（省电模式变化时可感知） */
+/** 当前是否处于省电模式（取值失败按「否」处理，避免误降级） */
+private fun isPowerSaveMode(context: Context): Boolean =
+    runCatching {
+        (context.getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isPowerSaveMode == true
+    }.getOrDefault(false)
+
+/**
+ * 在组合中记住当前玻璃等级。
+ *
+ * 省电模式是**可变的系统状态**，必须作为重算触发源：原实现是 `remember { glassLevel(context) }`
+ * （无 key），注释声称"省电模式变化时可感知"实际不成立——用户开启省电后，
+ * 玻璃仍会在每帧继续付出离屏渲染的代价，与降级策略的初衷相反（P0）。
+ */
 @Composable
 fun rememberGlassLevel(): GlassLevel {
     val context = LocalContext.current
-    return remember { glassLevel(context) }
+    var powerSave by remember { mutableStateOf(isPowerSaveMode(context)) }
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context?, intent: Intent?) {
+                powerSave = isPowerSaveMode(context)
+            }
+        }
+        val registered = runCatching {
+            context.registerReceiver(receiver, IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED))
+        }.isSuccess
+        onDispose { if (registered) runCatching { context.unregisterReceiver(receiver) } }
+    }
+    return remember(powerSave) { glassLevel(context) }
 }
 
 /** 是否值得为玻璃效果付出「把内容渲染进离屏图层」的开销 */

@@ -9,7 +9,7 @@
  ├── :upnp   UPnP/SOAP + SSDP
  ├── :liveview LiveView 流（裸 60152 socket）；ZV-E10 无 Camera Web API 服务，故未用 JSON-RPC
  ├── :raw    RAW 内嵌 JPEG 提取（libraw NDK 规划中）
- ├── :lut    .cube 解析 + LUT 处理器（CPU；Vulkan 规划中）
+ ├── :lut    .cube 解析 + LUT 处理器（GPU：GLES 3.0 3D 纹理；CPU 兜底）
  └── :motionphoto 视频 → 动态照片（Motion Photo / LIVE Photo）封装（Media3 MuxerUtil）
 ```
 
@@ -61,4 +61,4 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
 | `SonyBleShutter` | `:app/data/ble` | 蓝牙遥控快门（配对/GATT/命令队列） |
 | `CameraWifiManager` | `:app/data/remote/wifi` | 热点配网、网关发现、进程网络绑定 |
 | `EmbeddedJpegDecoder` | `:raw` | ARW TIFF 解析提取内嵌预览 |
-| `CubeLutParser` / `CpuLutProcessor` | `:lut` | .cube 解析 / 三线性插值 |
+| `CubeLutParser` / `CpuLutProcessor` / `GpuLutProcessor` | `:lut` | .cube 解析 / GPU（GLES 3.0 3D 纹理）/ CPU 三线性兜底 |

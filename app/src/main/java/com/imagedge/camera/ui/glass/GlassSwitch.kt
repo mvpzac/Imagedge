@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import com.imagedge.camera.ui.theme.PillShape
+import com.imagedge.camera.ui.glass.LocalGlassLevel
 
 /**
  * 玻璃开关：把 Switch 的轨道换成玻璃，滑块（thumb）保持实体。
@@ -26,7 +27,7 @@ fun GlassSwitch(
     enabled: Boolean = true
 ) {
     val backdrop = LocalGlassBackdrop.current
-    val level = rememberGlassLevel()
+    val level = LocalGlassLevel.current
     if (backdrop == null || !level.warrantsBackdropCapture()) {
         Switch(
             checked = checked,
@@ -48,6 +49,8 @@ fun GlassSwitch(
             backdrop = backdrop,
             level = level,
             shape = PillShape,
+            // 开关是小控件：用 SMALL 档（更轻的模糊），否则 40dp 高的轨道会糊成色块
+            profile = GlassProfile.SMALL,
             surfaceColor = trackColor
         )
     ) {

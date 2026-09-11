@@ -25,6 +25,11 @@ jobs:
       - name: Unit tests
         run: ./gradlew test --stacktrace
 
+      # UI 规范检查：feature/ 下禁止直接使用 M3 原生控件（docs/UI-SPEC.md §6.1）。
+      # 放在 lint 之前——这条失败的信息比 lint 更直白（直接指出该用哪个设计系统组件）。
+      - name: UI spec check
+        run: ./gradlew :app:uiSpecCheck --stacktrace
+
       - name: Lint (app)
         run: ./gradlew :app:lintDebug --stacktrace
 

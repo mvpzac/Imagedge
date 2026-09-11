@@ -25,6 +25,8 @@ object Lucide {
     val Settings = R.drawable.ic_lucide_settings
     val ArrowLeft = R.drawable.ic_lucide_arrow_left
     val ArrowLeftRight = R.drawable.ic_lucide_arrow_left_right
+    val ArrowUp = R.drawable.ic_lucide_arrow_up
+    val ArrowDown = R.drawable.ic_lucide_arrow_down
     val Sparkles = R.drawable.ic_lucide_sparkles
     val ShieldCheck = R.drawable.ic_lucide_shield_check
     val CircleQuestionMark = R.drawable.ic_lucide_circle_question_mark

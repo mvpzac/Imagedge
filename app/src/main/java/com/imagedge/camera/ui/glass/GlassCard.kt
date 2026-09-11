@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import com.imagedge.camera.ui.theme.Radius
+import com.imagedge.camera.ui.glass.LocalGlassLevel
 
 /**
  * 玻璃卡片：Material3 `Card` 的液态玻璃替代品。
@@ -31,7 +32,7 @@ fun GlassCard(
         modifier = modifier
             .glassSurface(
                 backdrop = LocalGlassBackdrop.current,
-                level = rememberGlassLevel(),
+                level = LocalGlassLevel.current,
                 shape = shape,
                 surfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest
             )

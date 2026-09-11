@@ -5,7 +5,7 @@ import androidx.room.Room
 import com.imagedge.camera.data.transfer.DownloadDatabase
 import com.imagedge.camera.data.transfer.DownloadHistoryDao
 import com.imagedge.camera.data.transfer.DownloadTaskDao
-import com.imagedge.camera.lut.CpuLutProcessor
+import com.imagedge.camera.lut.GpuLutProcessor
 import com.imagedge.camera.lut.LutProcessor
 import com.imagedge.camera.raw.EmbeddedJpegDecoder
 import com.imagedge.camera.raw.RawDecoder
@@ -34,10 +34,16 @@ object AppModule {
     @Singleton
     fun provideRawDecoder(): RawDecoder = EmbeddedJpegDecoder()
 
-    /** LUT 处理器（CPU 先行；Vulkan GPU 版落地后按设备能力智能选择） */
+    /**
+     * LUT 处理器：GPU（GLES 3.0 + 3D 纹理，硬件三线性）优先，失败自动回退 CPU。
+     *
+     * 选择逻辑在 [GpuLutProcessor] 内部：小图（缩略图级别）与字节数组接口走 CPU，
+     * 预览与全分辨率导出走 GPU；EGL/着色器/纹理任一环节不可用时记录原因并永久回退，
+     * 保证功能不中断（日志 tag `CamRemote-lut`）。
+     */
     @Provides
     @Singleton
-    fun provideLutProcessor(): LutProcessor = CpuLutProcessor()
+    fun provideLutProcessor(): LutProcessor = GpuLutProcessor()
 
     /** 下载任务数据库（队列 + 传输记录持久化） */
     @Provides

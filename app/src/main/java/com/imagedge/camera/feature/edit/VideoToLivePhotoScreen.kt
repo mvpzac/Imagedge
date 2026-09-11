@@ -60,6 +60,10 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.imagedge.camera.ui.components.AppButton
+import com.imagedge.camera.ui.components.AppSlider
+import com.imagedge.camera.ui.components.AppChipRow
+import com.imagedge.camera.ui.components.AppLink
+import com.imagedge.camera.ui.theme.Spacing
 import com.imagedge.camera.ui.components.AppButtonType
 import com.imagedge.camera.ui.components.EmptyState
 import com.imagedge.camera.ui.components.Lucide
@@ -211,13 +215,15 @@ private fun SessionEditor(viewModel: VideoToLivePhotoViewModel) {
             style = MaterialTheme.typography.bodyMedium
         )
         if (session.durationMs > 0) {
-            Slider(
-                value = session.keyMs.toFloat(),
+            AppSlider(
+                label = "关键点",
+                value = session.keyMs.toInt(),
                 // 拖动中只更新锚点状态（窗口随动）；松手才抽帧刷新封面预览，
                 // 避免 OPTION_CLOSEST 逐帧解码被高频触发
                 onValueChange = { viewModel.setKeyPoint(it.toLong()) },
                 onValueChangeFinished = { viewModel.refreshKeyPreview() },
-                valueRange = 0f..session.durationMs.toFloat()
+                range = 0..session.durationMs.toInt(),
+                valueText = "%.1fs".format(session.keyMs / 1000f)
             )
         }
 
@@ -300,13 +306,13 @@ private fun SessionEditor(viewModel: VideoToLivePhotoViewModel) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            WINDOW_LEN_OPTIONS_MS.forEach { len ->
-                FilterChip(
-                    selected = session.windowLenMs == len,
-                    onClick = { viewModel.setWindowLen(len) },
-                    label = { Text("${len / 1000} 秒") }
-                )
-            }
+            AppChipRow(
+                items = WINDOW_LEN_OPTIONS_MS.toList(),
+                selected = session.windowLenMs,
+                label = { "${it / 1000} 秒" },
+                onSelect = { viewModel.setWindowLen(it) },
+                modifier = Modifier.width(200.dp)
+            )
             Spacer(Modifier.weight(1f))
             Text(
                 text = "%.1fs – %.1fs".format(session.winStartMs / 1000f, session.winEndMs / 1000f),
@@ -440,14 +446,14 @@ private fun ClipPreviewDialog(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            TextButton(
+            AppLink(
+                text = "关闭",
                 onClick = onDismiss,
+                color = OnViewer,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(16.dp)
-            ) {
-                Text("关闭", color = OnViewer)
-            }
+                    .padding(Spacing.L)
+            )
         }
     }
 }

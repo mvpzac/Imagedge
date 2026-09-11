@@ -60,6 +60,7 @@ import com.imagedge.camera.R
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.LucideIcon
 import com.imagedge.camera.ui.feedback.SnackbarController
+import com.imagedge.camera.ui.glass.LocalGlassLevel
 import com.imagedge.camera.ui.glass.GlassBackdropLayer
 import com.imagedge.camera.ui.glass.GlassLevel
 import com.imagedge.camera.ui.glass.glassReactive
@@ -77,7 +78,7 @@ import com.imagedge.camera.feature.album.AlbumHubScreen
 import com.imagedge.camera.feature.album.AlbumScreen
 import com.imagedge.camera.feature.album.BrowseMode
 import com.imagedge.camera.feature.edit.EditHubScreen
-import com.imagedge.camera.feature.edit.LutEditScreen
+import com.imagedge.camera.feature.edit.PhotoEditScreen
 import com.imagedge.camera.feature.edit.VideoToLivePhotoScreen
 import com.imagedge.camera.feature.edit.LiveTriptychScreen
 import com.imagedge.camera.feature.edit.ExifFrameScreen
@@ -124,7 +125,7 @@ object Route {
     const val ALBUM_SELECTION = "album_selection"
     const val ALBUM_FULL_CARD = "album_full_card"
     const val EDIT_HUB = "edit_hub"
-    const val LUT_EDIT = "lut_edit"
+    const val PHOTO_EDIT = "photo_edit"
     const val LIVE_PHOTO = "live_photo"
     const val LIVE_TRIPTYCH = "live_triptych"
     const val EXIF_FRAME = "exif_frame"
@@ -173,6 +174,12 @@ fun RootScreen(
     val navBackdrop = rememberLayerBackdrop()
     val captureBackdrop = glassLevel.warrantsBackdropCapture()
 
+    // 玻璃等级只在这里算一次，通过 CompositionLocal 下发：
+    // 组件各自调 rememberGlassLevel() 会各自注册省电广播接收器（一屏 5~10 个），
+    // 进页面时那批 Binder 调用是切页固定开销的一部分。
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalGlassLevel provides glassLevel
+    ) {
     Box(modifier = Modifier.fillMaxSize()) {
         // 页面背景层（光晕）：采集给 pageBackdrop，供页面内玻璃控件折射
         GlassBackdropLayer(backdrop = if (captureBackdrop) pageBackdrop else null)
@@ -244,13 +251,13 @@ fun RootScreen(
                     EditHubScreen(
                         onBack = { navController.popBackStack() },
                         onOpenLivePhoto = { navController.navigate(Route.LIVE_PHOTO) },
-                        onOpenLut = { navController.navigate(Route.LUT_EDIT) },
+                        onOpenEdit = { navController.navigate(Route.PHOTO_EDIT) },
                         onOpenTriptych = { navController.navigate(Route.LIVE_TRIPTYCH) },
                         onOpenExifFrame = { navController.navigate(Route.EXIF_FRAME) }
                     )
                 }
-                composable(Route.LUT_EDIT) {
-                    LutEditScreen(onBack = { navController.popBackStack() })
+                composable(Route.PHOTO_EDIT) {
+                    PhotoEditScreen(onBack = { navController.popBackStack() })
                 }
                 composable(Route.LIVE_PHOTO) {
                     VideoToLivePhotoScreen(onBack = { navController.popBackStack() })
@@ -320,6 +327,7 @@ fun RootScreen(
             message = bannerMessage,
             modifier = Modifier.align(Alignment.TopCenter)
         )
+    }
     }
 }
 

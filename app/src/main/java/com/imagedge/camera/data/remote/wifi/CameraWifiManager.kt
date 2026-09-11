@@ -99,14 +99,20 @@ class CameraWifiManager @Inject constructor(
 
     /**
      * 连接相机热点（Android 10+，WifiNetworkSpecifier）
+     *
+     * 凭据按 [auth] 分支设置——**不要无条件设成 WPA2**：开放热点（T:nopass）
+     * 传空密码走 WPA2 会被系统直接判为不可用，WPA3 热点则需要 setWpa3Passphrase。
+     *
      * @param ssid 热点名（如 DIRECT-xxxx-ZV-E10）
-     * @param password WPA2 密码（相机屏幕显示）
+     * @param password 热点密码；[WifiAuth.OPEN] 时可为 null（不设置任何凭据）
+     * @param auth 认证方式（来自二维码 T 字段 / 索尼 W01 默认 WPA2）
      * @param onResult 连接结果回调
      */
     fun connectToCameraHotspot(
         ssid: String?,
-        password: String,
+        password: String?,
         bssid: String? = null,
+        auth: WifiAuth = WifiAuth.WPA2,
         onResult: (success: Boolean, message: String?) -> Unit
     ) {
         // 记录本次请求距上次释放的间隔：刚断开就重连同一热点，系统仍在拆除旧网络，
@@ -118,7 +124,17 @@ class CameraWifiManager @Inject constructor(
         check(ssid != null || bssid != null) { "SSID 与 BSSID 均为空" }
         val builder = WifiNetworkSpecifier.Builder()
         if (ssid != null) builder.setSsid(ssid)
-        builder.setWpa2Passphrase(password)
+        when (auth) {
+            WifiAuth.OPEN -> AppLog.i(TAG, "开放热点（T:nopass），不设置凭据")
+            WifiAuth.WPA3 -> builder.setWpa3Passphrase(password.orEmpty())
+            WifiAuth.WEP -> {
+                // WifiNetworkSpecifier 无 WEP 通道：明确失败，由调用方引导手动连接
+                AppLog.w(TAG, "二维码使用 WEP 加密，WifiNetworkSpecifier 不支持自动配网")
+                onResult(false, "该二维码使用 WEP 加密，Android 不支持自动配网，请在系统 Wi-Fi 设置中手动连接")
+                return
+            }
+            WifiAuth.WPA2 -> builder.setWpa2Passphrase(password.orEmpty())
+        }
         if (bssid != null) {
             runCatching { android.net.MacAddress.fromString(bssid) }.getOrNull()?.let {
                 builder.setBssid(it)

@@ -136,13 +136,34 @@
     <string name="hub_edit_title">相册编辑</string>
     <string name="hub_edit_desc">视频转 LIVE 图 · LUT 滤镜调色</string>
     <string name="edit_title">相册编辑</string>
-    <string name="edit_lut_title">LUT 滤镜</string>
     <string name="edit_hub_livephoto_desc">选择视频导出为动态照片</string>
-    <string name="edit_hub_lut_desc">内置滤镜与 .cube 导入调色</string>
+    <string name="edit_hub_edit_desc">裁剪、旋转、拉直 + 基础调色 + LUT 滤镜，导出按原分辨率并保留 EXIF</string>
     <string name="edit_pick_image">选择图片</string>
     <string name="edit_pick_hint">选择一张本机照片开始调色（更多滤镜可在设置 → LUT 管理导入）</string>
     <string name="edit_strength">强度</string>
     <string name="edit_save">保存到相册</string>
+    <!-- 调色与导出（LUT 编辑页）：对比度/饱和度/色温复用「基础调整」的既有文案 -->
+    <string name="edit_adjust_title">调整</string>
+    <string name="edit_exposure">曝光</string>
+    <string name="edit_compare_hint">长按对比原图</string>
+    <string name="edit_compare_original">原图</string>
+    <string name="edit_exporting">正在按原分辨率导出…</string>
+
+    <!-- 编辑调节（几何 + 调色） -->
+    <string name="edit_photo_title">编辑调节</string>
+    <string name="edit_crop_aspect">裁剪比例</string>
+    <string name="edit_crop_reset">重置裁剪</string>
+    <string name="edit_crop_hint">拖动边角调整范围</string>
+    <string name="edit_crop_tip">拖动四角改变裁剪范围，框内拖动可整体移动；比例锁定后按对角等比缩放。</string>
+    <string name="edit_rotate_left">左转 90°</string>
+    <string name="edit_rotate_right">右转 90°</string>
+    <string name="edit_rotate_title">旋转</string>
+    <string name="edit_flip_title">镜像</string>
+    <string name="edit_flip_h">水平翻转</string>
+    <string name="edit_flip_v">垂直翻转</string>
+    <string name="edit_straighten">拉直</string>
+    <string name="edit_straighten_tip">拉直会旋转画面并自动裁掉四角空白，适合校正地平线倾斜。</string>
+    <string name="edit_geometry_reset">重置几何</string>
 
     <!-- LUT 滤镜页：按适用画面类型分排 + 问号说明 -->
     <string name="edit_lut_filter_title">滤镜</string>
@@ -177,16 +198,11 @@
     <string name="download_empty_desc">在相册里长按选择照片后点「下载」，任务会出现在这里</string>
     <string name="download_empty_action">去相册选片</string>
 
-    <!-- 基础调整（编辑环节） -->
-    <string name="edit_basic_title">基础调整</string>
-    <string name="edit_brightness">亮度</string>
+    <!-- 编辑环节（通用文案：对比度/饱和度/色温/重置由「编辑调节」与基础调整共用） -->
     <string name="edit_contrast">对比度</string>
     <string name="edit_saturation">饱和度</string>
     <string name="edit_temperature">色温</string>
-    <string name="edit_rotate">旋转</string>
     <string name="edit_reset">重置</string>
-    <string name="edit_finish">完成</string>
-    <string name="edit_processing">处理中…</string>
     <string name="edit_action">编辑</string>
 
     <!-- 分享 / 导出 -->
@@ -197,8 +213,6 @@
     <string name="share_privacy">元数据与隐私</string>
     <string name="share_quality">画质</string>
     <string name="share_export_action">导出并分享</string>
-    <string name="share_exporting">导出中…</string>
-    <string name="share_failed">导出失败，请重试</string>
     <string name="share_png_no_exif">PNG 不支持 EXIF，元数据设置对该格式不生效</string>
     <string name="share_strip_location_hint">清除 GPS 坐标，保留光圈、快门、ISO 等拍摄参数</string>
     <string name="share_strip_all_hint">清除全部拍摄信息，适合发到公开平台</string>

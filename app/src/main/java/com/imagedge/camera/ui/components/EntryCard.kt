@@ -18,6 +18,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.imagedge.camera.ui.glass.rememberGlassHighlight
+import com.imagedge.camera.ui.glass.glassPressTracking
+import com.imagedge.camera.ui.glass.LocalGlassLevel
 import com.imagedge.camera.ui.glass.LocalGlassBackdrop
 import com.imagedge.camera.ui.glass.glassSurface
 import com.imagedge.camera.ui.glass.rememberGlassLevel
@@ -61,15 +64,19 @@ fun EntryCard(
     // （若卡片被采集就会形成自引用 —— 渲染递归 → RenderThread 栈溢出，真机实测过）。
     // 降级（不支持/省电/低内存）时 glassSurface 直接返回普通背景，观感与原来一致。
     val shape = RoundedCornerShape(Radius.Card)
+    // 按压高光：卡片点击由 Surface 处理，这里只**旁听**指针事件（不消费），
+    // 因此涟漪与无障碍语义不受影响，高光能跟着手指走
+    val highlight = rememberGlassHighlight()
     Box(
         modifier = modifier
             .fillMaxWidth()
             .glassSurface(
                 backdrop = LocalGlassBackdrop.current,
-                level = rememberGlassLevel(),
+                level = LocalGlassLevel.current,
                 shape = shape,
                 surfaceColor = MaterialTheme.colorScheme.surface
             )
+            .glassPressTracking(highlight)
     ) {
         Surface(
             onClick = onClick,

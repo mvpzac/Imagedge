@@ -52,6 +52,7 @@ import com.imagedge.camera.R
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.LucideIcon
 import com.imagedge.camera.ui.theme.ThemeMode
+import com.imagedge.camera.ui.components.AppLink
 
 /**
  * <pre>
@@ -193,16 +194,18 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.weight(1f)
                         )
-                        TextButton(onClick = {
-                            exportTarget = name
-                            lutExportLauncher.launch(name)
-                        }) { Text(stringResource(R.string.settings_lut_export)) }
-                        TextButton(onClick = { deleteTarget = name }) {
-                            Text(
-                                stringResource(R.string.settings_lut_delete),
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
+                        AppLink(
+                            text = stringResource(R.string.settings_lut_export),
+                            onClick = {
+                                exportTarget = name
+                                lutExportLauncher.launch(name)
+                            }
+                        )
+                        AppLink(
+                            text = stringResource(R.string.settings_lut_delete),
+                            onClick = { deleteTarget = name },
+                            color = MaterialTheme.colorScheme.error
+                        )
                     }
                 }
             }
@@ -239,20 +242,20 @@ fun SettingsScreen(
                     )
                 },
                 confirmButton = {
-                    TextButton(onClick = {
-                        viewModel.deleteLut(name)
-                        deleteTarget = null
-                    }) {
-                        Text(
-                            stringResource(R.string.settings_lut_delete),
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
+                    AppLink(
+                        text = stringResource(R.string.settings_lut_delete),
+                        onClick = {
+                            viewModel.deleteLut(name)
+                            deleteTarget = null
+                        },
+                        color = MaterialTheme.colorScheme.error
+                    )
                 },
                 dismissButton = {
-                    TextButton(onClick = { deleteTarget = null }) {
-                        Text(stringResource(R.string.settings_lut_delete_cancel))
-                    }
+                    AppLink(
+                        text = stringResource(R.string.settings_lut_delete_cancel),
+                        onClick = { deleteTarget = null }
+                    )
                 }
             )
         }
@@ -292,14 +295,16 @@ fun SettingsScreen(
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = { viewModel.confirmLutType(selected) }) {
-                        Text(stringResource(R.string.lut_type_confirm))
-                    }
+                    AppLink(
+                        text = stringResource(R.string.lut_type_confirm),
+                        onClick = { viewModel.confirmLutType(selected) }
+                    )
                 },
                 dismissButton = {
-                    TextButton(onClick = { viewModel.dismissLutType() }) {
-                        Text(stringResource(R.string.lut_type_skip))
-                    }
+                    AppLink(
+                        text = stringResource(R.string.lut_type_skip),
+                        onClick = { viewModel.dismissLutType() }
+                    )
                 }
             )
         }
@@ -318,17 +323,18 @@ fun SettingsScreen(
             val dirPicker = rememberLauncherForActivityResult(
                 ActivityResultContracts.OpenDocumentTree()
             ) { uri -> uri?.let { viewModel.onDirPicked(it) } }
-            // 通用按钮外观（描边按钮），不再是纯文字按钮
-            OutlinedButton(
+            // 设计系统按钮（次级）：描边 + 玻璃，与全站一致
+            AppButton(
+                text = stringResource(R.string.settings_pick_dir),
                 onClick = { dirPicker.launch(null) },
-                shape = MaterialTheme.shapes.small
-            ) {
-                Text(stringResource(R.string.settings_pick_dir))
-            }
+                type = AppButtonType.SECONDARY,
+                fullWidth = false
+            )
             if (viewModel.downloadTreeUri != null) {
-                TextButton(onClick = { viewModel.restoreDefaultDir() }) {
-                    Text(stringResource(R.string.settings_restore_dir))
-                }
+                AppLink(
+                    text = stringResource(R.string.settings_restore_dir),
+                    onClick = { viewModel.restoreDefaultDir() }
+                )
             }
         }
         Text(

@@ -52,6 +52,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.R
 import com.imagedge.camera.core.permission.PermissionGate
+import com.imagedge.camera.ui.components.AppLink
+import com.imagedge.camera.ui.glass.GlassCard
+import com.imagedge.camera.ui.theme.Spacing
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.LucideIcon
 import com.imagedge.camera.ui.components.PageHeader
@@ -60,6 +63,8 @@ import com.imagedge.camera.ui.feedback.SnackbarController
 import com.imagedge.camera.data.ble.BleShutterState
 import com.imagedge.camera.data.model.CameraSettings
 import androidx.compose.ui.platform.LocalContext
+import com.imagedge.camera.ui.components.AppButton
+import com.imagedge.camera.ui.components.AppButtonType
 
 /**
  * <pre>
@@ -157,10 +162,10 @@ fun RemoteShootingScreen(
                 )
             }
 
-            Card(
+            GlassCard(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 8.dp)
+                    .padding(top = Spacing.S)
             ) {
                 Column(
                     modifier = Modifier
@@ -226,15 +231,11 @@ fun RemoteShootingScreen(
                             )
                         }
                         else -> {
-                            Button(
+                            AppButton(
+                                text = stringResource(R.string.ble_connect_btn),
                                 onClick = blePermissionRequest,
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = MaterialTheme.shapes.small
-                            ) {
-                                LucideIcon(Lucide.Bluetooth, contentDescription = null, size = 18.dp)
-                                Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.ble_connect_btn))
-                            }
+                                leadingIcon = Lucide.Bluetooth
+                            )
                             Text(
                                 text = stringResource(R.string.ble_connect_hint),
                                 style = MaterialTheme.typography.bodySmall,
@@ -280,15 +281,12 @@ fun RemoteShootingScreen(
 
                     // ── 录像切换（仅蓝牙遥控可用）──
                     if (bleState is BleShutterState.Connected) {
-                        Button(
+                        AppButton(
+                            text = stringResource(R.string.control_btn_record),
                             onClick = { viewModel.recordToggle() },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = MaterialTheme.shapes.small
-                        ) {
-                            LucideIcon(Lucide.Video, contentDescription = null, size = 18.dp)
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(R.string.control_btn_record))
-                        }
+                            leadingIcon = Lucide.Video,
+                            type = AppButtonType.SECONDARY
+                        )
                     }
 
                     // ── PTP DeviceProp 参数区（ISO/光圈/快门，经 PTP 0x9205/0x9209 调节）──
@@ -434,12 +432,10 @@ private fun ParamSelectorCode(
             modifier = Modifier.weight(1f)
         )
         Box {
-            TextButton(onClick = { expanded = true }) {
-                Text(
-                    text = currentLabel ?: "--",
-                    style = MaterialTheme.typography.bodyLarge
-                )
-            }
+            AppLink(
+                text = currentLabel ?: "--",
+                onClick = { expanded = true }
+            )
             DropdownMenu(
                 expanded = expanded,
                 onDismissRequest = { expanded = false }

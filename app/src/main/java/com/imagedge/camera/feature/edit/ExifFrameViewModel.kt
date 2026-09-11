@@ -6,13 +6,20 @@ import android.graphics.BitmapFactory
 import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
 import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.net.Uri
+import androidx.core.content.res.ResourcesCompat
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.toColorInt
+import androidx.core.graphics.withSave
 import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -34,19 +41,27 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 边框水印 ViewModel（批次 C，对标 copicseal/可图匠的模板化思路，Apache-2.0）。
+ * 边框水印 ViewModel。
  *
- * 流程：选照片 → EXIF 自动读取（相机型号/等效焦距/快门/ISO/光圈，读不到留空可手动改）
- * → 选模板实时渲染预览 → 导出（普通照片直接画框落盘；实况图提取视频后与画框图重新合成）。
+ * 流程：选照片 → EXIF 自动读取（型号/等效焦距/快门/ISO/光圈/拍摄时间，可逐项开关与改写）
+ * → 选模板实时渲染预览 → 导出（普通照片画框落盘并保留 EXIF；实况图提取视频后与画框图重新合成）。
  *
- * 渲染要点（真机迭代沉淀）：
- * - **解码主路径 = fd + seekTo(0) 复位**：bounds 探测与正式解码共用同一 FileDescriptor，
- *   第二次读取前必须 seekTo(0)，否则从错误偏移解码（大图只加载顶部一行的根因）。
- * - **EXIF 旋转应用**：BitmapFactory 不自动应用 Orientation，竖拍照片需按
- *   rotationDegrees 手动旋转（否则竖屏被渲染成横向）。
- * - **品牌 LOGO = 商标图片资源**：simple-icons（CC0）VectorDrawable 为主 + Wikimedia
- *   PNG 兜底；缺失品牌（PENTAX 等）回退文字字标。
- * - **拍立得模板**：四周白纸 + 照片悬浮投影（BlurMaskFilter 软渲染）+ 底部信息。
+ * ## 渲染要点（v2 重做）
+ *
+ * v1 的「效果差」集中在渲染层，v2 逐条修掉：
+ * 1. **排版**：v1 把「品牌 + 型号 + 全部参数」挤在一行用空格分隔，参数一多就整体缩到 0.6 倍
+ *    再省略号截断。v2 改为**两行信息层级**——第一行品牌 LOGO + 型号（Medium 字重、主色），
+ *    第二行参数（`·` 分隔、次级灰），字号/颜色/基线各自独立。
+ * 2. **字体**：v1 用系统 `Typeface.DEFAULT` 与 `MONOSPACE`（各机型字形不一、等宽下中文字距难看）。
+ *    v2 统一用应用自带的 Inter（Regular/Medium），与应用整体视觉一致。
+ * 3. **经典白边**：v1 的「经典白边」其实是「照片贴边 + 底部一条白栏」，没有白边。
+ *    v2 是真正的**四边留白**（照片四周缩进），并可开圆角。
+ * 4. **极简单行**：v1 把半透明黑条画在照片**下方**，白底上就是一条灰带。
+ *    v2 改为照片**底部渐变遮罩**（透明 → 黑）后叠字，才是真正的极简叠字。
+ * 5. **可编辑性**：新增拍摄时间与自定义文字（署名/地点/版权）字段，并可逐项显示/隐藏。
+ *
+ * 另修复两处导出缺陷：成品**保留原图 EXIF**（v1 全丢，相册排序与拍摄信息都没了）、
+ * 落盘走 `IS_PENDING` + `DATE_TAKEN`（与传输链路一致：不留半成品、按拍摄时间排序）。
  */
 @HiltViewModel
 class ExifFrameViewModel @Inject constructor(
@@ -54,16 +69,17 @@ class ExifFrameViewModel @Inject constructor(
     private val haptics: Haptics
 ) : ViewModel() {
 
-    /** 内置模板（4 套） */
+    /** 内置模板（5 套，视觉差异明确） */
     enum class FrameTemplate(val label: String) {
         CLASSIC_WHITE("经典白边"),
-        DARK("暗色底栏"),
+        DARK_BAR("暗色底栏"),
         POLAROID("白框悬浮"),
-        MINIMAL("极简单行"),
+        SIGNATURE("双行签名"),
+        MINIMAL("极简叠字"),
     }
 
-    /** 单个可编辑字段（EXIF 预填 + 手动覆盖） */
-    data class FrameField(val label: String, val value: String)
+    /** 单个可编辑字段（EXIF 预填 + 手动覆盖 + 是否显示） */
+    data class FrameField(val label: String, val value: String, val enabled: Boolean = true)
 
     data class ExifFrameState(
         val sourceUri: Uri? = null,
@@ -74,6 +90,12 @@ class ExifFrameViewModel @Inject constructor(
         val preview: Bitmap? = null,
         val rendering: Boolean = false,
         val fields: List<FrameField> = emptyList(),
+        /** 自定义文字（署名 / 地点 / 版权） */
+        val customText: String = "",
+        /** 是否渲染品牌 LOGO */
+        val keepLogo: Boolean = true,
+        /** 照片圆角（经典白边 / 白框悬浮 / 暗色底栏下生效） */
+        val rounded: Boolean = false,
         val exporting: Boolean = false,
         val message: String? = null,
         val success: Boolean = false,
@@ -90,6 +112,14 @@ class ExifFrameViewModel @Inject constructor(
     /** assets 内品牌 PNG 的解码缓存（避免导出时重复解码） */
     private val pngCache = HashMap<String, Bitmap>()
 
+    /** 应用内自带字体（Inter）：与整体视觉一致，且不受机型系统字体差异影响 */
+    private val fontRegular: Typeface by lazy {
+        ResourcesCompat.getFont(context, R.font.inter_regular) ?: Typeface.DEFAULT
+    }
+    private val fontMedium: Typeface by lazy {
+        ResourcesCompat.getFont(context, R.font.inter_medium) ?: Typeface.DEFAULT_BOLD
+    }
+
     /**
      * 品牌标识：优先 assets/brand_logos 下的 PNG（用户自维护，自带品牌色 / 留白边距），
      * 缺失时回退特征文字字标。
@@ -102,6 +132,14 @@ class ExifFrameViewModel @Inject constructor(
         val assetPng: String? = null,
         val spacing: Float = 0.05f,
         val badge: Boolean = false,
+    )
+
+    /** 单套模板的配色 */
+    private data class Palette(
+        val bg: Int,
+        val fg: Int,
+        val muted: Int,
+        val divider: Int,
     )
 
     /**
@@ -144,13 +182,10 @@ class ExifFrameViewModel @Inject constructor(
     }
 
     /**
-     * 图片选择回调：**两级加载**（真机反馈大图导入慢的修复）——
-     * 1. 快速通道：长边 ~800px 小图立即解码渲染出预览（<1s，用户马上看到东西）；
-     * 2. 完整通道：EXIF 读取 + 1600px 基准图 + 实况检测，完成后替换为高清渲染。
+     * 图片选择回调：两级加载——快速通道先出 800px 预览（用户马上看到东西），
+     * 完整通道再补 EXIF + 1600px 基准图 + 实况检测。
      */
     fun onImagePicked(uri: Uri) {
-        // 诊断日志（w 级保证可见）：记录选择的 URI —— openInputStream 返回 null 时
-        // 需要 URI 的 scheme/authority 定位 provider 问题（MIUI 相册私有 provider 高危）
         AppLog.w("exifframe", "picked: $uri")
         // 选中即取持久化读权限（系统照片选择器授予的临时权限在进程重启后会失效）
         runCatching {
@@ -169,11 +204,11 @@ class ExifFrameViewModel @Inject constructor(
             viewModelScope.launch(Dispatchers.IO) {
                 runCatching {
                     val quick = decodeScaled(uri, targetLong = 800) ?: return@runCatching
-                    // 仅当完整加载尚未接管（preview 仍是本 quick 渲染的前置状态）时显示
                     if (_state.value.sourceUri == uri && sourceBitmap == null) {
-                        val rendered = renderFrame(quick, _state.value.template, _state.value.fields)
-                        _state.update { s ->
-                            if (s.sourceUri == uri && s.preview == null) s.copy(preview = rendered) else s
+                        val s = _state.value
+                        val rendered = renderFrame(quick, s.template, s.fields, s)
+                        _state.update { st ->
+                            if (st.sourceUri == uri && st.preview == null) st.copy(preview = rendered) else st
                         }
                     }
                 }
@@ -196,31 +231,26 @@ class ExifFrameViewModel @Inject constructor(
     }
 
     /**
-     * 流式采样解码，**三级降级**（对标成熟相册 App 的通用做法）：
+     * 流式采样解码，**三级降级**：
      * 1. fd 路径（**主路径**）：openFileDescriptor + seekTo(0) 复位 + BitmapFactory 采样，
      *    解码后按 EXIF rotation 旋转（照片选择器 URI 的 openInputStream 在部分 provider
      *    上恒为 null，fd 更稳；seekTo(0) 修复 bounds 探测与正式解码共用 fd 的偏移错位）；
      * 2. 流路径（openInputStream）：部分 provider 的 fd 读取有兼容问题时的兜底；
      * 3. ImageDecoder：HEIF/HDR/动图等 BitmapFactory 解不了的格式（自动应用 EXIF 旋转）。
-     * 每级失败都打日志，最终失败时可从日志定位图片格式与 provider。
      */
     private fun decodeScaled(uri: Uri, targetLong: Int): Bitmap? {
         // ── 1. fd 路径（主路径）──
         val fromFd = runCatching {
             context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                // 首次探测尺寸（inJustDecodeBounds 只读文件头，会使 fd 偏移前移）
                 android.system.Os.lseek(pfd.fileDescriptor, 0L, android.system.OsConstants.SEEK_SET)
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, bounds)
                 if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@use null
                 var sample = 1
                 while (maxOf(bounds.outWidth, bounds.outHeight) / sample > targetLong) sample *= 2
-                // 关键：正式解码前必须把 fd 偏移复位到 0，否则从错位偏移解码
-                // —— 大图「只加载顶部一小行」的根因
                 android.system.Os.lseek(pfd.fileDescriptor, 0L, android.system.OsConstants.SEEK_SET)
                 val opts = BitmapFactory.Options().apply { inSampleSize = sample }
                 val decoded = BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, opts)
-                // 读旋转角度（BitmapFactory 不自动应用 Orientation，竖拍必旋）
                 android.system.Os.lseek(pfd.fileDescriptor, 0L, android.system.OsConstants.SEEK_SET)
                 val rotation = runCatching {
                     ExifInterface(pfd.fileDescriptor).rotationDegrees
@@ -242,8 +272,7 @@ class ExifFrameViewModel @Inject constructor(
             context.contentResolver.openInputStream(uri)?.use {
                 streamOpened = true
                 // 注意：inJustDecodeBounds=true 时 decodeStream 恒返回 null（只填充 bounds），
-                // 不能用返回值判断是否成功——此前用「返回值 != null」导致 streamOpened 永假、
-                // 流路径兜底形同虚设（fd 失败后直接跳到 ImageDecoder，偶发解码差异）
+                // 不能用返回值判断是否成功
                 BitmapFactory.decodeStream(it, null, bounds)
             }
         }.onFailure {
@@ -335,9 +364,12 @@ class ExifFrameViewModel @Inject constructor(
             .let { if (it.isNotEmpty()) "ISO$it" else "" }
         val fNumber = exifOf(ExifInterface.TAG_F_NUMBER).toDoubleOrNull()
             ?.let { "f/%.1f".format(it) }.orEmpty()
+        val takenAt = formatExifDate(
+            exifOf(ExifInterface.TAG_DATETIME_ORIGINAL).ifEmpty { exifOf(ExifInterface.TAG_DATETIME) }
+        )
         AppLog.w(
             "exifframe",
-            "EXIF 结果：make=$make model=$model focal=$focal exposure=$exposure iso=$iso f=$fNumber"
+            "EXIF 结果：make=$make model=$model focal=$focal exposure=$exposure iso=$iso f=$fNumber date=$takenAt"
         )
         sourceBrand = detectBrand(make, model)
 
@@ -360,13 +392,49 @@ class ExifFrameViewModel @Inject constructor(
                     FrameField("快门", exposure),
                     FrameField("ISO", iso),
                     FrameField("光圈", fNumber),
+                    FrameField("拍摄时间", takenAt),
                 )
             )
         }
     }
 
+    /** EXIF 时间 `2026:09:11 20:31:05` → 显示用 `2026-09-11 20:31`（解析失败原样返回） */
+    private fun formatExifDate(raw: String): String {
+        if (raw.isEmpty()) return ""
+        val parsed = runCatching {
+            java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
+                .apply { isLenient = true }
+                .parse(raw)
+        }.getOrNull() ?: return raw
+        return java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).format(parsed)
+    }
+
     fun setTemplate(template: FrameTemplate) {
         _state.update { it.copy(template = template) }
+        renderPreview()
+    }
+
+    /** 自定义文字（署名/地点/版权） */
+    fun setCustomText(text: String) {
+        _state.update { it.copy(customText = text) }
+        scheduleRender()
+    }
+
+    fun setKeepLogo(keep: Boolean) {
+        _state.update { it.copy(keepLogo = keep) }
+        renderPreview()
+    }
+
+    fun setRounded(rounded: Boolean) {
+        _state.update { it.copy(rounded = rounded) }
+        renderPreview()
+    }
+
+    /** 字段显示开关（例如不想暴露快门速度） */
+    fun toggleField(label: String, enabled: Boolean) {
+        _state.update { s ->
+            s.copy(fields = s.fields.map { if (it.label == label) it.copy(enabled = enabled) else it })
+        }
         renderPreview()
     }
 
@@ -377,6 +445,10 @@ class ExifFrameViewModel @Inject constructor(
         _state.update { s ->
             s.copy(fields = s.fields.map { if (it.label == label) it.copy(value = value) else it })
         }
+        scheduleRender()
+    }
+
+    private fun scheduleRender() {
         fieldDebounceJob?.cancel()
         fieldDebounceJob = viewModelScope.launch {
             kotlinx.coroutines.delay(300)
@@ -392,10 +464,8 @@ class ExifFrameViewModel @Inject constructor(
         _state.update { it.copy(rendering = true) }
         viewModelScope.launch(Dispatchers.IO) {
             val rendered = runCatching {
-                renderFrame(source, state.template, state.fields)
+                renderFrame(source, state.template, state.fields, state)
             }.onFailure { e ->
-                // 排查盲区：此前 getOrNull 吞掉异常且 preview 被清成 null，
-                // 界面既不显示图也无提示——「大图不能完整显示」的疑似根因之一
                 AppLog.w("exifframe", "渲染失败：${e::class.simpleName}: ${e.message}")
             }.getOrNull()
             _state.update { s ->
@@ -414,161 +484,370 @@ class ExifFrameViewModel @Inject constructor(
 
     // ────────────────────────── 画框渲染 ──────────────────────────
 
-    /** 渲染入口：拍立得（白框悬浮）走独立布局，其余走底部信息栏布局 */
-    private fun renderFrame(source: Bitmap, template: FrameTemplate, fields: List<FrameField>): Bitmap =
-        if (template == FrameTemplate.POLAROID) renderPolaroid(source, fields)
-        else renderBar(source, template, fields)
+    /** 渲染入口：按模板分派到三种布局（带边框信息栏 / 白框悬浮 / 照片叠字） */
+    private fun renderFrame(
+        source: Bitmap,
+        template: FrameTemplate,
+        fields: List<FrameField>,
+        state: ExifFrameState
+    ): Bitmap = when (template) {
+        FrameTemplate.POLAROID -> renderPolaroid(source, fields, state)
+        FrameTemplate.MINIMAL -> renderMinimal(source, fields, state)
+        FrameTemplate.CLASSIC_WHITE -> renderFramed(
+            source, fields, state,
+            Palette(
+                Color.WHITE, hex("#111214"),
+                hex("#8A8F98"), hex("#E6E8EB")
+            ),
+            borderRatio = 0.045f
+        )
+        FrameTemplate.DARK_BAR -> renderFramed(
+            source, fields, state,
+            Palette(
+                hex("#0B0C0E"), hex("#F4F5F7"),
+                hex("#9BA1A9"), hex("#26282C")
+            ),
+            borderRatio = 0.045f
+        )
+        FrameTemplate.SIGNATURE -> renderSignature(source, fields, state)
+    }
 
     /**
-     * 白框悬浮模板（替代原拍立得）：四周白色相纸留白，照片悬浮于纸上
-     * （照片下方投影 = 照片形状的模糊阴影，软件渲染用 BlurMaskFilter），
-     * 底部信息区显示「品牌 LOGO · 型号 · 参数」。
+     * 带边框 + 底部信息栏（经典白边 / 暗色底栏共用）。
+     *
+     * 版式：四边留白 [borderRatio]×宽 → 照片（可选圆角）→ 底部信息区（占宽约 0.155）
+     * → 第一行「品牌 LOGO + 型号」（Medium、主色），第二行「参数 · 参数」（Regular、次级色）。
      */
-    private fun renderPolaroid(source: Bitmap, fields: List<FrameField>): Bitmap {
+    private fun renderFramed(
+        source: Bitmap,
+        fields: List<FrameField>,
+        state: ExifFrameState,
+        palette: Palette,
+        borderRatio: Float
+    ): Bitmap {
         val w = source.width
         val h = source.height
-        val marginX = (w * 0.09f).toInt().coerceAtLeast(28)   // 左右白边
-        val marginTop = (w * 0.07f).toInt().coerceAtLeast(24) // 顶部白边
-        val bottomH = (w * 0.16f).toInt().coerceAtLeast(56)   // 底部信息区（原 0.24 过高，真机反馈调低）
+        val border = (w * borderRatio).toInt().coerceAtLeast(16)
+        val barH = (w * 0.155f).toInt().coerceAtLeast(110)
+        val outW = w + border * 2
+        val outH = border + h + barH
+        val result = createBitmap(outW, outH)
+        val canvas = Canvas(result)
+        canvas.drawColor(palette.bg)
+
+        drawPhoto(canvas, source, border.toFloat(), border.toFloat(), state.rounded, w * 0.025f)
+
+        val padX = border + w * 0.045f
+        val modelText = visibleValue(fields, "相机型号")
+        val params = paramLine(fields)
+        val barTop = (border + h).toFloat()
+        val line1 = barTop + barH * 0.44f
+        val line2 = barTop + barH * 0.78f
+        val brandH = barH * 0.30f
+        val darkBg = !isLight(palette.bg)
+
+        var cursor = padX
+        if (state.keepLogo) {
+            val mark = brandOf()
+            drawBrand(canvas, mark, cursor, line1 - brandH / 2f, brandH, darkBg)
+            cursor += brandLogoWidth(mark, brandH) + w * 0.02f
+        }
+        if (modelText.isNotEmpty()) {
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = palette.fg
+                typeface = fontMedium
+                textSize = barH * 0.26f
+            }
+            fitTextSize(paint, modelText, outW - padX - cursor - w * 0.02f, barH * 0.26f, barH * 0.16f)
+            canvas.drawText(modelText, cursor, baselineFor(paint, line1), paint)
+        }
+        val custom = state.customText.trim()
+        if (custom.isNotEmpty()) {
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = palette.muted
+                typeface = fontRegular
+                textSize = barH * 0.20f
+                textAlign = Paint.Align.RIGHT
+            }
+            fitTextSize(paint, custom, outW - padX * 2, barH * 0.20f, barH * 0.13f)
+            canvas.drawText(custom, outW - padX, baselineFor(paint, line1), paint)
+        }
+        if (params.isNotEmpty()) {
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = palette.muted
+                typeface = fontRegular
+                textSize = barH * 0.19f
+            }
+            fitTextSize(paint, params, outW - padX * 2, barH * 0.19f, barH * 0.12f)
+            canvas.drawText(params, padX, baselineFor(paint, line2), paint)
+        }
+        // 分隔线：信息区上沿一条细线，弱化「贴了一条色块」的观感
+        val divider = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = palette.divider
+            strokeWidth = hairlineFor(w)
+        }
+        canvas.drawLine(padX, barTop + barH * 0.16f, outW - padX, barTop + barH * 0.16f, divider)
+        return result
+    }
+
+    /** 白框悬浮（拍立得）：四周白纸留白更大，底部信息居中，照片下方带柔和投影 */
+    private fun renderPolaroid(source: Bitmap, fields: List<FrameField>, state: ExifFrameState): Bitmap {
+        val w = source.width
+        val h = source.height
+        val marginX = (w * 0.085f).toInt().coerceAtLeast(24)
+        val marginTop = (w * 0.085f).toInt().coerceAtLeast(24)
+        val bottomH = (w * 0.20f).toInt().coerceAtLeast(72)
         val outW = w + marginX * 2
         val outH = marginTop + h + bottomH
-        val result = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
+        val result = createBitmap(outW, outH)
         val canvas = Canvas(result)
         canvas.drawColor(Color.WHITE)
 
-        // 悬浮投影（真机反馈「照片周围加阴影」）：偏移更大、模糊更大、透明度更深，
-        // 让照片明显「浮」在纸上。软件 Canvas 不支持 Paint.setShadowLayer，
-        // 阴影 = 先画一张照片形状的模糊黑色块（偏移），再画照片本体。
-        val photoLeft = marginX.toFloat()
-        val photoTop = marginTop.toFloat()
-        val blur = (w * 0.030f).coerceAtLeast(8f)
+        // 悬浮投影：先画一张照片形状的模糊黑块（带偏移），再画照片本体
+        val blur = (w * 0.022f).coerceAtLeast(6f)
         val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             maskFilter = BlurMaskFilter(blur, BlurMaskFilter.Blur.NORMAL)
-            color = Color.argb(150, 0, 0, 0)
+            color = Color.argb(120, 0, 0, 0)
         }
-        val shadowDx = w * 0.020f
-        val shadowDy = h * 0.030f
-        canvas.drawBitmap(source, photoLeft + shadowDx, photoTop + shadowDy, shadowPaint)
-        canvas.drawBitmap(source, photoLeft, photoTop, null)
+        val shadowPath = Path().apply {
+            addRoundRect(
+                RectF(
+                    marginX + w * 0.012f, marginTop + h * 0.022f,
+                    marginX + w * 1.012f, marginTop + h * 1.022f
+                ),
+                w * 0.012f, w * 0.012f, Path.Direction.CW
+            )
+        }
+        canvas.drawPath(shadowPath, shadowPaint)
+        drawPhoto(canvas, source, marginX.toFloat(), marginTop.toFloat(), state.rounded, w * 0.025f)
 
-        // 底部信息：品牌 LOGO（图片）+ 型号 + 参数，单行居中自适应防溢出
-        val modelText = fields.firstOrNull()?.value.orEmpty().trim()
-        val params = fields.drop(1).filter { it.value.isNotEmpty() }
-            .joinToString("   ") { displayValue(it) }
-        val mark = sourceBrand ?: BrandMark("IMAGEDEGE", Color.argb(255, 0x33, 0x33, 0x33))
-        val logoH = bottomH * 0.50f
-        val paramTextSize = bottomH * 0.30f
-        val gap = w * 0.05f
-        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            textSize = paramTextSize
-            color = Color.DKGRAY
+        // 底部居中：第一行「品牌 + 型号」，第二行「参数 · 自定义文字」
+        val modelText = visibleValue(fields, "相机型号")
+        val params = paramLine(fields)
+        val mark = brandOf()
+        val brandH = bottomH * 0.26f
+        val modelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = hex("#111214")
+            typeface = fontMedium
+            textSize = bottomH * 0.22f
         }
-        val line = listOf(modelText, params).filter { it.isNotEmpty() }.joinToString("   ")
-        val logoW = brandLogoWidth(mark, logoH)
-        val totalW = logoW + (if (line.isEmpty()) 0f else gap + textPaint.measureText(line))
-        val maxW = outW - w * 0.08f
-        var scale = 1f
-        while (totalW * scale > maxW && scale > 0.5f) scale -= 0.04f
-        val centerY = photoTop + h + bottomH / 2f
-        var x = (outW - totalW * scale) / 2f
-        // LOGO 与文字垂直居中对齐：用 FontMetrics 精确计算 baseline，使文字视觉中心 = centerY
-        drawBrand(canvas, mark, x, centerY - logoH * scale / 2f, logoH * scale, darkBg = false)
-        x += logoW * scale + gap * scale
-        if (line.isNotEmpty()) {
-            textPaint.textSize = paramTextSize * scale
-            val fm = textPaint.fontMetrics
-            val baseline = centerY - (fm.ascent + fm.descent) / 2f
-            canvas.drawText(line, x, baseline, textPaint)
+        val paramPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = hex("#8A8F98")
+            typeface = fontRegular
+            textSize = bottomH * 0.17f
+        }
+        var firstLineW = 0f
+        if (state.keepLogo) firstLineW += brandLogoWidth(mark, brandH) + w * 0.02f
+        if (modelText.isNotEmpty()) firstLineW += modelPaint.measureText(modelText)
+        val line1Y = marginTop + h + bottomH * 0.38f
+        val line2Y = marginTop + h + bottomH * 0.74f
+        var x = (outW - firstLineW) / 2f
+        if (state.keepLogo) {
+            drawBrand(canvas, mark, x, line1Y - brandH / 2f, brandH, darkBg = false)
+            x += brandLogoWidth(mark, brandH) + w * 0.02f
+        }
+        if (modelText.isNotEmpty()) {
+            fitTextSize(modelPaint, modelText, outW * 0.8f, bottomH * 0.22f, bottomH * 0.14f)
+            canvas.drawText(modelText, x, baselineFor(modelPaint, line1Y), modelPaint)
+        }
+        val custom = state.customText.trim()
+        val second = listOf(params, custom).filter { it.isNotEmpty() }.joinToString("  ·  ")
+        if (second.isNotEmpty()) {
+            paramPaint.textAlign = Paint.Align.CENTER
+            fitTextSize(paramPaint, second, outW * 0.82f, bottomH * 0.17f, bottomH * 0.11f)
+            canvas.drawText(second, outW / 2f, baselineFor(paramPaint, line2Y), paramPaint)
         }
         return result
     }
 
     /**
-     * 底部信息栏模板（经典白边 / 暗色底栏 / 极简单行）：
-     * 左区（品牌 LOGO 图片 + 型号）+ 右区（参数右对齐），整体自适应防重叠。
+     * 双行签名：贴边（无白边）+ 底部深色信息区 + 左侧强调竖线。
+     * 与经典白边的差别是「编辑感」——强调线 + 大写字距的型号，适合发布用。
      */
-    private fun renderBar(source: Bitmap, template: FrameTemplate, fields: List<FrameField>): Bitmap {
+    private fun renderSignature(source: Bitmap, fields: List<FrameField>, state: ExifFrameState): Bitmap {
         val w = source.width
-        val barH = when (template) {
-            FrameTemplate.CLASSIC_WHITE, FrameTemplate.DARK -> (w * 0.10f).toInt().coerceAtLeast(80)
-            FrameTemplate.MINIMAL -> (w * 0.07f).toInt().coerceAtLeast(60)
-            FrameTemplate.POLAROID -> 0 // 不会走到
-        }
-        val result = Bitmap.createBitmap(w, source.height + barH, Bitmap.Config.ARGB_8888)
+        val h = source.height
+        val barH = (w * 0.17f).toInt().coerceAtLeast(120)
+        val result = createBitmap(w, h + barH)
         val canvas = Canvas(result)
-        canvas.drawColor(Color.WHITE)
+        canvas.drawColor(hex("#0B0C0E"))
         canvas.drawBitmap(source, 0f, 0f, null)
 
-        val (bg, fg) = when (template) {
-            FrameTemplate.CLASSIC_WHITE -> Color.WHITE to Color.BLACK
-            FrameTemplate.DARK -> Color.BLACK to Color.WHITE
-            FrameTemplate.MINIMAL -> Color.argb(150, 0, 0, 0) to Color.WHITE
-            FrameTemplate.POLAROID -> Color.WHITE to Color.DKGRAY
-        }
-        canvas.drawRect(0f, source.height.toFloat(), w.toFloat(), result.height.toFloat(), Paint().apply { color = bg })
-        val darkBg = template == FrameTemplate.DARK || template == FrameTemplate.MINIMAL
+        val padX = w * 0.055f
+        val accentW = (w * 0.006f).coerceAtLeast(2f)
+        val barTop = h.toFloat()
+        val accent = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = hex("#E8B75A") }
+        canvas.drawRect(padX, barTop + barH * 0.26f, padX + accentW, barTop + barH * 0.78f, accent)
 
-        val pad = w * 0.04f
-        val textCenterY = source.height + barH / 2f
-        val modelText = fields.firstOrNull()?.value.orEmpty().trim()
-        val params = fields.drop(1).filter { it.value.isNotEmpty() }
-            .joinToString("   ") { displayValue(it) }
-        val mark = sourceBrand ?: BrandMark("IMAGEDEGE", Color.argb(255, 0x33, 0x33, 0x33))
-
-        // 左区：品牌 LOGO 图片 + 型号；右区：参数
-        val logoH = barH * 0.50f
-        val logoW = brandLogoWidth(mark, logoH)
+        val textX = padX + accentW + w * 0.03f
+        val modelText = visibleValue(fields, "相机型号").uppercase()
+        val params = paramLine(fields)
+        val line1 = barTop + barH * 0.44f
+        val line2 = barTop + barH * 0.76f
         val modelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = fg; textSize = barH * 0.26f
+            color = hex("#F4F5F7")
+            typeface = fontMedium
+            textSize = barH * 0.28f
+            letterSpacing = 0.02f
         }
         val paramPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = fg; typeface = Typeface.MONOSPACE; textSize = barH * 0.28f
-            textAlign = Paint.Align.RIGHT
+            color = hex("#9BA1A9")
+            typeface = fontRegular
+            textSize = barH * 0.18f
+            letterSpacing = 0.05f
         }
-        val avail = w - pad * 2
-        var scale = 1f
-        val need = {
-            logoW * scale + pad * 0.5f +
-                (if (modelText.isEmpty()) 0f else modelPaint.measureText(modelText) + pad * 0.5f) +
-                (if (params.isEmpty()) 0f else paramPaint.measureText(params))
+        if (modelText.isNotEmpty()) {
+            fitTextSize(modelPaint, modelText, w - textX - padX, barH * 0.28f, barH * 0.16f)
+            canvas.drawText(modelText, textX, baselineFor(modelPaint, line1), modelPaint)
         }
-        while (need() > avail && scale > 0.6f) {
-            scale -= 0.04f
-            modelPaint.textSize = barH * 0.26f * scale
-            paramPaint.textSize = barH * 0.28f * scale
+        if (state.keepLogo) {
+            val mark = brandOf()
+            val brandH = barH * 0.26f
+            drawBrand(
+                canvas, mark,
+                w - padX - brandLogoWidth(mark, brandH),
+                line1 - brandH / 2f, brandH, darkBg = true
+            )
         }
-        var leftModel = modelText
-        // 缩到底后仍溢出 → 左区省略号截断（保参数完整）
-        if (need() > avail && leftModel.isNotEmpty()) {
-            val budget = avail - logoW - pad * 0.5f -
-                (if (params.isEmpty()) 0f else paramPaint.measureText(params) + pad * 0.5f)
-            leftModel = ellipsize(modelPaint, leftModel, budget.coerceAtLeast(0f))
-        }
-        // 用 FontMetrics 精确计算 baseline：使文字视觉中心与 bar 中心 / LOGO 中心严格对齐
-        val paramFm = paramPaint.fontMetrics
-        val baseline = textCenterY - (paramFm.ascent + paramFm.descent) / 2f
-        // LOGO 垂直居中于 bar 中心（之前是底对齐 baseline，导致 logo 比正文高 14% barH）
-        drawBrand(canvas, mark, pad, textCenterY - logoH * scale / 2f, logoH * scale, darkBg = darkBg)
-        val logoX = pad + logoW * scale + pad * 0.5f
-        if (leftModel.isNotEmpty()) {
-            canvas.drawText(leftModel, logoX, baseline, modelPaint)
-        }
-        if (params.isNotEmpty()) {
-            canvas.drawText(params, w - pad, baseline, paramPaint)
+        val custom = state.customText.trim()
+        val second = listOf(params, custom).filter { it.isNotEmpty() }.joinToString("   ")
+        if (second.isNotEmpty()) {
+            fitTextSize(paramPaint, second, w - textX - padX, barH * 0.18f, barH * 0.11f)
+            canvas.drawText(second, textX, baselineFor(paramPaint, line2), paramPaint)
         }
         return result
     }
 
-    /** 字段显示值：等效焦距渲染为「等效50mm」而非裸 "50mm"（用户要求） */
+    /**
+     * 极简叠字：不改变画面尺寸，在照片底部叠加渐变遮罩后写信息。
+     *
+     * v1 是把半透明黑条画在照片**下方**（白底上就是一条灰带），v2 改为照片内部叠字。
+     */
+    private fun renderMinimal(source: Bitmap, fields: List<FrameField>, state: ExifFrameState): Bitmap {
+        val w = source.width
+        val h = source.height
+        val result = source.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = Canvas(result)
+        val scrimH = (h * 0.30f).coerceAtLeast(60f)
+
+        // 自下而上的渐变遮罩：底部不透明黑 → 顶部完全透明
+        val scrim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = LinearGradient(
+                0f, h - scrimH, 0f, h.toFloat(),
+                intArrayOf(Color.TRANSPARENT, Color.argb(150, 0, 0, 0), Color.argb(215, 0, 0, 0)),
+                floatArrayOf(0f, 0.55f, 1f),
+                Shader.TileMode.CLAMP
+            )
+        }
+        canvas.drawRect(0f, h - scrimH, w.toFloat(), h.toFloat(), scrim)
+
+        val padX = w * 0.05f
+        val padBottom = h * 0.045f
+        val modelText = visibleValue(fields, "相机型号")
+        val params = paramLine(fields)
+        val custom = state.customText.trim()
+        val modelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            typeface = fontMedium
+            textSize = (w * 0.032f).coerceAtLeast(14f)
+        }
+        val paramPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = hex("#E4E6EA")
+            typeface = fontRegular
+            textSize = (w * 0.022f).coerceAtLeast(11f)
+        }
+        val baseline2 = h - padBottom
+        val baseline1 = baseline2 - modelPaint.textSize * 1.25f
+        var cursor = padX
+        if (state.keepLogo) {
+            val mark = brandOf()
+            val brandH = modelPaint.textSize * 0.95f
+            drawBrand(canvas, mark, cursor, baseline1 - brandH * 0.78f, brandH, darkBg = true)
+            cursor += brandLogoWidth(mark, brandH) + w * 0.02f
+        }
+        if (modelText.isNotEmpty()) {
+            fitTextSize(modelPaint, modelText, w - padX - cursor, modelPaint.textSize, modelPaint.textSize * 0.6f)
+            canvas.drawText(modelText, cursor, baseline1, modelPaint)
+        }
+        val second = listOf(params, custom).filter { it.isNotEmpty() }.joinToString("  ·  ")
+        if (second.isNotEmpty()) {
+            fitTextSize(paramPaint, second, w - padX * 2, paramPaint.textSize, paramPaint.textSize * 0.7f)
+            canvas.drawText(second, padX, baseline2, paramPaint)
+        }
+        return result
+    }
+
+    /** 画照片：可选圆角（用裁剪路径实现，避免额外分配一张圆角位图） */
+    private fun drawPhoto(
+        canvas: Canvas,
+        source: Bitmap,
+        left: Float,
+        top: Float,
+        rounded: Boolean,
+        radius: Float
+    ) {
+        if (!rounded) {
+            canvas.drawBitmap(source, left, top, null)
+            return
+        }
+        val path = Path().apply {
+            addRoundRect(
+                RectF(left, top, left + source.width, top + source.height),
+                radius, radius, Path.Direction.CW
+            )
+        }
+        canvas.withSave {
+            clipPath(path)
+            drawBitmap(source, left, top, null)
+        }
+    }
+
+    /** 字段显示值：等效焦距渲染为「等效50mm」而非裸 "50mm" */
     private fun displayValue(f: FrameField): String =
         if (f.label == "等效焦距" && f.value.isNotEmpty()) "等效${f.value}" else f.value
 
+    private fun visibleValue(fields: List<FrameField>, label: String): String =
+        fields.firstOrNull { it.label == label && it.enabled }?.value?.trim().orEmpty()
+
+    /** 第二行参数：除型号外的所有启用字段，` · ` 分隔（空值自动跳过） */
+    private fun paramLine(fields: List<FrameField>): String =
+        fields
+            .filter { it.label != "相机型号" && it.enabled && it.value.isNotBlank() }
+            .joinToString("  ·  ") { displayValue(it).trim() }
+
+    private fun brandOf(): BrandMark =
+        sourceBrand ?: BrandMark("IMAGEDGE", hex("#333333"))
+
+    /** 文字视觉中心 → baseline（用 FontMetrics 精确换算，避免不同字体的基线偏移） */
+    private fun baselineFor(paint: Paint, centerY: Float): Float {
+        val fm = paint.fontMetrics
+        return centerY - (fm.ascent + fm.descent) / 2f
+    }
+
+    /** 自适应字号：先按基准字号量宽，超出则等比缩小（不低于 minSize），避免溢出截断 */
+    private fun fitTextSize(paint: Paint, text: String, maxWidth: Float, baseSize: Float, minSize: Float) {
+        paint.textSize = baseSize
+        if (maxWidth <= 0f) return
+        val measured = paint.measureText(text)
+        if (measured <= maxWidth) return
+        paint.textSize = (baseSize * maxWidth / measured).coerceAtLeast(minSize)
+    }
+
+    /** 细线线宽：按位图宽度取，避免高分辨率下 1px 细线消失 */
+    private fun hairlineFor(bitmapWidth: Int): Float = (bitmapWidth / 1000f).coerceAtLeast(1f)
+
+    private fun isLight(color: Int): Boolean {
+        val luminance = 0.299 * Color.red(color) + 0.587 * Color.green(color) + 0.114 * Color.blue(color)
+        return luminance > 160
+    }
+
+    /** 十六进制颜色 → ARGB（统一走 KTX，避免逐处 Color.parseColor） */
+    private fun hex(value: String): Int = value.toColorInt()
+
     /**
      * 品牌 LOGO 渲染：优先 assets/brand_logos 下的 PNG，缺失时回退特征文字字标。
-     * - 透明底 PNG：深色底（DARK/MINIMAL）下用 SRC_IN 染白保证可见。
-     * - badge = true（gopro 黑底 / realme 黄底）：官方徽章带纯色底，不参与染色，
-     *   否则整块底色被染白导致与正文混淆。
+     * - 透明底 PNG：深色底（DARK/MINIMAL/SIGNATURE）下用 SRC_IN 染白保证可见。
+     * - badge = true（gopro 黑底 / realme 黄底）：官方徽章带纯色底，不参与染色。
      */
     private fun drawBrand(
         canvas: Canvas,
@@ -578,12 +857,11 @@ class ExifFrameViewModel @Inject constructor(
         height: Float,
         darkBg: Boolean,
     ) {
-        // 1. assets PNG（用户自维护，25 品牌统一格式）
         val png = mark.assetPng?.let(::pngBitmap)
         if (png != null) {
             val ratio = png.width.toFloat() / maxOf(1, png.height)
             var w = height * ratio
-            if (w > height * 4.5f) w = height * 4.5f // 超宽字标限宽，防挤压正文
+            if (w > height * 4.5f) w = height * 4.5f
             val p = Paint(Paint.ANTI_ALIAS_FLAG)
             if (darkBg && !mark.badge) {
                 p.colorFilter = PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN)
@@ -591,17 +869,17 @@ class ExifFrameViewModel @Inject constructor(
             canvas.drawBitmap(png, null, RectF(left, top, left + w, top + height), p)
             return
         }
-        // 2. 文字字标回退（PENTAX / 未知品牌）
+        // 文字字标回退（PENTAX / 未知品牌）
         val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = if (darkBg) Color.WHITE else mark.color
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            textSize = height * 1.2f
+            typeface = fontMedium
+            textSize = height
             letterSpacing = mark.spacing
         }
-        canvas.drawText(mark.text, left, top + height * 0.88f, p)
+        canvas.drawText(mark.text, left, top + height * 0.85f, p)
     }
 
-    /** 品牌 LOGO 的渲染宽度（与 [drawBrand] 的宽高比一致，供防重叠布局计算） */
+    /** 品牌 LOGO 的渲染宽度（与 [drawBrand] 的宽高比一致，供布局计算） */
     private fun brandLogoWidth(mark: BrandMark, height: Float): Float {
         val png = mark.assetPng?.let(::pngBitmap)
         if (png != null) {
@@ -610,10 +888,9 @@ class ExifFrameViewModel @Inject constructor(
             if (w > height * 4.5f) w = height * 4.5f
             return w
         }
-        // 文字回退
         return Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            textSize = height * 1.2f
+            typeface = fontMedium
+            textSize = height
             letterSpacing = mark.spacing
         }.measureText(mark.text)
     }
@@ -628,15 +905,7 @@ class ExifFrameViewModel @Inject constructor(
         return bmp
     }
 
-    /** 省略号截断到指定宽度（二分近似：先粗裁再逐字回退） */
-    private fun ellipsize(paint: Paint, text: String, maxWidth: Float): String {
-        if (paint.measureText(text) <= maxWidth) return text
-        var end = text.length
-        while (end > 0 && paint.measureText(text.take(end) + "…") > maxWidth) end -= (end / 8).coerceAtLeast(1)
-        return text.take(end) + "…"
-    }
-
-    /** 导出：全尺寸渲染 → 普通照片落盘；实况图提取视频重新合成 */
+    /** 导出：全尺寸渲染 → 普通照片落盘（保留 EXIF）；实况图提取视频重新合成 */
     fun export() {
         val state = _state.value
         val sourceUri = state.sourceUri ?: return
@@ -653,15 +922,16 @@ class ExifFrameViewModel @Inject constructor(
                 val renderedFile = withContext(Dispatchers.IO) {
                     // 用发起时捕获的局部引用：导出期间用户重新选择会置空字段，
                     // 此处再用 sourceBitmap!! 会 NPE
-                    val bitmap = renderFrame(src, state.template, state.fields)
+                    val bitmap = renderFrame(src, state.template, state.fields, state)
                     File.createTempFile("exifframe", ".jpg", context.cacheDir).apply {
                         outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 95, it) }
+                        bitmap.recycle()
                     }
                 }
                 val motionVideo = sourceMotionVideo
                 if (motionVideo != null) {
                     // 实况图：画框静态图 + 原视频重新合成（视频内原封面帧时间戳保持不变）。
-                    // exifSourceUri = 原图：画框成品同样保留原拍摄信息（EXIF 保留需求）
+                    // exifSourceUri = 原图：画框成品同样保留原拍摄信息
                     val result = MotionPhotoComposer.compose(
                         context = context,
                         imageUri = Uri.fromFile(renderedFile),
@@ -671,7 +941,7 @@ class ExifFrameViewModel @Inject constructor(
                     MotionPhotoComposer.saveToGallery(context, result)
                     AppLog.i("exifframe", "实况画框已导出：${result.displayName}")
                 } else {
-                    saveStill(renderedFile)
+                    saveStill(renderedFile, sourceUri)
                     AppLog.i("exifframe", "画框照片已导出")
                 }
                 renderedFile.delete()
@@ -687,28 +957,73 @@ class ExifFrameViewModel @Inject constructor(
         }
     }
 
-    /** 普通照片落盘：MediaStore DCIM/Imagedge */
-    private fun saveStill(rendered: File) {
+    /**
+     * 普通照片落盘：MediaStore DCIM/Imagedge。
+     *
+     * 修复 v1 的三处缺陷：文件名拼写（IMGDEGE → IMAGEDGE）、丢 EXIF（现在复制拍摄参数与
+     * 时间）、落盘缺 `IS_PENDING`/`DATE_TAKEN`（相册会看到半成品，且按保存时间而非拍摄时间排序）。
+     */
+    private fun saveStill(rendered: File, sourceUri: Uri) {
+        val resolver = context.contentResolver
+        val sourceExif = runCatching {
+            resolver.openFileDescriptor(sourceUri, "r")?.use { ExifInterface(it.fileDescriptor) }
+        }.getOrNull()
+        val dateMillis = runCatching {
+            (sourceExif?.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+                ?: sourceExif?.getAttribute(ExifInterface.TAG_DATETIME))?.let(::parseExifDate)
+        }.getOrNull()
+
+        // EXIF 复制在缓存文件上完成（MediaStore 目标流不可随机读写）
+        runCatching {
+            val dst = ExifInterface(rendered.absolutePath)
+            sourceExif?.let { src ->
+                for (tag in COPY_EXIF_TAGS) src.getAttribute(tag)?.let { dst.setAttribute(tag, it) }
+            }
+            dst.setAttribute(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL.toString())
+            dst.saveAttributes()
+        }.onFailure { AppLog.w("exifframe", "EXIF 复制失败（成品仍可用）：${it.message}") }
+
         val values = android.content.ContentValues().apply {
-            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "IMGDEGE_${System.currentTimeMillis()}.jpg")
+            put(
+                android.provider.MediaStore.MediaColumns.DISPLAY_NAME,
+                "IMAGEDGE_${System.currentTimeMillis()}.jpg"
+            )
             put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
             put(
                 android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
                 "${android.os.Environment.DIRECTORY_DCIM}/Imagedge"
             )
+            put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
+            dateMillis?.let { put(android.provider.MediaStore.MediaColumns.DATE_TAKEN, it) }
         }
-        val resolver = context.contentResolver
         val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
             ?: throw IllegalStateException("创建相册条目失败")
         try {
             resolver.openOutputStream(uri)?.use { out ->
                 rendered.inputStream().use { it.copyTo(out) }
             } ?: throw IllegalStateException("无法写入相册")
+            runCatching {
+                resolver.update(
+                    uri,
+                    android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
+                    },
+                    null, null
+                )
+            }
         } catch (e: Exception) {
             runCatching { resolver.delete(uri, null, null) }
             throw e
         }
     }
+
+    /** EXIF 时间格式 `yyyy:MM:dd HH:mm:ss` → 毫秒时间戳 */
+    private fun parseExifDate(value: String): Long? = runCatching {
+        java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
+            .apply { isLenient = true }
+            .parse(value)
+            ?.time
+    }.getOrNull()
 
     /** 回初始态（结果页「继续」） */
     fun reset() {
@@ -717,5 +1032,36 @@ class ExifFrameViewModel @Inject constructor(
         sourceBrand = null
         pngCache.clear()
         _state.update { ExifFrameState() }
+    }
+
+    companion object {
+        /** 导出时复制的 EXIF 字段（拍摄参数 + 时间 + 作者信息） */
+        private val COPY_EXIF_TAGS = arrayOf(
+            ExifInterface.TAG_MAKE,
+            ExifInterface.TAG_MODEL,
+            ExifInterface.TAG_LENS_MODEL,
+            ExifInterface.TAG_F_NUMBER,
+            ExifInterface.TAG_EXPOSURE_TIME,
+            ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY,
+            ExifInterface.TAG_FOCAL_LENGTH,
+            ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM,
+            ExifInterface.TAG_DATETIME_ORIGINAL,
+            ExifInterface.TAG_DATETIME,
+            ExifInterface.TAG_EXPOSURE_BIAS_VALUE,
+            ExifInterface.TAG_WHITE_BALANCE,
+            ExifInterface.TAG_COLOR_SPACE,
+            ExifInterface.TAG_ARTIST,
+            ExifInterface.TAG_COPYRIGHT,
+            ExifInterface.TAG_IMAGE_DESCRIPTION,
+            ExifInterface.TAG_SOFTWARE,
+            ExifInterface.TAG_GPS_LATITUDE,
+            ExifInterface.TAG_GPS_LATITUDE_REF,
+            ExifInterface.TAG_GPS_LONGITUDE,
+            ExifInterface.TAG_GPS_LONGITUDE_REF,
+            ExifInterface.TAG_GPS_ALTITUDE,
+            ExifInterface.TAG_GPS_ALTITUDE_REF,
+            ExifInterface.TAG_GPS_TIMESTAMP,
+            ExifInterface.TAG_GPS_DATESTAMP,
+        )
     }
 }

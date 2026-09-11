@@ -19,6 +19,36 @@ data class WifiQrInfo(
 )
 
 /**
+ * 二维码声明的 Wi-Fi 认证方式（配网时**决定怎么传凭据**）。
+ *
+ * 背景（P0）：原先一律 `setWpa2Passphrase(password ?: "")`，于是
+ * `T:nopass` 的开放热点、`T:WEP` 的旧设备、`T:SAE` 的 WPA3 热点
+ * 全部以「空密码走 WPA2」发起请求，必然失败且提示误导用户去查密码。
+ */
+enum class WifiAuth {
+    /** 开放网络（`T:nopass`）——配网时不设置任何凭据 */
+    OPEN,
+
+    /** WPA/WPA2，或未标注认证方式的带密码热点（索尼 W01 固定 WPA2） */
+    WPA2,
+
+    /** WPA3-SAE */
+    WPA3,
+
+    /** WEP——Android 的 WifiNetworkSpecifier 不支持，只能引导用户手动连接 */
+    WEP
+}
+
+/** 归一化认证方式：标准 `WIFI:` 格式取 T 字段；索尼 `W01:` 未标注，固定按 WPA2 处理 */
+val WifiQrInfo.auth: WifiAuth
+    get() = when (authType?.trim()?.uppercase()) {
+        "NOPASS", "OPEN", "" -> WifiAuth.OPEN
+        "SAE", "WPA3", "WPA3-SAE" -> WifiAuth.WPA3
+        "WEP" -> WifiAuth.WEP
+        else -> WifiAuth.WPA2
+    }
+
+/**
  * 解析 WiFi 二维码内容，支持两种格式：
  *
  * 1. 标准格式：`WIFI:T:WPA;S:DIRECT-xx-ZV-E10;P:password;H:false;;`

@@ -9,7 +9,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,14 +17,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -40,14 +34,20 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.ui.components.AppButton
+import com.imagedge.camera.ui.components.AppChipRow
+import com.imagedge.camera.ui.components.AppLink
+import com.imagedge.camera.ui.components.AppPage
+import com.imagedge.camera.ui.components.AppSection
+import com.imagedge.camera.ui.glass.GlassCard
+import com.imagedge.camera.ui.theme.Spacing
 import com.imagedge.camera.ui.glass.GlassSwitch
 import com.imagedge.camera.ui.components.AppButtonType
 import com.imagedge.camera.ui.components.EmptyState
 import com.imagedge.camera.ui.components.Lucide
-import com.imagedge.camera.ui.components.PageHeader
 import com.imagedge.camera.ui.components.ProcessingView
 import com.imagedge.camera.ui.components.ResultMessage
 import com.imagedge.camera.ui.theme.Radius
+import com.imagedge.camera.ui.components.AppIconButton
 
 /**
  * LIVE 图三拼（批次 B，对标 DJI Mimo「Live 三拼」，两阶段流程）：
@@ -71,20 +71,29 @@ fun LiveTriptychScreen(
         if (uris.isNotEmpty()) viewModel.onImagesPicked(uris)
     }
 
-    Scaffold(
-        topBar = { PageHeader(title = "LIVE 图三拼", onBack = onBack) }
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+    AppPage(title = "LIVE 图三拼", onBack = onBack) {
             when {
                 state.parsing || state.exporting -> {
                     ProcessingView(message = state.progressText ?: "处理中…")
+                }
+
+                // 结果页：导出成功/失败都必须停留展示——v1 复用了预览页且不渲染 message，
+                // 用户生成成功后看不到任何确认，失败也看不到原因，只能感觉「点了没反应」
+                state.phase == LiveTriptychViewModel.Phase.DONE -> {
+                    state.message?.let { ResultMessage(text = it, ok = state.success) }
+                    val donePreview = state.previewBitmap
+                    if (donePreview != null) {
+                        Image(
+                            bitmap = donePreview.asImageBitmap(),
+                            contentDescription = "三拼结果",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(state.aspect.targetW.toFloat() / (state.aspect.targetH * 3))
+                                .clip(RoundedCornerShape(Radius.Card))
+                        )
+                    }
+                    AppButton(text = "再拼一张", onClick = { viewModel.startOver() })
                 }
 
                 state.slots.size == 3 && state.phase == LiveTriptychViewModel.Phase.PREVIEW -> {
@@ -112,7 +121,6 @@ fun LiveTriptychScreen(
                     )
                 }
             }
-        }
     }
 }
 
@@ -123,15 +131,13 @@ private fun EditStage(
     viewModel: LiveTriptychViewModel
 ) {
     // ── 全局统一长宽比 ──
-    Text("统一长宽比（三张都将裁切到此比例）", style = MaterialTheme.typography.titleSmall)
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        LiveTriptychViewModel.Aspect.entries.forEach { aspect ->
-            FilterChip(
-                selected = state.aspect == aspect,
-                onClick = { viewModel.setAspect(aspect) },
-                label = { Text(aspect.label) }
-            )
-        }
+    AppSection(title = "统一长宽比") {
+        AppChipRow(
+            items = LiveTriptychViewModel.Aspect.entries.toList(),
+            selected = state.aspect,
+            label = { it.label },
+            onSelect = { viewModel.setAspect(it) }
+        )
     }
 
     // ── 三张槽位：封面重选 / 声音 / 对齐 / 顺序 ──
@@ -153,6 +159,8 @@ private fun PreviewStage(
 ) {
     val aspect = state.aspect
     val preview = state.previewBitmap
+    // 失败信息必须在预览页也能看到（原实现只在空态分支渲染 message）
+    state.message?.let { ResultMessage(text = it, ok = state.success) }
     if (preview != null) {
         Image(
             bitmap = preview.asImageBitmap(),
@@ -193,8 +201,11 @@ private fun SlotCard(
     // 进入可视区时懒加载封面候选帧
     LaunchedEffect(index) { viewModel.loadCoverThumbs(index) }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(Spacing.M),
+            verticalArrangement = Arrangement.spacedBy(Spacing.S)
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("第 ${index + 1} 格 · ${slot.displayName}", style = MaterialTheme.typography.labelLarge)
@@ -205,12 +216,18 @@ private fun SlotCard(
                     )
                 }
                 // 顺序调整
-                androidx.compose.material3.IconButton(onClick = { viewModel.moveUp(index) }, enabled = index > 0) {
-                    Text("↑", style = MaterialTheme.typography.titleMedium)
-                }
-                androidx.compose.material3.IconButton(onClick = { viewModel.moveDown(index) }, enabled = index < 2) {
-                    Text("↓", style = MaterialTheme.typography.titleMedium)
-                }
+                AppIconButton(
+                    icon = Lucide.ArrowUp,
+                    contentDescription = "上移该格",
+                    onClick = { viewModel.moveUp(index) },
+                    enabled = index > 0
+                )
+                AppIconButton(
+                    icon = Lucide.ArrowDown,
+                    contentDescription = "下移该格",
+                    onClick = { viewModel.moveDown(index) },
+                    enabled = index < 2
+                )
             }
 
             // ── 封面候选帧条带（点选重选封面；高亮当前选择）──
@@ -227,7 +244,8 @@ private fun SlotCard(
                             contentDescription = "封面候选帧",
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
-                                .size(width = 72.dp, height = 44.dp)
+                                // 触控目标 ≥ 48dp（规范 §8.1）：高度从 44 提到 48
+                                .size(width = 72.dp, height = 48.dp)
                                 .clip(RoundedCornerShape(Radius.Tag))
                                 .then(
                                     if (selected) Modifier.border(
@@ -248,40 +266,28 @@ private fun SlotCard(
                     modifier = Modifier.weight(1f)
                 )
                 if (slot.coverTimeMs != null) {
-                    Text(
+                    AppLink(
                         text = "恢复原图",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(Radius.Tag))
-                            .clickable { viewModel.resetCover(index) }
-                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                        onClick = { viewModel.resetCover(index) }
                     )
                 }
             }
 
             // ── 声音 + 对齐 ──
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("声音", style = MaterialTheme.typography.bodySmall)
+                Text("声音", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                 GlassSwitch(
                     checked = slot.audioOn,
-                    onCheckedChange = { viewModel.setAudioOn(index, it) },
-                    modifier = Modifier.padding(horizontal = 4.dp)
+                    onCheckedChange = { viewModel.setAudioOn(index, it) }
                 )
-                Spacer(Modifier.width(8.dp))
-                listOf(
-                    LiveTriptychViewModel.Alignment.TOP to "顶",
-                    LiveTriptychViewModel.Alignment.CENTER to "中",
-                    LiveTriptychViewModel.Alignment.BOTTOM to "底"
-                ).forEach { (alignment, label) ->
-                    FilterChip(
-                        selected = slot.alignment == alignment,
-                        onClick = { viewModel.setAlignment(index, alignment) },
-                        label = { Text(label, style = MaterialTheme.typography.labelSmall) },
-                        modifier = Modifier.padding(end = 4.dp)
-                    )
-                }
             }
+            // 裁切对齐（该格在统一比例下保上/中/下）
+            AppChipRow(
+                items = LiveTriptychViewModel.Alignment.entries.toList(),
+                selected = slot.alignment,
+                label = { alignment -> alignment.label },
+                onSelect = { viewModel.setAlignment(index, it) }
+            )
         }
     }
 }

@@ -2,7 +2,9 @@ package com.imagedge.camera.feature.connection
 
 import androidx.lifecycle.ViewModel
 import com.imagedge.camera.core.common.AppLog
+import com.imagedge.camera.data.remote.wifi.WifiAuth
 import com.imagedge.camera.data.remote.wifi.CameraWifiManager
+import com.imagedge.camera.data.remote.wifi.auth
 import com.imagedge.camera.data.remote.wifi.parseWifiQr
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -55,15 +57,35 @@ class QrScanViewModel @Inject constructor(
             return
         }
         AppLog.i(TAG, "QR 解析成功：ssid=" + info.ssid + "，bssid=" + info.bssid)
+
+        // 认证方式决定「要不要传凭据、传哪种凭据」（P0）：
+        // 原先无条件 setWpa2Passphrase(password ?: "")，开放热点/WEP/SAE 二维码
+        // 都会以空密码走 WPA2 发起请求，必然失败且提示误导用户去查密码。
+        val auth = info.auth
+        if (auth == WifiAuth.WEP) {
+            AppLog.w(TAG, "二维码为 WEP 加密，无法自动配网：${info.ssid}")
+            _state.value = QrScanUiState.Error(
+                "该二维码使用 WEP 加密，Android 不支持自动配网，请在系统 Wi-Fi 设置中手动连接"
+            )
+            return
+        }
+        val passphrase = info.password
+        if (auth != WifiAuth.OPEN && passphrase.isNullOrEmpty()) {
+            AppLog.w(TAG, "二维码缺少密码：ssid=${info.ssid}，auth=${info.authType}")
+            _state.value = QrScanUiState.Error(
+                "二维码未包含 Wi-Fi 密码（认证方式：${info.authType ?: "未标注"}），请在系统 Wi-Fi 设置中手动连接"
+            )
+            return
+        }
+        AppLog.i(TAG, "开始配网：auth=$auth，带密码=${!passphrase.isNullOrEmpty()}")
         _state.value = QrScanUiState.Connecting(info.ssid)
-        val passphrase = info.password ?: ""
 
         // 顺序实证（14:37 实测）：SSID 公式 5s 即有连接候选，BSSID-only 等了 33s 无果
         // （二维码 M 字段可能非热点 BSSID）。SSID 公式优先，BSSID 兜底。
         fun onFail(msg: String?) {
             if (info.bssid != null) {
                 AppLog.w(TAG, "SSID 公式未连上，回退 BSSID 匹配：" + info.bssid)
-                wifiManager.connectToCameraHotspot(null, passphrase, info.bssid) { ok2, msg2 ->
+                wifiManager.connectToCameraHotspot(null, passphrase, info.bssid, auth) { ok2, msg2 ->
                     if (ok2) {
                         _state.value = QrScanUiState.Success(info.ssid)
                     } else {
@@ -74,7 +96,7 @@ class QrScanViewModel @Inject constructor(
                 _state.value = QrScanUiState.Error(msg ?: "连接失败")
             }
         }
-        wifiManager.connectToCameraHotspot(info.ssid, passphrase, null) { ok, msg ->
+        wifiManager.connectToCameraHotspot(info.ssid, passphrase, null, auth) { ok, msg ->
             if (ok) {
                 // 关键：成功后保持配网请求存活（释放即断开），UI 关闭弹窗不影响连接
                 _state.value = QrScanUiState.Success(info.ssid)

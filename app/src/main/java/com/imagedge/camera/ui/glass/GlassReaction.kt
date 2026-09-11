@@ -46,9 +46,23 @@ fun Modifier.glassReactive(
     }
 
     val maxDragPx = with(LocalDensity.current) { MaxDragRadius.toPx() }
+    val glassLevel = LocalGlassLevel.current
 
     var pressed by remember { mutableStateOf(false) }
     var dragPx by remember { mutableStateOf(Offset.Zero) }
+    // 高光：按下点（松手后光点回到这里）与当前手指位置
+    var pressPoint by remember { mutableStateOf(Offset.Zero) }
+    var touchPoint by remember { mutableStateOf(Offset.Zero) }
+    val highlight = rememberGlassHighlight()
+
+    // 按压则高光淡入，松手淡出并把光点弹回按下点
+    LaunchedEffect(pressed) {
+        if (pressed) highlight.press(pressPoint) else highlight.release(pressPoint)
+    }
+    // 拖动中光点即时吸附手指（不做动画，否则高光会明显滞后于手指）
+    LaunchedEffect(touchPoint, pressed) {
+        if (pressed) highlight.follow(touchPoint)
+    }
 
     // 回弹：pressed 由 true 转 false 时，把拖动位移弹回原位
     LaunchedEffect(pressed) {
@@ -81,11 +95,22 @@ fun Modifier.glassReactive(
             translationX = dragPx.x
             translationY = dragPx.y
         }
+        // 高光画在玻璃之上、内容之下（本修饰符挂在 glassSurface 内侧）
+        .then(
+            if (glassLevel.warrantsBackdropCapture()) {
+                val intensity = highlightIntensity()
+                with(highlight) { Modifier.highlightLayer(intensity) }
+            } else {
+                Modifier
+            }
+        )
         .pointerInput(onClick, enabled) {
             awaitEachGesture {
                 val down = awaitFirstDown()
                 pressed = true
                 val downPos = down.position
+                pressPoint = downPos
+                touchPoint = downPos
                 var isTap = true
 
                 while (true) {
@@ -93,6 +118,7 @@ fun Modifier.glassReactive(
                     val change = event.changes.firstOrNull() ?: break
                     if (!change.pressed) break  // 手指抬起
 
+                    touchPoint = change.position
                     val moved = change.position - downPos
                     if (moved.getDistance() > viewConfiguration.touchSlop) {
                         isTap = false

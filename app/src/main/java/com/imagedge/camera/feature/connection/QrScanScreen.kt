@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.ui.graphics.Color
+import com.imagedge.camera.ui.glass.LocalGlassLevel
 import com.imagedge.camera.ui.glass.LocalGlassBackdrop
 import com.imagedge.camera.ui.glass.glassSurface
 import com.imagedge.camera.ui.glass.rememberGlassLevel
@@ -77,6 +78,7 @@ import com.imagedge.camera.core.common.AppLog
 import com.imagedge.camera.ui.feedback.SnackbarController
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import com.imagedge.camera.ui.components.AppLink
 
 /** 日志 TAG（logcat：CamRemote-qrscan） */
 private const val TAG = "qrscan"
@@ -340,15 +342,10 @@ fun QrScanSheetContent(
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.weight(1f)
                     )
-                    TextButton(
-                        onClick = { viewModel.reset() },
-                        contentPadding = PaddingValues(horizontal = 8.dp)
-                    ) {
-                        Text(
-                            text = stringResource(R.string.qr_retry),
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                    }
+                    AppLink(
+                        text = stringResource(R.string.qr_retry),
+                        onClick = { viewModel.reset() }
+                    )
                 }
                 is QrScanUiState.Connecting -> QrStatusText(
                     text = stringResource(R.string.qr_connecting, s.ssid),
@@ -587,7 +584,7 @@ fun QrScanDialog(
 ) {
     // 玻璃弹窗：Sheet 容器透明，内容底下铺玻璃（引用页面背景层，无递归风险）
     val backdrop = LocalGlassBackdrop.current
-    val glassLevel = rememberGlassLevel()
+    val glassLevel = LocalGlassLevel.current
     val useGlass = backdrop != null && glassLevel.warrantsBackdropCapture()
     val sheetShape = RoundedCornerShape(topStart = Radius.Sheet, topEnd = Radius.Sheet)
 

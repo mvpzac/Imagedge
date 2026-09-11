@@ -57,6 +57,8 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
+import com.imagedge.camera.ui.components.AppChipRow
+import com.imagedge.camera.ui.theme.Spacing
 
 /**
  * <pre>
@@ -138,30 +140,18 @@ fun AlbumScreen(
                 .padding(horizontal = 16.dp)
         ) {
             // 类型筛选（全部 / 照片 / 视频 / RAW）
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp, bottom = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                MediaFilter.entries.forEach { f ->
-                    FilterChip(
-                        selected = filter == f,
-                        onClick = {
-                            filter = f
-                            viewModel.onFilterChanged()
-                        },
-                        label = {
-                            Text(
-                                text = stringResource(f.labelRes),
-                                modifier = Modifier.fillMaxWidth(),
-                                textAlign = TextAlign.Center
-                            )
-                        },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
+            // 标签在组合作用域内先取好：AppChipRow 的 label 是普通 lambda（不能调 stringResource）
+            val filterLabels = MediaFilter.entries.associateWith { stringResource(it.labelRes) }
+            AppChipRow(
+                items = MediaFilter.entries.toList(),
+                selected = filter,
+                label = { filterLabels.getValue(it) },
+                onSelect = {
+                    filter = it
+                    viewModel.onFilterChanged()
+                },
+                modifier = Modifier.padding(top = Spacing.XS, bottom = Spacing.XS)
+            )
 
             // 断线提示横幅（连接状态由保活/事务自愈维护）
             if (connectionState == ChannelConnectionState.DISCONNECTED) {

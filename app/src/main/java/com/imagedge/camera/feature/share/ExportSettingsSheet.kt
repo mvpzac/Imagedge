@@ -7,16 +7,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -26,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import com.imagedge.camera.ui.glass.LocalGlassLevel
 import com.imagedge.camera.ui.glass.LocalGlassBackdrop
 import com.imagedge.camera.ui.glass.glassSurface
 import com.imagedge.camera.ui.glass.rememberGlassLevel
@@ -39,6 +37,11 @@ import com.imagedge.camera.share.ExportSize
 import com.imagedge.camera.share.ExifPolicy
 import com.imagedge.camera.share.ShareIntents
 import com.imagedge.camera.ui.theme.Radius
+import androidx.compose.ui.Alignment
+import com.imagedge.camera.ui.components.AppButton
+import com.imagedge.camera.ui.components.AppChipRow
+import com.imagedge.camera.ui.components.AppSlider
+import com.imagedge.camera.ui.theme.Spacing
 
 /**
  * 导出设置底部弹窗 —— 分享环节的入口。
@@ -68,7 +71,7 @@ fun ExportSettingsSheet(
     // 玻璃弹窗：Sheet 自身容器设为透明，内容底下铺一层玻璃。
     // 玻璃引用的是页面背景层（弹窗在 Popup 中，不会被该图层采集）→ 无递归。
     val backdrop = LocalGlassBackdrop.current
-    val glassLevel = rememberGlassLevel()
+    val glassLevel = LocalGlassLevel.current
     val useGlass = backdrop != null && glassLevel.warrantsBackdropCapture()
     val sheetShape = androidx.compose.material3.BottomSheetDefaults.ExpandedShape
 
@@ -105,20 +108,20 @@ fun ExportSettingsSheet(
 
             // 尺寸
             SettingsSection(stringResource(R.string.share_size)) {
-                ChipRow(
-                    options = ExportSize.entries,
+                AppChipRow(
+                    items = ExportSize.entries.toList(),
                     selected = config.size,
-                    labelOf = { it.label },
+                    label = { it.label },
                     onSelect = { viewModel.setSize(it) }
                 )
             }
 
             // 格式
             SettingsSection(stringResource(R.string.share_format)) {
-                ChipRow(
-                    options = ExportFormat.entries,
+                AppChipRow(
+                    items = ExportFormat.entries.toList(),
                     selected = config.format,
-                    labelOf = { it.name },
+                    label = { it.name },
                     onSelect = { viewModel.setFormat(it) }
                 )
                 // PNG 无 EXIF 容器，需要明说，避免用户误以为元数据被保留
@@ -133,10 +136,10 @@ fun ExportSettingsSheet(
 
             // 元数据与隐私
             SettingsSection(stringResource(R.string.share_privacy)) {
-                ChipRow(
-                    options = ExifPolicy.entries,
+                AppChipRow(
+                    items = ExifPolicy.entries.toList(),
                     selected = config.exif,
-                    labelOf = { it.label },
+                    label = { it.label },
                     onSelect = { viewModel.setExif(it) },
                     enabled = { config.format.supportsExif }
                 )
@@ -156,15 +159,13 @@ fun ExportSettingsSheet(
 
             // 画质（PNG 无损，无质量概念）
             if (config.format != ExportFormat.PNG) {
-                SettingsSection(
-                    label = stringResource(R.string.share_quality) + "  ${config.quality}"
-                ) {
-                    Slider(
-                        value = config.quality.toFloat(),
-                        onValueChange = { viewModel.setQuality(it.toInt()) },
-                        valueRange = 60f..100f,
-                        steps = 7,
-                        modifier = Modifier.fillMaxWidth()
+                SettingsSection(label = stringResource(R.string.share_quality)) {
+                    AppSlider(
+                        label = stringResource(R.string.share_quality),
+                        value = config.quality,
+                        onValueChange = { viewModel.setQuality(it) },
+                        range = 60..100,
+                        steps = 7
                     )
                 }
             }
@@ -178,22 +179,27 @@ fun ExportSettingsSheet(
                 )
             }
 
-            Button(
+            AppButton(
+                text = stringResource(R.string.share_export_action),
                 onClick = { viewModel.export() },
-                enabled = !exporting,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(Radius.Control)
+                enabled = !exporting
             ) {
-                if (exporting) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.height(20.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary
+                // 导出中：内联菊花 + 文案（规范 §7「按钮级加载态」）
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.S)
+                ) {
+                    if (exporting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Text(
+                        text = stringResource(R.string.share_export_action),
+                        style = MaterialTheme.typography.labelLarge
                     )
-                } else {
-                    Text(stringResource(R.string.share_export_action))
                 }
             }
             }
@@ -213,28 +219,6 @@ private fun SettingsSection(label: String, content: @Composable () -> Unit) {
     }
 }
 
-@Composable
-private fun <T> ChipRow(
-    options: List<T>,
-    selected: T,
-    labelOf: (T) -> String,
-    onSelect: (T) -> Unit,
-    enabled: (T) -> Boolean = { true }
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        options.forEach { option ->
-            FilterChip(
-                selected = option == selected,
-                onClick = { onSelect(option) },
-                enabled = enabled(option),
-                label = { Text(labelOf(option)) }
-            )
-        }
-    }
-}
 
 private fun launchShare(context: Context, payload: SharePayload) {
     val intent = if (payload.uris.size == 1) {

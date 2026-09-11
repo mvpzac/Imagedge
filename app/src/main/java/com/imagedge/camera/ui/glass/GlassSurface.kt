@@ -18,6 +18,7 @@ import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import com.imagedge.camera.ui.theme.Radius
 import com.imagedge.camera.ui.theme.PillShape
+import com.imagedge.camera.ui.glass.LocalGlassLevel
 
 /**
  * 玻璃参数（集中在此，方便真机调优）。
@@ -28,23 +29,37 @@ import com.imagedge.camera.ui.theme.PillShape
  */
 object GlassSpec {
     /**
-     * 背景模糊半径。
-     * 注意不要过大：iOS 玻璃的模糊偏轻（保留背后内容的剪影），
-     * 真正让它区别于「半透明板」的是边缘折射而非模糊。
+     * 背景模糊半径（容器类：导航胶囊、卡片、弹窗、抽屉）。
+     *
+     * **取值对齐官方示例（LiquidBottomTabs）**：官方是 `blur(8dp) + lens(24dp, 24dp)`，
+     * 我们此前用 14dp + 46dp——模糊过强会把背景糊成一团色块（观感像磨砂板），
+     * 折射位移过大则边缘拉伸失真。玻璃的高级感来自「**几乎看得清背后**」，
+     * 靠边缘折射出彩，而不是靠模糊。
      */
-    val BlurRadius = 14.dp
+    val BlurRadius = 8.dp
+
+    /**
+     * 小元素（按钮、开关、标签）的模糊半径。
+     * 官方 LiquidButton 用的是 `blur(2dp) + lens(12dp, 24dp)`：小面积上更轻的模糊，
+     * 否则一个 48dp 高的按钮会被糊成没有任何背景信息的色块。
+     */
+    val SmallBlurRadius = 3.dp
 
     /** 折射带高度（从边缘向内多宽的区域发生折射） */
     val RefractionHeight = 24.dp
 
-    /** 折射强度：正值让边缘把背后画面向中心放大，是「玻璃凸透镜」感的关键 */
-    val RefractionAmount = 46.dp
+    /** 折射强度：正值让边缘把背后画面向中心放大，是「玻璃凸透镜」感的关键（官方 24dp） */
+    val RefractionAmount = 24.dp
+
+    /** 小元素的折射强度（随尺寸等比缩小，避免小控件边缘被拉变形） */
+    val SmallRefractionAmount = 16.dp
 
     /**
      * 玻璃表面色不透明度。
      * 越低越通透（能看到背后画面），iOS 观感约 0.1–0.25。
      */
-    const val SurfaceAlpha = 0.2f
+    const val SurfaceAlpha = 0.18f
+    const val SmallSurfaceAlpha = 0.12f
 
     /** 背后内容饱和度增益（vibrancy），提升玻璃下画面的鲜活度 */
     const val Vibrancy = true
@@ -54,6 +69,21 @@ object GlassSpec {
 
     /** 色差：边缘折射带出轻微 RGB 分离（玻璃的最标志性细节） */
     const val ChromaticAberration = true
+}
+
+/**
+ * 玻璃尺寸档位。
+ *
+ * 同一个参数在一颗 48dp 按钮和一块全宽导航胶囊上的观感完全不同：
+ * 按钮需要更轻的模糊与更小的折射带，否则会糊成色块。官方示例也是这么分档的
+ * （LiquidButton 2dp/12dp vs LiquidBottomTabs 8dp/24dp）。
+ */
+enum class GlassProfile {
+    /** 小元素：按钮、开关、标签 */
+    SMALL,
+
+    /** 容器：卡片、导航胶囊、弹窗、抽屉 */
+    CONTAINER,
 }
 
 /**
@@ -75,9 +105,10 @@ fun Modifier.glassSurface(
     backdrop: LayerBackdrop?,
     level: GlassLevel,
     shape: Shape = RoundedCornerShape(Radius.Card),
-    blurRadius: Dp = GlassSpec.BlurRadius,
+    profile: GlassProfile = GlassProfile.CONTAINER,
+    blurRadius: Dp = if (profile == GlassProfile.SMALL) GlassSpec.SmallBlurRadius else GlassSpec.BlurRadius,
     refractionHeight: Dp = GlassSpec.RefractionHeight,
-    refractionAmount: Dp = GlassSpec.RefractionAmount,
+    refractionAmount: Dp = if (profile == GlassProfile.SMALL) GlassSpec.SmallRefractionAmount else GlassSpec.RefractionAmount,
     surfaceColor: Color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerHighest
 ): Modifier {
     if (level == GlassLevel.NONE || backdrop == null) {
@@ -85,14 +116,17 @@ fun Modifier.glassSurface(
         return this.background(color = surfaceColor, shape = shape)
     }
 
-    val tint = surfaceColor.copy(alpha = GlassSpec.SurfaceAlpha)
+    val tint = surfaceColor.copy(
+        alpha = if (profile == GlassProfile.SMALL) GlassSpec.SmallSurfaceAlpha else GlassSpec.SurfaceAlpha
+    )
     val specular = surfaceColor.luminance() < 0.5f
     return this.drawBackdrop(
         backdrop = backdrop,
         shape = { shape },
         effects = {
-            blur(blurRadius.toPx())
+            // 顺序与官方示例一致：先提饱和度，再模糊，最后折射
             if (GlassSpec.Vibrancy) vibrancy()
+            blur(blurRadius.toPx())
             // lens 需要 AGSL（API 33+），且只支持圆角形状——
             // 低版本由分级挡在门外，这里无需再判断版本
             if (level == GlassLevel.FULL) {
@@ -131,7 +165,7 @@ fun Modifier.glassSurface(
 @Composable
 fun glassDialogContainerColor(default: Color = androidx.compose.material3.AlertDialogDefaults.containerColor): Color {
     val backdrop = LocalGlassBackdrop.current
-    val level = rememberGlassLevel()
+    val level = LocalGlassLevel.current
     return if (backdrop != null && level.warrantsBackdropCapture()) Color.Transparent else default
 }
 
@@ -146,7 +180,7 @@ fun Modifier.glassDialog(
     surfaceColor: Color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerHigh
 ): Modifier = glassSurface(
     backdrop = LocalGlassBackdrop.current,
-    level = rememberGlassLevel(),
+    level = LocalGlassLevel.current,
     shape = shape,
     surfaceColor = surfaceColor
 )

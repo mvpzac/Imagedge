@@ -1,7 +1,5 @@
 package com.imagedge.camera.image
 
-import android.graphics.RectF
-
 /**
  * 编辑步骤 —— 非破坏性编辑的原子单位。
  *
@@ -10,7 +8,9 @@ import android.graphics.RectF
  * - 可任意增删（撤销、回退、重编辑）
  * - 对多张照片套同一串步骤 = 批处理
  *
- * 参数取值统一为 **-1f..1f**（0 = 原始），便于 UI 直接绑定滑块。
+ * 参数取值统一为 **-1f..1f**（0 = 原始），便于 UI 直接绑定滑块；
+ * 几何类步骤的顺序由 [ImagePipeline] 固定（拉直 → 旋转 → 翻转 → 裁剪），
+ * 与「用户在裁剪界面看到的画面」保持一致。
  */
 sealed interface EditStep {
 
@@ -27,16 +27,22 @@ sealed interface EditStep {
     data class Temperature(val value: Float) : EditStep
 
     /**
-     * 裁剪：归一化矩形（0..1 相对原图），避免与具体像素绑定。
-     * 这样同一配方可以套用到不同分辨率的照片。
+     * 裁剪：归一化矩形（0..1，相对**拉直+旋转+翻转之后**的画面）。
+     * 用归一化坐标而不是像素，同一配方可套用到不同分辨率的照片。
      */
-    data class Crop(val rect: RectF) : EditStep
+    data class Crop(val rect: NormRect) : EditStep
 
-    /** 旋转：角度（度），通常为 ±90 / 180 */
+    /** 旋转：角度（度），正 = 顺时针；UI 上按 90° 递增 */
     data class Rotate(val degrees: Float) : EditStep
+
+    /** 拉直：小角度校正（-45..45），旋转后自动裁掉四角空白 */
+    data class Straighten(val degrees: Float) : EditStep
+
+    /** 翻转：horizontal = true 左右镜像，false 上下镜像 */
+    data class Flip(val horizontal: Boolean) : EditStep
 
     companion object {
         /** 全图（不裁剪） */
-        val FULL_CROP = RectF(0f, 0f, 1f, 1f)
+        val FULL_CROP = NormRect.FULL
     }
 }

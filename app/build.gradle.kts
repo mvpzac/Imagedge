@@ -31,9 +31,9 @@ android {
         applicationId = "com.imagedge.camera"
         minSdk = 29
         targetSdk = 36
-        // 0.2.0-alpha03：液态玻璃全覆盖（导航/卡片/按钮/开关/弹窗/返回钮）+ 全页可滑动
-        versionCode = 1012
-        versionName = "0.2.0-alpha03"
+        // 0.2.0-alpha05：液态玻璃对齐官方参数（轻模糊 + 边缘折射）+ 切页性能优化 + 按钮真玻璃
+        versionCode = 1014
+        versionName = "0.2.0-alpha05"
 
         // 仅支持 64 位设备（项目决策 2026-08-29）：排除 32 位 ABI
         ndk {
@@ -143,3 +143,77 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
 }
+
+/**
+ * UI 规范静态检查（docs/UI-SPEC.md §6.1 决策表）。
+ *
+ * `feature/` 下不允许直接使用 Material3 原生控件——同一屏出现两套高度/圆角/配色，
+ * 正是规范化之前的状态。所有控件必须来自 `ui/components` 的设计系统组件；
+ * 组件实现本身在 `ui/` 下，不受本检查约束（AppControls 内部就是包装 M3 控件）。
+ *
+ * 为什么做成 Gradle 任务而不是 CI 里的 grep：本地 `./gradlew check` 与 CI 跑同一份逻辑，
+ * 且输出带文件与行号，错误信息直接指向替代组件。
+ */
+val uiSpecCheck = tasks.register("uiSpecCheck") {
+    group = "verification"
+    description = "检查 feature/ 是否绕过设计系统直接使用 M3 控件（UI-SPEC §6.1）"
+
+    val featureDir = layout.projectDirectory.dir("src/main/java/com/imagedge/camera/feature")
+    inputs.dir(featureDir).withPropertyName("featureSources")
+
+    // 裸控件 → 设计系统替代品（错误信息里直接给出该用什么）
+    val banned = linkedMapOf(
+        "Button" to "AppButton",
+        "FilledTonalButton" to "AppButton(SECONDARY)",
+        "OutlinedButton" to "AppButton(SECONDARY)",
+        "ElevatedButton" to "AppButton",
+        "TextButton" to "AppLink",
+        "IconButton" to "AppIconButton",
+        "FilterChip" to "AppChip / AppChipRow",
+        "AssistChip" to "AppChip / AppLink",
+        "OutlinedTextField" to "AppTextField",
+        "Switch" to "AppSwitch / AppSwitchRow",
+        "Slider" to "AppSlider",
+        "Card" to "GlassCard",
+    )
+
+    doLast {
+        val violations = mutableListOf<String>()
+        featureDir.asFile.walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .forEach { file ->
+                file.readLines().forEachIndexed { index, raw ->
+                    // 去掉行尾注释（保留 URL 中的 //），整行注释与文档注释直接跳过
+                    val code = raw.replace(Regex("(?<!:)//.*$"), "")
+                    val trimmed = code.trim()
+                    if (trimmed.isEmpty() || trimmed.startsWith("*") || trimmed.startsWith("/*")) {
+                        return@forEachIndexed
+                    }
+                    banned.forEach { (control, replacement) ->
+                        // 排除 AppButton(/GlassCard( 这类设计系统组件：
+                        // 名字前面是字母、数字、下划线或点号时不算命中
+                        if (Regex("(?<![\\w.])$control\\s*\\(").containsMatchIn(code)) {
+                            val path = file.relativeTo(featureDir.asFile).path
+                            violations += "$path:${index + 1} 直接使用了 M3 的 $control —— 请改用 $replacement"
+                        }
+                    }
+                }
+            }
+
+        if (violations.isNotEmpty()) {
+            throw GradleException(
+                buildString {
+                    appendLine("UI 规范检查未通过（docs/UI-SPEC.md §6.1 组件决策表）：")
+                    violations.forEach { appendLine("  - $it") }
+                    appendLine()
+                    appendLine("设计系统组件：AppPage / AppSection / AppButton / AppLink / AppIconButton /")
+                    append("AppChip / AppChipRow / AppSlider / AppTextField / AppSwitch(Row) / GlassCard / States")
+                }
+            )
+        }
+        logger.lifecycle("UI 规范检查通过：feature/ 下未发现裸 M3 控件")
+    }
+}
+
+// 并入标准校验链路：本地 ./gradlew check 与 CI 都会执行
+tasks.named("check") { dependsOn(uiSpecCheck) }

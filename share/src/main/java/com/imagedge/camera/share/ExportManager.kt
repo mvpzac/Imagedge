@@ -185,8 +185,8 @@ class ExportManager(private val context: Context) {
         // 超大图保护
         while ((maxOf(w, h) / sample) > MAX_DECODE_EDGE) sample *= 2
         // 目标档位：先粗采样到目标附近，后续再做精确缩放
+        // （原写法 `?: if (size == ExportSize.M2) null else null` 是重构残留的死分支，结果恒为 maxLongEdge）
         val target = size.maxLongEdge
-            ?: if (size == ExportSize.M2) null else null
         if (target != null) {
             while ((maxOf(w, h) / sample) > target * 2) sample *= 2
         } else if (size == ExportSize.M2) {

@@ -24,6 +24,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.imagedge.camera.R
 import com.imagedge.camera.ui.glass.glassReactive
+import com.imagedge.camera.ui.theme.Spacing
 
 /**
  * 二级页统一标题栏。
@@ -51,31 +52,34 @@ fun PageHeader(
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (onBack != null) {
-            // 液态玻璃返回钮（圆形悬浮）：40dp 触控目标，内部视觉 36dp
+            // 液态玻璃返回钮（圆形悬浮）：**48dp 触控目标**（UI 规范 §8.1），内部视觉 36dp。
+            // 视觉缩小但触摸区撑满，避免"看得见点不中"。
             Box(
                 modifier = Modifier
-                    .padding(horizontal = 12.dp)
-                    .size(36.dp)
+                    .padding(start = Spacing.S)
+                    .size(48.dp)
                     .clip(CircleShape)
-                    .background(
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
-                        shape = CircleShape
-                    )
-                    .border(
-                        width = 1.dp,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
-                        shape = CircleShape
-                    )
-                    // 液态玻璃返回钮：glassReactive 处理按压缩放 + 拖动位移 + 点击
                     .glassReactive(onClick = onBack),
                 contentAlignment = Alignment.Center
             ) {
-                LucideIcon(
-                    Lucide.ArrowLeft,
-                    contentDescription = stringResource(R.string.viewer_back),
-                    size = 20.dp,
-                    tint = MaterialTheme.colorScheme.primary
-                )
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        // 只有半透明圆底、没有描边（与 AppIconButton 共用同一套观感）
+                        .background(
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+                            shape = CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    LucideIcon(
+                        Lucide.ArrowLeft,
+                        contentDescription = stringResource(R.string.viewer_back),
+                        size = 20.dp,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
         Text(

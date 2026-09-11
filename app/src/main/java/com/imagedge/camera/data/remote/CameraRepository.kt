@@ -415,6 +415,12 @@ class CameraRepository @Inject constructor(
                 MediaStore.MediaColumns.RELATIVE_PATH,
                 "${Environment.DIRECTORY_DCIM}/Imagedge"
             )
+            // 下载中标记为 pending：否则大文件（几十 MB 视频）下载的几分钟里，
+            // 相册/其他应用能看到一个打不开的残缺文件（P0）
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+            // 拍摄时间决定系统相册的排序。相机枚举时已经拿到 captureDate，
+            // 不写它的话下载回来的照片会按「下载时间」排序，用户看到顺序全乱（P0）
+            item.captureDate?.time?.let { put(MediaStore.MediaColumns.DATE_TAKEN, it) }
         }
 
         val uri = resolver.insert(collection, contentValues) ?: return@withContext null
@@ -429,6 +435,15 @@ class CameraRepository @Inject constructor(
             output.use { stream ->
                 channel.download(item, stream) { loaded, total -> onProgress(loaded, total) }
             }
+            // 写完才发布条目（IS_PENDING=0），此后图库才可见完整文件
+            runCatching {
+                resolver.update(
+                    uri,
+                    ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) },
+                    null,
+                    null
+                )
+            }.onFailure { AppLog.w("camera", "清除 IS_PENDING 失败（文件已完整，仅标记残留）：$uri：${it.message}") }
         } catch (e: Exception) {
             runCatching { resolver.delete(uri, null, null) }
                 .onFailure { AppLog.w("camera", "删除半成品文件失败：$uri：${it.message}") }
@@ -484,9 +499,20 @@ class CameraRepository @Inject constructor(
             put(MediaStore.MediaColumns.DISPLAY_NAME, item.filename)
             put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
             put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DCIM}/Imagedge")
+            // 与 downloadToGallery 同样：先 pending，搬完再发布；并写入拍摄时间（P0）
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+            item.captureDate?.time?.let { put(MediaStore.MediaColumns.DATE_TAKEN, it) }
         }
         val uri = resolver.insert(collection, contentValues) ?: return@withContext null
         commitInto(uri, source) { resolver.delete(uri, null, null) }
+        runCatching {
+            resolver.update(
+                uri,
+                ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) },
+                null,
+                null
+            )
+        }
         uri
     }
 
@@ -558,8 +584,14 @@ class CameraRepository @Inject constructor(
             lower.endsWith(".arw") -> "image/x-sony-arw"
             lower.endsWith(".jpg") || lower.endsWith(".jpeg") -> "image/jpeg"
             lower.endsWith(".png") -> "image/png"
+            // HEIF 系列（索尼新机型、手机出片）：缺这三条会被写成 octet-stream，
+            // 图库不索引或显示为未知文件（P0）
+            lower.endsWith(".heic") || lower.endsWith(".heif") || lower.endsWith(".hif") -> "image/heif"
+            lower.endsWith(".tif") || lower.endsWith(".tiff") -> "image/tiff"
+            lower.endsWith(".dng") -> "image/x-adobe-dng"
             lower.endsWith(".mp4") -> "video/mp4"
             lower.endsWith(".mov") -> "video/quicktime"
+            lower.endsWith(".m4v") -> "video/x-m4v"
             lower.endsWith(".mts") || lower.endsWith(".m2ts") -> "video/mp2t"
             else -> "application/octet-stream"
         }

@@ -52,6 +52,10 @@ import com.imagedge.camera.ui.theme.ViewerBackdrop
 import com.imagedge.camera.data.model.MediaItem
 import com.imagedge.camera.ptp.PhotoType
 import java.io.File
+import com.imagedge.camera.ui.components.AppButton
+import com.imagedge.camera.ui.components.AppButtonType
+import com.imagedge.camera.ui.components.AppIconButton
+import com.imagedge.camera.ui.theme.Spacing
 
 /**
  * <pre>
@@ -106,19 +110,15 @@ fun PhotoViewerScreen(
                     }
                 },
                 navigationIcon = {
-                    // 半透明深色圆底衬：照片明暗不定，保证 primary 箭头在任意画面上可读
-                    IconButton(
+                    // 半透明深色圆底衬：照片明暗不定，保证箭头在任意画面上可读
+                    AppIconButton(
+                        icon = Lucide.ArrowLeft,
+                        contentDescription = stringResource(R.string.viewer_back),
                         onClick = onBack,
                         modifier = Modifier
-                            .padding(4.dp)
+                            .padding(Spacing.XS)
                             .background(ViewerBackdrop.copy(alpha = 0.35f), PillShape)
-                    ) {
-                        LucideIcon(
-                            Lucide.ArrowLeft,
-                            contentDescription = stringResource(R.string.viewer_back),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
+                    )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = ViewerBackdrop.copy(alpha = 0.6f)
@@ -138,9 +138,12 @@ fun PhotoViewerScreen(
                         .padding(16.dp),
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    Button(onClick = { viewModel.enqueueDownload(current) }) {
-                        Text(stringResource(R.string.viewer_download))
-                    }
+                    AppButton(
+                        text = stringResource(R.string.viewer_download),
+                        onClick = { viewModel.enqueueDownload(current) },
+                        fullWidth = false,
+                        type = AppButtonType.PRIMARY
+                    )
                 }
             }
         }
@@ -162,6 +165,9 @@ fun PhotoViewerScreen(
         ) { page ->
             val item = items[page]
             val preview = previews[item.thumbKey] ?: viewModel.cachedPreview(item)
+            // 只取一次：gridPreview 读的是可被 onTrimMemory / 切模式清空的共享缓存，
+            // 若在 when 条件里判空、在分支里再调一次并 !!，两次之间缓存被清就会 NPE 崩溃（P0）
+            val gridFallback = if (preview == null) viewModel.gridPreview(item) else null
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -179,8 +185,8 @@ fun PhotoViewerScreen(
                         contentScale = ContentScale.Fit
                     )
                     // 网格缩略图垫底：点开瞬间可见，原图加载完成后自动替换
-                    viewModel.gridPreview(item) != null -> Image(
-                        bitmap = viewModel.gridPreview(item)!!,
+                    gridFallback != null -> Image(
+                        bitmap = gridFallback,
                         contentDescription = item.filename,
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Fit
@@ -235,9 +241,19 @@ private fun VideoPreview(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text("下载失败：${state.message}", color = OnViewer)
-                Button(onClick = onPlay) { Text("重试") }
+                AppButton(
+                    text = "重试",
+                    onClick = onPlay,
+                    fullWidth = false,
+                    type = AppButtonType.SECONDARY
+                )
             }
-            else -> Button(onClick = onPlay) { Text("播放视频") }
+            else -> AppButton(
+                text = "播放视频",
+                onClick = onPlay,
+                fullWidth = false,
+                type = AppButtonType.SECONDARY
+            )
         }
     }
 }

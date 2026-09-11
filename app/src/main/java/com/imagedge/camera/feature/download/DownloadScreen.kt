@@ -52,9 +52,10 @@ import com.imagedge.camera.data.model.DownloadState
 import com.imagedge.camera.data.model.DownloadTask
 import com.imagedge.camera.data.model.isActive
 import com.imagedge.camera.data.transfer.DownloadHistoryEntity
-import com.imagedge.camera.feature.edit.BasicEditScreen
+import com.imagedge.camera.feature.edit.PhotoEditScreen
 import com.imagedge.camera.feature.share.ExportSettingsSheet
 import com.imagedge.camera.feature.share.ShareViewModel
+import com.imagedge.camera.ui.components.AppLink
 import com.imagedge.camera.ui.components.EmptyState
 import com.imagedge.camera.ui.glass.glassDialog
 import com.imagedge.camera.ui.glass.glassDialogContainerColor
@@ -64,6 +65,7 @@ import com.imagedge.camera.ui.components.PageHeader
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import com.imagedge.camera.ui.components.AppIconButton
 
 /**
  * <pre>
@@ -108,20 +110,23 @@ fun DownloadScreen(
                 actions = {
                     if (tab == 0) {
                         if (hasActive) {
-                            TextButton(onClick = { viewModel.cancelAllActive() }) {
-                                Text(stringResource(R.string.download_cancel_all))
-                            }
+                            AppLink(
+                                text = stringResource(R.string.download_cancel_all),
+                                onClick = { viewModel.cancelAllActive() }
+                            )
                         }
                         if (hasFinished) {
-                            TextButton(onClick = { viewModel.clearFinished() }) {
-                                Text(stringResource(R.string.download_clear))
-                            }
+                            AppLink(
+                                text = stringResource(R.string.download_clear),
+                                onClick = { viewModel.clearFinished() }
+                            )
                         }
                     } else {
                         if (history.isNotEmpty()) {
-                            TextButton(onClick = { viewModel.clearHistory() }) {
-                                Text(stringResource(R.string.download_history_clear))
-                            }
+                            AppLink(
+                                text = stringResource(R.string.download_history_clear),
+                                onClick = { viewModel.clearHistory() }
+                            )
                         }
                     }
                 }
@@ -220,10 +225,10 @@ fun DownloadScreen(
         )
     }
 
-    // 编辑：基础调整（覆盖当前页，返回即回到下载队列）
+    // 编辑：编辑调节（裁剪/旋转/调色/滤镜，直接以已下载的照片为源；返回即回到下载队列）
     editTarget?.let { uri ->
-        BasicEditScreen(
-            sourceUri = uri,
+        PhotoEditScreen(
+            initialUri = uri,
             onBack = { editTarget = null }
         )
     }
@@ -313,34 +318,20 @@ private fun DownloadTaskRow(
         // 原先只能等它跑完或杀进程——相机断链时任务会一直卡在「下载中」，
         // 用户没有任何办法把它从队列里拿掉（真机反馈）。
         if (task.state.isActive) {
-            androidx.compose.material3.IconButton(
+            AppIconButton(
+                icon = Lucide.X,
+                contentDescription = stringResource(R.string.download_cancel),
                 onClick = { onCancel(task) },
-                modifier = Modifier.size(32.dp)
-            ) {
-                LucideIcon(
-                    lucide = Lucide.X,
-                    contentDescription = stringResource(R.string.download_cancel),
-                    size = 16.dp
-                )
-            }
+                iconSize = 16.dp
+            )
         }
 
         // 已完成且拿到相册 Uri 的任务：提供「编辑」与「分享」。
         // 这是一站式闭环的后两环——传完的照片可以直接调整并分享出去，
         // 不必先退出 App 再打开相册或第三方工具。
         if (task.state == DownloadState.DONE && task.savedUri != null) {
-            androidx.compose.material3.TextButton(onClick = { onEdit(task) }) {
-                Text(
-                    text = stringResource(R.string.edit_action),
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-            androidx.compose.material3.TextButton(onClick = { onShare(task) }) {
-                Text(
-                    text = stringResource(R.string.share_action),
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
+            AppLink(text = stringResource(R.string.edit_action), onClick = { onEdit(task) })
+            AppLink(text = stringResource(R.string.share_action), onClick = { onShare(task) })
         }
     }
 }
@@ -420,7 +411,10 @@ private fun HistoryDetailDialog(record: DownloadHistoryEntity, onDismiss: () -> 
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.download_history_close)) }
+            AppLink(
+                text = stringResource(R.string.download_history_close),
+                onClick = onDismiss
+            )
         }
     )
 }

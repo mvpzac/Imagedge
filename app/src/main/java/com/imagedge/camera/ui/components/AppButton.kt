@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -24,18 +25,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.imagedge.camera.ui.glass.LocalGlassLevel
 import com.imagedge.camera.ui.glass.LocalGlassBackdrop
 import com.imagedge.camera.ui.glass.glassReactive
 import com.imagedge.camera.ui.glass.rememberGlassLevel
 import com.imagedge.camera.ui.glass.warrantsBackdropCapture
 import com.imagedge.camera.ui.theme.Radius
 import com.imagedge.camera.ui.theme.Spacing
+import com.imagedge.camera.ui.glass.GlassProfile
+import com.imagedge.camera.ui.glass.glassSurface
 
 /** 按钮内容内边距：垂直 14dp 与文字行高凑约 48dp 目标高度；水平 24dp 保非全宽时不贴边 */
 private val ButtonContentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp)
 
 /** 统一按钮：PRIMARY 强调 / SECONDARY 次级 / GHOST 文字 */
 enum class AppButtonType { PRIMARY, SECONDARY, GHOST }
+
+/** 按钮内容对齐：CENTER = 单行居中；START = 图标 + 左对齐双行 + 尾部箭头（大号行动按钮） */
+enum class AppButtonAlign { CENTER, START }
 
 @Composable
 fun AppButton(
@@ -45,63 +52,110 @@ fun AppButton(
     type: AppButtonType = AppButtonType.PRIMARY,
     enabled: Boolean = true,
     leadingIcon: Int? = null,
+    trailingIcon: Int? = null,
+    /** 第二行说明文字：传入后按钮变为「标题 + 说明」双行布局 */
+    subtitle: String? = null,
+    align: AppButtonAlign = AppButtonAlign.CENTER,
     fullWidth: Boolean = true,
     // 自定义内容槽：传入后替代默认的「图标 + 单行文字」布局
-    //（供 HomeBigButton 这类需要双行/富内容的按钮复用同一套玻璃样式）
+    //（仅用于极特殊排版；常规双行/带箭头请用 subtitle + align + trailingIcon）
     content: (@Composable () -> Unit)? = null
 ) {
     val shape = RoundedCornerShape(Radius.Control)
     val backdrop = LocalGlassBackdrop.current
-    val glassLevel = rememberGlassLevel()
+    val glassLevel = LocalGlassLevel.current
     val useGlass = backdrop != null && glassLevel.warrantsBackdropCapture()
 
+    /**
+     * 默认内容：三种形态由参数决定，不再需要调用方自己拼 Column
+     * 1. 单行居中（默认）：[图标] 文字
+     * 2. 双行居中：标题 + 说明，用于主页大按钮
+     * 3. 双行左对齐（align = START）：左侧图标 + 中间双行 + 右侧箭头，用于列表式行动项
+     */
     val defaultContent: @Composable () -> Unit = {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            if (leadingIcon != null) {
-                LucideIcon(leadingIcon, contentDescription = null, size = 18.dp)
-                Spacer(Modifier.width(Spacing.S))
+        val titleStyle =
+            if (subtitle != null) MaterialTheme.typography.titleMedium
+            else MaterialTheme.typography.labelLarge
+        val subtitleColor = LocalContentColor.current.copy(alpha = 0.72f)
+        if (align == AppButtonAlign.START) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.M)
+            ) {
+                if (leadingIcon != null) {
+                    LucideIcon(leadingIcon, contentDescription = null, size = 22.dp)
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text, style = titleStyle)
+                    if (subtitle != null) {
+                        Text(subtitle, style = MaterialTheme.typography.labelSmall, color = subtitleColor)
+                    }
+                }
+                if (trailingIcon != null) {
+                    LucideIcon(trailingIcon, contentDescription = null, size = 18.dp)
+                }
             }
-            Text(text, style = MaterialTheme.typography.labelLarge)
+        } else {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    if (leadingIcon != null) {
+                        LucideIcon(leadingIcon, contentDescription = null, size = 20.dp)
+                        Spacer(Modifier.width(Spacing.S))
+                    }
+                    Text(text, style = titleStyle)
+                    if (trailingIcon != null) {
+                        Spacer(Modifier.width(Spacing.S))
+                        LucideIcon(trailingIcon, contentDescription = null, size = 18.dp)
+                    }
+                }
+                if (subtitle != null) {
+                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = subtitleColor)
+                }
+            }
         }
     }
     val body: @Composable () -> Unit = { (content ?: defaultContent)() }
     val baseModifier = if (fullWidth) modifier.fillMaxWidth() else modifier
 
     // ===== 玻璃路径 =====
-    // 不用 drawBackdrop：在我们的双背景源架构下，按钮位置 backdrop.graphicsLayer
-    // 在某些路径上为空（具体根因未深挖），drawBackdrop 会渲染成全黑——
-    // 完全背离「液态玻璃」的初衷。
-    // 改用半透明背景 + 描边的"伪玻璃"实现：浅色半透明表面透出背后光晕，
-    // 描边模拟玻璃边缘。**不是真玻璃**（无 blur/lens），但绝对不是黑色大块，
-    // 且观感与背景光晕一致。EntryCard、GlassCard 等大尺寸玻璃容器
-    // 仍用真 glassSurface（它们工作正常）。
+    // 历史坑：早期直接在 Material3 `Button` 上叠 drawBackdrop 会渲染成黑色实心块
+    //（M3 容器自带的 elevation 底色与离屏图层冲突），当时的兜底是「透明背景 + 描边」的
+    // 伪玻璃——**没有模糊也没有折射**，观感与真玻璃差别很大。
+    // 现在按钮本身已经是 `Box` 实现（不是 M3 Button），可以安全走真 glassSurface：
+    // 小尺寸档位（更轻的模糊 + 更小的折射带），既保住可读性又有玻璃质感。
     if (useGlass && type != AppButtonType.GHOST) {
-        val bg: Color
+        // 不加任何描边（黑线描边会把极简黑白界面切碎，也与液态玻璃的语言冲突）。
+        // 主/次的层级改由**玻璃浓淡 + 文字色**表达：
+        //   主 = 更浓的玻璃（表面色取 onSurfaceVariant，12% 罩色后是一层浅灰烟熏）
+        //   次 = 与相册页卡片同色的清透玻璃（surface）
+        // 两种都不含深色填充，深浅主题下都成立（深色主题里"更浓"表现为更亮）。
         val textColor: Color
-        val border: BorderStroke?
+        val tintColor: Color
         when (type) {
             AppButtonType.PRIMARY -> {
-                // 透明背景 + 主色描边 + 主色文字：液态玻璃按钮不靠填充色，
-// 透明透出背后光晕，描边和文字颜色提供强调。这绝对不是黑色。
-                bg = Color.Transparent
                 textColor = MaterialTheme.colorScheme.primary
-                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+                tintColor = MaterialTheme.colorScheme.onSurfaceVariant
             }
             AppButtonType.SECONDARY -> {
-                bg = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f)
                 textColor = MaterialTheme.colorScheme.onSurface
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                tintColor = MaterialTheme.colorScheme.surface
             }
             else -> return@AppButton
         }
         Box(
             modifier = baseModifier
                 .clip(shape)
-                .background(bg, shape)
-                .border(border.width, border.brush, shape)
+                .glassSurface(
+                    backdrop = backdrop,
+                    level = glassLevel,
+                    shape = shape,
+                    profile = GlassProfile.SMALL,
+                    surfaceColor = tintColor
+                )
                 .glassReactive(onClick = onClick, enabled = enabled)
                 .padding(ButtonContentPadding),
             contentAlignment = Alignment.Center
@@ -134,7 +188,8 @@ fun AppButton(
         }
         AppButtonType.SECONDARY -> Box(
             modifier = baseModifier
-                .border(1.dp, MaterialTheme.colorScheme.outline, shape)
+                // 降级路径同样不描边：用一档中性填充与主按钮区分
+                .background(MaterialTheme.colorScheme.surfaceVariant, shape)
                 .clickable(enabled = enabled) { onClick() }
                 .padding(ButtonContentPadding),
             contentAlignment = Alignment.Center

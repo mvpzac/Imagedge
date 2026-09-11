@@ -1,5 +1,5 @@
-// :lut LUT 引擎（Vulkan 计算着色器 + 纯 Kotlin CPU 回退，参考 Lut2Photo 架构）
-// M0 骨架：先声明 Android library；Vulkan NDK 在 M3 落地
+// :lut LUT 引擎（GPU：OpenGL ES 3.0 + 3D 纹理硬件三线性 / CPU：纯 Kotlin 三线性兜底）
+// 3D LUT 交给 sampler3D 的硬件过滤即可，无需 Vulkan NDK（见 GpuLutProcessor 类注释）
 plugins {
     alias(libs.plugins.android.library)
 }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.Paint
 import android.graphics.RectF
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -43,7 +44,11 @@ class LiveTriptychViewModel @Inject constructor(
 ) : ViewModel() {
 
     /** 该段画面在裁切窗口内的垂直对齐（横图裁成更"竖"的比例时决定保上/中/下） */
-    enum class Alignment { TOP, CENTER, BOTTOM }
+    enum class Alignment(val label: String) {
+        TOP("顶"),
+        CENTER("中"),
+        BOTTOM("底"),
+    }
 
     /** 统一长宽比（全局作用于三张；目标分辨率 = 三段转码归一的统一规格） */
     enum class Aspect(val label: String, val ratio: Float, val targetW: Int, val targetH: Int) {
@@ -78,8 +83,8 @@ class LiveTriptychViewModel @Inject constructor(
         val thumbnail: Bitmap? = null,
     )
 
-    /** 阶段：归一化编辑 → 拼接预览 */
-    enum class Phase { EDIT, PREVIEW }
+    /** 阶段：归一化编辑 → 拼接预览 → 已生成（结果页） */
+    enum class Phase { EDIT, PREVIEW, DONE }
 
     data class UiState(
         val parsing: Boolean = false,
@@ -101,6 +106,13 @@ class LiveTriptychViewModel @Inject constructor(
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private val parsedFiles = mutableListOf<File>()
+
+    /**
+     * 导出过程中产生的派生文件（转码段 / 拼接产物 / 拼图 JPEG）。
+     * 与 [parsedFiles] 分开管理：导出失败时只清理这些，**保留槽位提取出的原视频**，
+     * 用户才能直接点「重试」而不是被迫重新选三张图（v1 失败后 cleanup 把源文件也删了）。
+     */
+    private val exportFiles = mutableListOf<File>()
 
     /** 图片选择器回调：解析 3 张实况图（任意长宽比） */
     fun onImagesPicked(uris: List<Uri>) {
@@ -146,10 +158,9 @@ class LiveTriptychViewModel @Inject constructor(
             retriever.release()
         }
         require(width > 0 && height > 0) { "invalid video size ${width}x$height" }
-        val thumb = BitmapFactory.decodeFile(parsed.imageFile.absolutePath)?.let {
-            val scale = 360f / maxOf(it.width, it.height)
-            Bitmap.createScaledBitmap(it, (it.width * scale).toInt().coerceAtLeast(1), (it.height * scale).toInt().coerceAtLeast(1), true)
-        }
+        // 缩略图必须采样解码：实况图静态帧可达 24MP，整图解码约 96MB，
+        // 只为一张 360px 缩略图付这个代价会直接把低端机顶到 OOM 阈值
+        val thumb = decodeSampled(parsed.imageFile, 360)
         TriptychSlot(
             sourceUri = uri,
             displayName = queryDisplayName(uri) ?: "实况图",
@@ -176,8 +187,9 @@ class LiveTriptychViewModel @Inject constructor(
     fun setCover(index: Int, timeMs: Long) {
         val slot = _state.value.slots.getOrNull(index) ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            val frame = extractFrame(slot.videoFile, timeMs, MediaMetadataRetriever.OPTION_CLOSEST)
+            val frame = extractFrame(slot.videoFile, timeMs, MediaMetadataRetriever.OPTION_CLOSEST, maxWidth = 640)
             if (frame != null) {
+                frame.recycle()
                 updateSlot(index) { it.copy(coverTimeMs = timeMs) }
                 _state.update { it.copy(previewBitmap = null) }
                 if (_state.value.phase == Phase.PREVIEW) refreshPreview()
@@ -188,6 +200,9 @@ class LiveTriptychViewModel @Inject constructor(
     /** 重置为原静态图封面 */
     fun resetCover(index: Int) {
         updateSlot(index) { it.copy(coverTimeMs = null) }
+        // 封面变了预览必须作废，否则页面停留在一张不再对应当前设置的旧拼图上
+        _state.update { it.copy(previewBitmap = null) }
+        if (_state.value.phase == Phase.PREVIEW) refreshPreview()
     }
 
     /** 装载某槽位的封面候选帧（9 帧均匀抽取，264px 宽） */
@@ -202,7 +217,9 @@ class LiveTriptychViewModel @Inject constructor(
             val count = 9
             val thumbs = (0 until count).mapNotNull { i ->
                 val t = duration * i / count
-                extractFrame(slot.videoFile, t, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                // 与最终取帧用同一个 OPTION_CLOSEST：OPTION_CLOSEST_SYNC 抽到的是最近关键帧，
+                // 用户点选的高亮帧与拼图里实际用的帧可能明显不同（错帧感）
+                extractFrame(slot.videoFile, t, MediaMetadataRetriever.OPTION_CLOSEST, maxWidth = 264)
                     ?.let { CoverThumb(t, it) }
             }
             _state.update { s ->
@@ -248,6 +265,12 @@ class LiveTriptychViewModel @Inject constructor(
         refreshPreview()
     }
 
+    /** 结果页「再拼一张」：清空状态与全部临时文件 */
+    fun startOver() {
+        cleanup()
+        _state.update { UiState() }
+    }
+
     /** 回到编辑（调整封面/声音/对齐/比例） */
     fun backToEdit() {
         _state.update { it.copy(phase = Phase.EDIT) }
@@ -280,7 +303,8 @@ class LiveTriptychViewModel @Inject constructor(
         viewModelScope.launch {
             val aspect = _state.value.aspect
             val bitmap = withContext(Dispatchers.IO) {
-                runCatching { buildTriptychBitmap(slots, aspect) }.getOrNull()
+                // 预览：抽帧宽度取 960（屏幕上看足够，省内存）；导出时用整格宽重抽
+                runCatching { buildTriptychBitmap(slots, aspect, frameWidth = 960) }.getOrNull()
             }
             if (previewDirty) {
                 // 构建期间状态已变：旧结果作废（从未进入 state，可安全回收），
@@ -301,23 +325,46 @@ class LiveTriptychViewModel @Inject constructor(
     /**
      * 静态三格拼图：每格 = 统一比例目标尺寸，竖排无缝。
      * 每格画面 = 用户所选封面帧（或原静态图）按对齐裁切到统一比例。
+     *
+     * @param frameWidth 抽帧/解码宽度上限：预览用 960（够看且省内存），导出用整格宽
+     *   （1920 / 1080）——v1 预览与导出都按 640 抽帧再放大到 1920 的格子里，成品封面明显发虚。
      */
-    private fun buildTriptychBitmap(slots: List<TriptychSlot>, aspect: Aspect): Bitmap {
+    private fun buildTriptychBitmap(
+        slots: List<TriptychSlot>,
+        aspect: Aspect,
+        frameWidth: Int
+    ): Bitmap {
         val cellW = aspect.targetW
         val cellH = aspect.targetH
         val result = Bitmap.createBitmap(cellW, cellH * slots.size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
         slots.forEachIndexed { index, slot ->
             // 格画面来源：重选封面 → 精确帧；未重选 → 原静态图
-            val cover = slot.coverTimeMs?.let { extractFrame(slot.videoFile, it, MediaMetadataRetriever.OPTION_CLOSEST) }
-                ?: BitmapFactory.decodeFile(slot.imageFile.absolutePath)
+            val cover = slot.coverTimeMs?.let {
+                extractFrame(slot.videoFile, it, MediaMetadataRetriever.OPTION_CLOSEST, frameWidth)
+            } ?: decodeSampled(slot.imageFile, frameWidth)
                 ?: return@forEachIndexed
             val cropped = cropToAspect(cover, aspect.ratio, slot.alignment)
-            canvas.drawBitmap(cropped, null, RectF(0f, index * cellH.toFloat(), cellW.toFloat(), (index + 1) * cellH.toFloat()), null)
+            canvas.drawBitmap(
+                cropped, null,
+                RectF(0f, index * cellH.toFloat(), cellW.toFloat(), (index + 1) * cellH.toFloat()),
+                Paint(Paint.FILTER_BITMAP_FLAG)
+            )
             if (cropped !== cover) cropped.recycle()
-            if (cover !== slot.thumbnail) cover.recycle()
+            cover.recycle()
         }
         return result
+    }
+
+    /** 采样解码本地图片文件（长边 ≤ [maxWidth]），避免为缩略图/格子做整图解码 */
+    private fun decodeSampled(file: File, maxWidth: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxWidth) sample *= 2
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        return runCatching { BitmapFactory.decodeFile(file.absolutePath, opts) }.getOrNull()
     }
 
     /** 位图中心/对齐裁切到目标比例 */
@@ -377,16 +424,21 @@ class LiveTriptychViewModel @Inject constructor(
         }
     }
 
-    /** 抽帧（带 OPTION 参数与宽度限制） */
-    private fun extractFrame(video: File, timeMs: Long, option: Int): Bitmap? = try {
+    /**
+     * 抽帧（带 OPTION 参数与宽度限制）。
+     * @param maxWidth 抽帧宽度上限；预览缩略图 264~640，拼图按格子宽传（见 buildTriptychBitmap）
+     */
+    private fun extractFrame(video: File, timeMs: Long, option: Int, maxWidth: Int = 640): Bitmap? = try {
         val retriever = retrieverFor(video)
         val frame = synchronized(retriever) {
             retriever.getFrameAtTime(timeMs * 1000, option)
         }
         frame?.let { f ->
-            if (f.width > 640) {
-                val scale = 640f / f.width
-                Bitmap.createScaledBitmap(f, 640, (f.height * scale).toInt().coerceAtLeast(1), true).also {
+            if (f.width > maxWidth) {
+                val scale = maxWidth.toFloat() / f.width
+                Bitmap.createScaledBitmap(
+                    f, maxWidth, (f.height * scale).toInt().coerceAtLeast(1), true
+                ).also {
                     if (it !== f) f.recycle()
                 }
             } else f
@@ -415,7 +467,11 @@ class LiveTriptychViewModel @Inject constructor(
                     val trimmed = runCatching {
                         MotionPhotoComposer.trimVideo(
                             context = context,
-                            videoUri = slot.sourceUri,
+                            // **必须用提取出来的 MP4**：sourceUri 是实况图本身（JPEG 头 + 后挂 MP4），
+                            // 直接交给 Media3 Transformer 会按「图片输入」处理——裁剪分数是按视频
+                            // 尺寸算的却作用在静态画面上，导出的动态部分要么是静帧、要么直接失败。
+                            // 这正是「三拼导出异常」的根因。
+                            videoUri = Uri.fromFile(slot.videoFile),
                             startMs = 0L,
                             endMs = slot.videoDurationMs,
                             audioOn = slot.audioOn,
@@ -427,7 +483,7 @@ class LiveTriptychViewModel @Inject constructor(
                         kotlinx.coroutines.delay(1_500)
                         MotionPhotoComposer.trimVideo(
                             context = context,
-                            videoUri = slot.sourceUri,
+                            videoUri = Uri.fromFile(slot.videoFile),
                             startMs = 0L,
                             endMs = slot.videoDurationMs,
                             audioOn = slot.audioOn,
@@ -436,7 +492,7 @@ class LiveTriptychViewModel @Inject constructor(
                             targetH = aspect.targetH,
                         )
                     }.getOrThrow()
-                    parsedFiles += trimmed
+                    exportFiles += trimmed
                     normalized += trimmed to slot
                 }
                 // 2) 序列拼接（每段独立声音开关）
@@ -445,18 +501,23 @@ class LiveTriptychViewModel @Inject constructor(
                     context = context,
                     segments = normalized.map { (file, slot) -> Uri.fromFile(file) to slot.audioOn },
                 )
-                parsedFiles += stitched
+                exportFiles += stitched
                 // 3) 静态三格拼图（与预览同源）
                 _state.update { it.copy(progressText = "合成 LIVE 图") }
                 val collage = withContext(Dispatchers.IO) {
                     File.createTempFile("triptych", ".jpg", context.cacheDir).apply {
+                        // 导出用整格宽抽帧（1920/1080），封面才清晰；用完立即回收
+                        val collageBitmap = buildTriptychBitmap(
+                            normalized.map { it.second }, aspect,
+                            frameWidth = aspect.targetW
+                        )
                         outputStream().use { out ->
-                            buildTriptychBitmap(normalized.map { it.second }, aspect)
-                                .compress(Bitmap.CompressFormat.JPEG, 92, out)
+                            collageBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                         }
+                        collageBitmap.recycle()
                     }
                 }
-                parsedFiles += collage
+                exportFiles += collage
                 // 4) 合成 Motion Photo（封面 = 顶部格，presentationTimestampUs = 0）
                 //    exifSourceUri = 第一张实况图：成品显示第一个 LIVE 图的拍摄信息（用户需求）
                 val result = MotionPhotoComposer.compose(
@@ -469,19 +530,33 @@ class LiveTriptychViewModel @Inject constructor(
                 AppLog.i("triptych", "三拼已合成：${result.displayName}（${result.totalBytes} 字节）")
                 MotionPhotoComposer.saveToGallery(context, result)
                 _state.update {
-                    it.copy(exporting = false, progressText = null, success = true, message = "三拼 LIVE 图已保存到相册")
+                    it.copy(
+                        exporting = false,
+                        progressText = null,
+                        success = true,
+                        // 结果页需要停留展示，才能让用户看到「已保存」而不是回到预览一头雾水
+                        phase = Phase.DONE,
+                        message = "三拼 LIVE 图已保存到相册"
+                    )
                 }
                 haptics.thud()
-                cleanup()
+                cleanupExportFiles()
             } catch (e: Exception) {
                 AppLog.w("triptych", "三拼导出失败：${e.message}")
                 _state.update {
                     it.copy(exporting = false, progressText = null, message = "导出失败：${e.message}")
                 }
                 haptics.double()
-                cleanup()
+                // 只清理本次导出的派生文件：保留槽位源文件，让用户能直接重试
+                cleanupExportFiles()
             }
         }
+    }
+
+    /** 清理导出派生文件（保留槽位提取出的原视频/静态帧） */
+    private fun cleanupExportFiles() {
+        exportFiles.forEach { runCatching { it.delete() } }
+        exportFiles.clear()
     }
 
     /** 回到初始态（结果页「继续」；成功信息保留一次供结果页显示） */
@@ -494,6 +569,7 @@ class LiveTriptychViewModel @Inject constructor(
     private fun cleanup() {
         parsedFiles.forEach { runCatching { it.delete() } }
         parsedFiles.clear()
+        cleanupExportFiles()
         synchronized(frameRetrievers) {
             frameRetrievers.values.forEach { runCatching { it.release() } }
             frameRetrievers.clear()
