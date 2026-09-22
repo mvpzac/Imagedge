@@ -33,6 +33,9 @@ interface DownloadTaskDao {
     @Query("DELETE FROM download_task WHERE id = :id")
     suspend fun delete(id: String)
 
+    @Query("DELETE FROM download_task WHERE id IN (:ids)")
+    suspend fun deleteAll(ids: List<String>)
+
     @Query("SELECT * FROM download_task")
     suspend fun getAll(): List<DownloadTaskEntity>
 }

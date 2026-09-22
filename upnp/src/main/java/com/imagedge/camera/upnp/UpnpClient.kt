@@ -1,15 +1,24 @@
 package com.imagedge.camera.upnp
 
 import com.imagedge.camera.core.common.AppLog
+import com.imagedge.camera.core.io.BoundedOutputStream
+import okhttp3.Call
+import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.ResponseBody
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.w3c.dom.Element
 import org.w3c.dom.Node
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.OutputStream
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 
 /**
@@ -27,6 +36,11 @@ const val UPNP_PORT = 64321
 
 /** 日志 tag */
 private const val TAG = "upnp"
+private const val MAX_SERVICE_DESCRIPTION_BYTES = 1024L * 1024
+private const val MAX_SOAP_RESPONSE_BYTES = 4L * 1024 * 1024
+private const val MAX_ERROR_BODY_BYTES = 4L * 1024
+private const val MAX_XML_NODES = 20_000
+private const val MAX_XML_DEPTH = 64
 
 /** SOAP Action 命名空间 */
 object SoapActionNs {
@@ -51,12 +65,23 @@ class UpnpClient(
     private val port: Int = UPNP_PORT
 ) {
 
-    private val baseUrl = "http://$host:$port"
+    init {
+        require(isPrivateIpv4(host)) { "UPnP 目标必须是私有或链路本地 IPv4 地址" }
+        require(port in 1..65535) { "UPnP 端口无效" }
+    }
+
+    private val baseUrl: HttpUrl = "http://$host:$port/".toHttpUrl()
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
+        // Redirect destinations are camera-controlled input. Re-resolving each hop safely is
+        // preferable to OkHttp silently following a redirect to another LAN/public host.
+        .followRedirects(false)
+        .followSslRedirects(false)
         .build()
+
+    private val activeCall = AtomicReference<Call?>(null)
 
     private val xmlMediaType = "text/xml; charset=utf-8".toMediaType()
 
@@ -72,18 +97,16 @@ class UpnpClient(
     /** 获取服务描述（DmsDescPush.xml），并解析服务控制 URL */
     fun getServiceDescription(): String {
         val request = Request.Builder()
-            .url("$baseUrl/DmsDescPush.xml")
+            .url(resolveUrl("DmsDescPush.xml"))
             .header("User-Agent", "Imagedge")
             .build()
-        val xml = httpClient.newCall(request).execute().use { response ->
+        val xml = execute(request) { response ->
             if (!response.isSuccessful) throw IllegalStateException("获取服务描述失败：HTTP ${response.code}")
-            response.body?.string() ?: throw IllegalStateException("空响应")
+            readBodyLimited(response.body, MAX_SERVICE_DESCRIPTION_BYTES, "服务描述")
         }
-        // 打印原文（截断），用于定位真实服务结构
-        AppLog.i(TAG, "服务描述原文：${xml.take(2000)}")
-        // 解析服务控制 URL（<service controlURL="...">）
-        runCatching { parseServiceControlUrls(xml) }
-            .onFailure { AppLog.w(TAG, "解析服务控制 URL 失败：${it.message}，将用默认路径") }
+        AppLog.i(TAG, "已读取服务描述（${xml.length} 字符）")
+        // 服务描述是相机端输入：非法 XML/越界 URL 必须失败关闭，不能吞异常继续连接。
+        parseServiceControlUrls(xml)
         return xml
     }
 
@@ -91,15 +114,13 @@ class UpnpClient(
     private fun parseServiceControlUrls(xml: String) {
         val doc = parseXml(xml)
         val services = doc.getElementsByTagName("service")
-        if (services.length == 0) {
-            AppLog.w(TAG, "服务描述中未发现任何 <service> 元素")
-            return
-        }
+        require(services.length in 1..256) { "服务描述中的 service 数量无效" }
         var foundContentDirectory = false
         var foundXPushList = false
         for (i in 0 until services.length) {
             val service = services.item(i) as Element
-            val serviceType = service.getElementsByTagName("serviceType")?.item(0)?.textContent ?: continue
+            val serviceType = service.getElementsByTagName("serviceType")?.item(0)?.textContent
+                ?.let(::validatedServiceType) ?: continue
             val controlUrl = service.getElementsByTagName("controlURL")?.item(0)?.textContent ?: continue
             AppLog.i(TAG, "发现服务 $serviceType → $controlUrl")
             when {
@@ -119,7 +140,7 @@ class UpnpClient(
             }
         }
         if (!foundContentDirectory) {
-            AppLog.w(TAG, "未找到 ContentDirectory 服务，将回退默认路径 /upnp/control/ContentDirectory")
+            throw IllegalArgumentException("服务描述缺少 ContentDirectory")
         }
         if (!foundXPushList) {
             AppLog.w(TAG, "未找到 XPushList 服务，将回退默认路径 /upnp/control/XPushList")
@@ -127,8 +148,36 @@ class UpnpClient(
     }
 
     /** 解析相对 URL（索尼 DDD 通常用相对路径，如 /upnp/control/ContentDirectory） */
-    private fun resolveUrl(url: String): String =
-        if (url.startsWith("http")) url else "$baseUrl${if (url.startsWith("/")) url else "/$url"}"
+    private fun resolveUrl(url: String): String {
+        val resolved = baseUrl.resolve(url.trim())
+            ?: throw IllegalArgumentException("无效的相机 URL")
+        require(resolved.scheme == "http") { "相机 URL 只允许 HTTP" }
+        require(resolved.host == baseUrl.host) { "相机 URL 不允许跳转到其他主机" }
+        require(resolved.port == baseUrl.port) { "相机 URL 不允许使用未授权端口" }
+        require(resolved.username.isEmpty() && resolved.password.isEmpty()) { "相机 URL 不允许包含凭据" }
+        return resolved.toString()
+    }
+
+    private fun validatedServiceType(value: String): String {
+        val normalized = value.trim()
+        require(normalized.length in 1..256 && normalized.startsWith("urn:") &&
+            normalized.none { it == '\r' || it == '\n' || it == '"' || it == '<' || it == '>' }
+        ) { "非法 serviceType" }
+        return normalized
+    }
+
+    private fun isPrivateIpv4(value: String): Boolean {
+        val parts = value.split('.')
+        val octets = parts.mapNotNull(String::toIntOrNull)
+        if (parts.size != 4 || octets.size != 4 || octets.any { it !in 0..255 }) return false
+        return when (octets[0]) {
+            10 -> true
+            172 -> octets[1] in 16..31
+            192 -> octets[1] == 168
+            169 -> octets[1] == 254
+            else -> false
+        }
+    }
 
     // ── 传输控制 ─────────────────────────────────────────────────────
 
@@ -165,7 +214,7 @@ class UpnpClient(
         val serviceType = contentDirectoryServiceType ?: SoapActionNs.CONTENT_DIRECTORY
         val body = buildString {
             append("<u:Browse xmlns:u=\"$serviceType\">")
-            append("<ObjectID>").append(objectId).append("</ObjectID>")
+            append("<ObjectID>").append(xmlEscape(objectId.take(512))).append("</ObjectID>")
             append("<BrowseFlag>BrowseDirectChildren</BrowseFlag>")
             append("<Filter>*</Filter>")
             append("<StartingIndex>").append(startIndex).append("</StartingIndex>")
@@ -186,10 +235,10 @@ class UpnpClient(
      * @param url 完整下载 URL（来自 Browse 结果的 res.url）
      */
     fun download(url: String, output: OutputStream, onProgress: (Long, Long) -> Unit = { _, _ -> }) {
-        val fullUrl = if (url.startsWith("http")) url else "$baseUrl$url"
+        val fullUrl = resolveUrl(url)
         AppLog.i(TAG, "HTTP 下载：$fullUrl")
         val request = Request.Builder().url(fullUrl).build()
-        httpClient.newCall(request).execute().use { response ->
+        execute(request) { response ->
             if (!response.isSuccessful) throw IllegalStateException("下载失败：HTTP ${response.code}")
             val body = response.body ?: throw IllegalStateException("空响应")
             val total = body.contentLength()
@@ -206,6 +255,11 @@ class UpnpClient(
             }
             output.flush()
         }
+    }
+
+    /** Interrupt a blocking browse/download before the owning channel is discarded. */
+    fun cancelActiveCall() {
+        activeCall.getAndSet(null)?.cancel()
     }
 
     // ── SOAP 调用 ────────────────────────────────────────────────────
@@ -231,11 +285,11 @@ class UpnpClient(
         val (controlUrl, actionType) = when (serviceNs) {
             SoapActionNs.CONTENT_DIRECTORY -> contentDirectoryControlUrl?.let { url ->
                 url to (contentDirectoryServiceType ?: serviceNs)
-            } ?: ("$baseUrl/upnp/control/${serviceName(serviceNs)}" to serviceNs)
+            } ?: (resolveUrl("upnp/control/${serviceName(serviceNs)}") to serviceNs)
             SoapActionNs.X_PUSH_LIST -> xPushListControlUrl?.let { url ->
                 url to (xPushListServiceType ?: serviceNs)
-            } ?: ("$baseUrl/upnp/control/${serviceName(serviceNs)}" to serviceNs)
-            else -> "$baseUrl/upnp/control/${serviceName(serviceNs)}" to serviceNs
+            } ?: (resolveUrl("upnp/control/${serviceName(serviceNs)}") to serviceNs)
+            else -> resolveUrl("upnp/control/${serviceName(serviceNs)}") to serviceNs
         }
         AppLog.i(TAG, "SOAP 调用：$actionName → $controlUrl（serviceType=$actionType）")
 
@@ -247,22 +301,18 @@ class UpnpClient(
             .post(envelope.toRequestBody(xmlMediaType))
             .build()
 
-        return httpClient.newCall(request).execute().use { response ->
+        return execute(request) { response ->
             if (!response.isSuccessful) {
-                val errBody = runCatching { response.body?.string() }.getOrNull()?.take(500)
-                AppLog.e(TAG, "SOAP 调用失败：$actionName → $controlUrl：HTTP ${response.code}，body=$errBody")
-                // 404 端点诊断：GET 探测（405=端点存在但拒绝 GET；404=端点真不存在）
-                if (response.code == 404) {
-                    runCatching {
-                        httpClient.newCall(Request.Builder().url(controlUrl).get().build())
-                            .execute().use { probe ->
-                                AppLog.w(TAG, "端点诊断：GET $controlUrl → HTTP ${probe.code}")
-                            }
-                    }
-                }
-                throw IllegalStateException("SOAP 调用失败：$actionName HTTP ${response.code}：${errBody ?: "无错误体"}")
+                val errBody = runCatching {
+                    readBodyLimited(response.body, MAX_ERROR_BODY_BYTES, "SOAP 错误体")
+                }.getOrNull()
+                AppLog.e(TAG, "SOAP 调用失败：$actionName，HTTP ${response.code}")
+                throw IllegalStateException(
+                    "SOAP 调用失败：$actionName HTTP ${response.code}" +
+                        if (errBody.isNullOrBlank()) "" else "：${errBody.take(200)}"
+                )
             }
-            response.body?.string() ?: throw IllegalStateException("空响应")
+            readBodyLimited(response.body, MAX_SOAP_RESPONSE_BYTES, "SOAP 响应")
         }
     }
 
@@ -391,22 +441,43 @@ class UpnpClient(
     // ── XML 工具 ─────────────────────────────────────────────────────
 
     private fun parseXml(xml: String): org.w3c.dom.Document {
+        require(xml.length <= MAX_SOAP_RESPONSE_BYTES.toInt()) { "XML 文档过大" }
         val factory = DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = false
             isCoalescing = true
             isXIncludeAware = false
             isExpandEntityReferences = false
-            // XXE 加固：数据来自相机局域网但仍禁用实体展开，防畸形响应借实体
-            // 读本地文件或发起网络请求（setFeature 在部分解析器上可能不支持，容错处理）
-            runCatching {
-                setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-                setFeature("http://xml.org/sax/features/external-general-entities", false)
-                setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-            }
+            // These are security requirements, not optional tuning. Failing closed prevents an
+            // unsupported parser implementation from silently re-enabling XXE/external fetches.
+            setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
+            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+            setFeature("http://xml.org/sax/features/external-general-entities", false)
+            setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+            setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
+            setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
+            setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
         }
         val builder = factory.newDocumentBuilder()
         // trim 前导空白，避免 XML 声明前有空格导致解析失败
-        return builder.parse(ByteArrayInputStream(xml.trim().toByteArray(Charsets.UTF_8)))
+        return builder.parse(ByteArrayInputStream(xml.trim().toByteArray(Charsets.UTF_8))).also {
+            validateDocumentShape(it)
+        }
+    }
+
+    private fun validateDocumentShape(document: org.w3c.dom.Document) {
+        val pending = java.util.ArrayDeque<Pair<Node, Int>>()
+        pending.add(document to 0)
+        var nodes = 0
+        while (pending.isNotEmpty()) {
+            val (node, depth) = pending.removeFirst()
+            nodes++
+            require(nodes <= MAX_XML_NODES) { "XML 节点数量超出上限" }
+            require(depth <= MAX_XML_DEPTH) { "XML 嵌套深度超出上限" }
+            val children = node.childNodes
+            for (index in 0 until children.length) {
+                pending.addLast(children.item(index) to depth + 1)
+            }
+        }
     }
 
     /** 取元素 localName（去掉命名空间前缀） */
@@ -415,11 +486,15 @@ class UpnpClient(
 
     /** 深度优先查找第一个匹配 localName 的元素 */
     private fun firstElement(root: Node, name: String): Element? {
-        if (root is Element && localName(root) == name) return root
-        val children = root.childNodes
-        for (i in 0 until children.length) {
-            val found = firstElement(children.item(i), name)
-            if (found != null) return found
+        val pending = java.util.ArrayDeque<Node>()
+        pending.add(root)
+        while (pending.isNotEmpty()) {
+            val node = pending.removeLast()
+            if (node is Element && localName(node) == name) return node
+            val children = node.childNodes
+            for (index in children.length - 1 downTo 0) {
+                pending.addLast(children.item(index))
+            }
         }
         return null
     }
@@ -437,4 +512,41 @@ class UpnpClient(
     /** 取子元素文本（匹配 localName） */
     private fun childText(parent: Element, name: String): String? =
         firstChildElement(parent, name)?.textContent?.trim()
+
+    private fun xmlEscape(value: String): String = buildString(value.length) {
+        for (character in value) {
+            append(
+                when (character) {
+                    '&' -> "&amp;"
+                    '<' -> "&lt;"
+                    '>' -> "&gt;"
+                    '"' -> "&quot;"
+                    '\'' -> "&apos;"
+                    else -> character
+                }
+            )
+        }
+    }
+
+    private fun readBodyLimited(body: ResponseBody?, maxBytes: Long, label: String): String {
+        val responseBody = body ?: throw IllegalStateException("$label 为空")
+        val declared = responseBody.contentLength()
+        if (declared > maxBytes) {
+            throw IllegalStateException("$label 超出上限：$declared > $maxBytes")
+        }
+        val sink = ByteArrayOutputStream(minOf(declared.takeIf { it > 0 } ?: 8192L, maxBytes).toInt())
+        val bounded = BoundedOutputStream(sink, maxBytes)
+        responseBody.byteStream().use { input -> input.copyTo(bounded) }
+        return sink.toString(StandardCharsets.UTF_8.name())
+    }
+
+    private fun <T> execute(request: Request, block: (okhttp3.Response) -> T): T {
+        val call = httpClient.newCall(request)
+        activeCall.getAndSet(call)?.cancel()
+        return try {
+            call.execute().use(block)
+        } finally {
+            activeCall.compareAndSet(call, null)
+        }
+    }
 }

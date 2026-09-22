@@ -65,6 +65,7 @@ import com.imagedge.camera.ui.components.PageHeader
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import com.imagedge.camera.ui.components.AppIconButton
 
 /**
@@ -458,10 +459,10 @@ private fun formatSize(bytes: Long): String {
     if (bytes <= 0) return ""
     val mb = bytes / 1024.0 / 1024.0
     return if (mb >= 1024) {
-        String.format("%.1f GB", mb / 1024.0)
+        String.format(Locale.US, "%.1f GB", mb / 1024.0)
     } else if (mb >= 1) {
-        String.format("%.1f MB", mb)
+        String.format(Locale.US, "%.1f MB", mb)
     } else {
-        String.format("%.1f KB", bytes / 1024.0)
+        String.format(Locale.US, "%.1f KB", bytes / 1024.0)
     }
 }

@@ -16,8 +16,10 @@ internal data class ExtractedItem(
 )
 
 internal data class BinarySegment(
-    val bytes: ByteArray,
+    val sourceFile: java.io.File,
     val mimeType: String,
-    val startOffset: Int,
-    val endOffset: Int,
-)
+    val startOffset: Long,
+    val endOffset: Long,
+) {
+    val length: Long get() = endOffset - startOffset
+}

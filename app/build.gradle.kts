@@ -30,10 +30,10 @@ android {
     defaultConfig {
         applicationId = "com.imagedge.camera"
         minSdk = 29
-        targetSdk = 36
-        // 0.2.0-alpha05：液态玻璃对齐官方参数（轻模糊 + 边缘折射）+ 切页性能优化 + 按钮真玻璃
-        versionCode = 1014
-        versionName = "0.2.0-alpha05"
+        targetSdk = 37
+        // 0.2.0-alpha06：安全与稳定性修复、传输链路加固、玻璃效果性能优化
+        versionCode = 1015
+        versionName = "0.2.0-alpha06"
 
         // 仅支持 64 位设备（项目决策 2026-08-29）：排除 32 位 ABI
         ndk {
@@ -73,10 +73,6 @@ android {
         }
     }
 
-    lint {
-        // 存量警告入基线（2026-08-31 生成），之后只对新增问题报警
-        baseline = file("lint-baseline.xml")
-    }
 }
 
 dependencies {

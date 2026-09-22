@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.os.Build
 import androidx.core.content.ContextCompat
 import androidx.core.view.doOnLayout
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -265,30 +266,42 @@ fun QrScanSheetContent(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // 相机运行时权限：未授权时 CameraX bind 会失败（黑屏），必须先请求
-    var cameraGranted by remember {
+    // 扫码页才按需请求相机 + Wi-Fi 配网权限；首启不再打扰用户。
+    val requiredPermissions = remember {
+        buildList {
+            add(android.Manifest.permission.CAMERA)
+            add(
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    android.Manifest.permission.NEARBY_WIFI_DEVICES
+                } else {
+                    android.Manifest.permission.ACCESS_FINE_LOCATION
+                },
+            )
+        }
+    }
+    var permissionsGranted by remember {
         mutableStateOf(
-            ContextCompat.checkSelfPermission(
-                context, android.Manifest.permission.CAMERA
-            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            requiredPermissions.all { PermissionGate.isGranted(context, it) }
         )
     }
-    val cameraPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted -> cameraGranted = granted }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) {
+        permissionsGranted = requiredPermissions.all { PermissionGate.isGranted(context, it) }
+    }
 
-    LaunchedEffect(Unit) {
-        if (!cameraGranted) {
-            // 未授予（首次进入被拒 / 用户后续关闭）：顶部弹窗说明用途后再申请，
-            // 避免用户面对一个「无声黑屏」却不知道缺什么权限
+    LaunchedEffect(requiredPermissions) {
+        val missing = requiredPermissions.filterNot { PermissionGate.isGranted(context, it) }
+        if (missing.isNotEmpty()) {
+            val ask = { permissionLauncher.launch(missing.toTypedArray()) }
             if (snackbarController != null) {
                 PermissionGate.check(
                     context,
-                    android.Manifest.permission.CAMERA,
+                    missing.first(),
                     snackbarController
-                ) { cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA) }
+                ) { ask() }
             } else {
-                cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+                ask()
             }
         }
     }
@@ -378,14 +391,14 @@ fun QrScanSheetContent(
                     .size(side)
                     .clip(RoundedCornerShape(Radius.Container))
             ) {
-                if (!cameraGranted) {
+                if (!permissionsGranted) {
                     Text(
-                        text = stringResource(R.string.qr_camera_permission),
+                        text = stringResource(R.string.qr_permissions_required),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(16.dp)
                     )
                 }
-                if (cameraGranted) {
+                if (permissionsGranted) {
                 AndroidView(
                     factory = { ctx ->
                         val previewView = PreviewView(ctx).apply {
@@ -462,7 +475,12 @@ fun QrScanSheetContent(
                                         proxy.close()
                                         decoding.set(false)
                                     }
-                                    if (decoded != null && analyzing.get() && sheetAlive.get()) {
+                                    if (
+                                        decoded != null &&
+                                        permissionsGranted &&
+                                        analyzing.get() &&
+                                        sheetAlive.get()
+                                    ) {
                                         viewModel.onQrContent(decoded)
                                     }
                                 }

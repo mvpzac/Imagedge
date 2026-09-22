@@ -68,9 +68,9 @@ fun SkeletonBox(
 /** 相册网格骨架屏：列数与间距同真实网格，避免加载完成时跳动 */
 @Composable
 fun AlbumGridSkeleton(
+    modifier: Modifier = Modifier,
     columns: Int = 3,
     contentPadding: PaddingValues = PaddingValues(0.dp),
-    modifier: Modifier = Modifier
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(columns),

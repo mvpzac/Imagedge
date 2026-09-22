@@ -16,7 +16,9 @@
     应用没有公网 HTTP 请求（无云服务，图片均经 content:// 读取），明文放行不引入
     超出相机局域网的额外攻击面。
 -->
-<network-security-config>
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
     <!-- 相机局域网连接（动态私有 IP，无法按网段收窄，见文件头注释） -->
-    <base-config cleartextTrafficPermitted="true" />
+    <base-config
+        cleartextTrafficPermitted="true"
+        tools:ignore="InsecureBaseConfiguration" />
 </network-security-config>

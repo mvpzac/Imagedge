@@ -9,12 +9,19 @@ import com.imagedge.camera.R
  *     author : Imagedge Team
  *     time   : 2026/08/30
  *     desc   : 应用权限清单（诚实披露 + 按需申请）。
- *              危险权限在首次启动统一申请；被拒后使用相关功能时顶部弹窗说明用途。
+ *              危险权限仅在用户主动进入对应功能时申请，拒绝不影响其他功能。
  *              普通权限系统安装即授予，仅用于权限说明页的诚实披露。
  *     version: 1.0
  * </pre>
  */
 object AppPermissions {
+
+    // Use stable permission strings so class verification on older Android releases never needs
+    // to resolve newer Manifest.permission fields before the associated SDK guard is evaluated.
+    private const val NEARBY_WIFI_DEVICES = "android.permission.NEARBY_WIFI_DEVICES"
+    private const val POST_NOTIFICATIONS = "android.permission.POST_NOTIFICATIONS"
+    private const val BLUETOOTH_CONNECT = "android.permission.BLUETOOTH_CONNECT"
+    private const val BLUETOOTH_SCAN = "android.permission.BLUETOOTH_SCAN"
 
     /**
      * 权限条目
@@ -36,7 +43,7 @@ object AppPermissions {
 
     /**
      * 危险权限（用户可拒绝，需运行时申请）。
-     * 首次启动统一申请；拒绝后使用对应功能时顶部弹窗说明。
+     * 按需申请：扫码、下载通知、BLE 遥控各自在功能入口触发。
      */
     val dangerous: List<PermissionEntry> = listOf(
         PermissionEntry(
@@ -45,25 +52,25 @@ object AppPermissions {
             R.string.permission_camera_purpose
         ),
         PermissionEntry(
-            Manifest.permission.NEARBY_WIFI_DEVICES,
+            NEARBY_WIFI_DEVICES,
             R.string.permission_nearby_wifi_label,
             R.string.permission_nearby_wifi_purpose,
             minSdk = Build.VERSION_CODES.TIRAMISU
         ),
         PermissionEntry(
-            Manifest.permission.POST_NOTIFICATIONS,
+            POST_NOTIFICATIONS,
             R.string.permission_notification_label,
             R.string.permission_notification_purpose,
             minSdk = Build.VERSION_CODES.TIRAMISU
         ),
         PermissionEntry(
-            Manifest.permission.BLUETOOTH_CONNECT,
+            BLUETOOTH_CONNECT,
             R.string.permission_bluetooth_connect_label,
             R.string.permission_bluetooth_connect_purpose,
             minSdk = Build.VERSION_CODES.S
         ),
         PermissionEntry(
-            Manifest.permission.BLUETOOTH_SCAN,
+            BLUETOOTH_SCAN,
             R.string.permission_bluetooth_scan_label,
             R.string.permission_bluetooth_scan_purpose,
             minSdk = Build.VERSION_CODES.S

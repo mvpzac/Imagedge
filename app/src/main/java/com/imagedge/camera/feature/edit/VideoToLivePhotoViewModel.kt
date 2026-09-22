@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import androidx.core.graphics.scale
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.imagedge.camera.core.common.AppLog
@@ -405,12 +406,7 @@ class VideoToLivePhotoViewModel @Inject constructor(
                 frame
             } else {
                 val ratio = widthPx.toFloat() / frame.width
-                Bitmap.createScaledBitmap(
-                    frame,
-                    widthPx,
-                    (frame.height * ratio).toInt().coerceAtLeast(1),
-                    true
-                )
+                frame.scale(widthPx, (frame.height * ratio).toInt().coerceAtLeast(1))
             }
         }
     }.getOrNull()

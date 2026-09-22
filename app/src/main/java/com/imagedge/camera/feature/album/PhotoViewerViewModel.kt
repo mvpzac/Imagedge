@@ -25,6 +25,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import java.util.Locale
 import javax.inject.Inject
 
 /**
@@ -127,21 +131,77 @@ class PhotoViewerViewModel @Inject constructor(
         if (current is VideoDownloadState.Downloading || current is VideoDownloadState.Ready) return
         _videoStates.value = _videoStates.value + (key to VideoDownloadState.Downloading(0))
         viewModelScope.launch(Dispatchers.IO) {
+            val directory = File(context.cacheDir, VIDEO_CACHE_DIRECTORY).apply { mkdirs() }
+            val file = File(directory, videoCacheName(item))
+            val partial = File(directory, file.name + ".part")
             try {
-                val file = File(context.cacheDir, "preview_" + item.filename)
                 if (file.exists() && item.sizeBytes > 0 && file.length() == item.sizeBytes) {
+                    file.setLastModified(System.currentTimeMillis())
                     _videoStates.value = _videoStates.value + (key to VideoDownloadState.Ready(file))
                     return@launch
                 }
-                repository.downloadToFile(item, file) { loaded, total ->
+                partial.delete()
+                repository.downloadToFile(item, partial) { loaded, total ->
                     val progress = if (total > 0) (loaded * 100 / total).toInt() else 0
                     _videoStates.value = _videoStates.value + (key to VideoDownloadState.Downloading(progress))
                 }
+                if (item.sizeBytes > 0 && partial.length() != item.sizeBytes) {
+                    throw java.io.IOException("视频缓存长度不完整")
+                }
+                moveAtomically(partial, file)
+                pruneVideoCache(directory, keep = file)
                 _videoStates.value = _videoStates.value + (key to VideoDownloadState.Ready(file))
             } catch (e: Exception) {
+                partial.delete()
                 AppLog.w("viewer", "视频下载失败 ${item.filename}：${e.message}")
                 _videoStates.value = _videoStates.value + (key to VideoDownloadState.Failed(e.message ?: "下载失败"))
             }
+        }
+    }
+
+    override fun onCleared() {
+        File(context.cacheDir, VIDEO_CACHE_DIRECTORY).listFiles()
+            ?.filter { it.name.endsWith(".part") }
+            ?.forEach { runCatching { it.delete() } }
+        super.onCleared()
+    }
+
+    private fun videoCacheName(item: MediaItem): String {
+        val identity = "${item.channelKey}\u0000${item.sizeBytes}".toByteArray(Charsets.UTF_8)
+        val digest = MessageDigest.getInstance("SHA-256").digest(identity)
+        val hash = digest.joinToString("") { byte ->
+            String.format(Locale.US, "%02x", byte.toInt() and 0xff)
+        }
+        val extension = item.filename.substringAfterLast('.', "mp4")
+            .lowercase(Locale.US)
+            .filter { it.isLetterOrDigit() }
+            .take(8)
+            .ifEmpty { "mp4" }
+        return "$hash.$extension"
+    }
+
+    private fun moveAtomically(source: File, destination: File) {
+        runCatching {
+            Files.move(
+                source.toPath(),
+                destination.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING
+            )
+        }.getOrElse {
+            Files.move(source.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
+
+    private fun pruneVideoCache(directory: File, keep: File) {
+        val files = directory.listFiles()?.filter { it.isFile && !it.name.endsWith(".part") }
+            ?.sortedByDescending { it.lastModified() } ?: return
+        var total = files.sumOf { it.length() }
+        for (candidate in files.asReversed()) {
+            if (total <= MAX_VIDEO_CACHE_BYTES) break
+            if (candidate == keep) continue
+            val length = candidate.length()
+            if (candidate.delete()) total -= length
         }
     }
 
@@ -157,6 +217,11 @@ class PhotoViewerViewModel @Inject constructor(
         }
         val opts = BitmapFactory.Options().apply { inSampleSize = sample }
         return BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, opts)
+    }
+
+    private companion object {
+        const val VIDEO_CACHE_DIRECTORY = "video_previews"
+        const val MAX_VIDEO_CACHE_BYTES = 1024L * 1024 * 1024
     }
 }
 

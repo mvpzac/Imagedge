@@ -10,11 +10,16 @@ import com.imagedge.camera.motionphoto.internal.format.MotionPhotoMimeSniffer
 import com.imagedge.camera.motionphoto.internal.format.looksLikeJpeg
 import com.imagedge.camera.motionphoto.internal.xmp.extractAllXmpPackets
 import com.imagedge.camera.motionphoto.internal.xmp.parseContainerXmp
-import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.IOException
 import java.util.UUID
 
 internal object MotionPhotoStillImagePreparer {
+    private const val MAX_SOURCE_IMAGE_BYTES = 256L * 1024L * 1024L
+    private const val MAX_XMP_SCAN_BYTES = 32 * 1024 * 1024
+
     fun prepare(
         context: Context,
         imageUri: Uri,
@@ -22,32 +27,44 @@ internal object MotionPhotoStillImagePreparer {
         exifSourceUri: Uri? = null,
     ): PreparedImage {
         val sourceMimeType = MotionPhotoMimeSniffer.sniffImageMimeType(context, imageUri)
-        val imageBytes: ByteArray
+        val outputFile = File(outputDir, "input_${UUID.randomUUID().toString().take(8)}.jpg")
         val sourceHasGainMap: Boolean
 
         if (sourceMimeType == "image/jpeg") {
-            imageBytes = context.contentResolver.openInputStream(imageUri)?.use { it.readBytes() }
+            val input = context.contentResolver.openInputStream(imageUri)
                 ?: throw MotionPhotoComposeException("Failed to read the image file.")
-            sourceHasGainMap = extractUltraHdrInfoFromJpeg(imageBytes) != null
+            input.use { source ->
+                FileOutputStream(outputFile).use { output ->
+                    val buffer = ByteArray(256 * 1024)
+                    var total = 0L
+                    while (true) {
+                        val read = source.read(buffer)
+                        if (read < 0) break
+                        if (read == 0) continue
+                        total += read.toLong()
+                        if (total > MAX_SOURCE_IMAGE_BYTES) {
+                            throw MotionPhotoComposeException("The source image is too large to process safely.")
+                        }
+                        output.write(buffer, 0, read)
+                    }
+                }
+            }
+            sourceHasGainMap = extractUltraHdrInfoFromJpeg(outputFile) != null
         } else {
             val bitmap = decodeBitmapForStillImage(context, imageUri)
             sourceHasGainMap = bitmapHasGainMap(bitmap)
-            imageBytes = try {
-                ByteArrayOutputStream().use { output ->
+            try {
+                FileOutputStream(outputFile).use { output ->
                     if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 96, output)) {
                         throw MotionPhotoComposeException("Failed to convert the image to JPEG.")
                     }
-                    output.toByteArray()
                 }
             } finally {
                 bitmap.recycle()
             }
         }
 
-        val ultraHdrInfo = extractUltraHdrInfoFromJpeg(imageBytes)
-        val outputFile = File(outputDir, "input_${UUID.randomUUID().toString().take(8)}.jpg").apply {
-            writeBytes(imageBytes)
-        }
+        val ultraHdrInfo = extractUltraHdrInfoFromJpeg(outputFile)
         // EXIF 保留：把源素材（原图片/视频）的拍摄信息注入封面 JPEG，
         // 使成品在系统相册中能显示与源一致的机型/参数/时间（用户需求，见 ExifPreserver）。
         if (exifSourceUri != null) {
@@ -106,7 +123,18 @@ internal object MotionPhotoStillImagePreparer {
         }
     }
 
-    private fun extractUltraHdrInfoFromJpeg(jpegBytes: ByteArray): UltraHdrInfo? {
+    private fun extractUltraHdrInfoFromJpeg(file: File): UltraHdrInfo? {
+        val prefixSize = minOf(file.length(), MAX_XMP_SCAN_BYTES.toLong()).toInt()
+        val jpegBytes = ByteArray(prefixSize)
+        FileInputStream(file).use { input ->
+            var offset = 0
+            while (offset < jpegBytes.size) {
+                val read = input.read(jpegBytes, offset, jpegBytes.size - offset)
+                if (read < 0) throw IOException("Unexpected end of source JPEG.")
+                if (read == 0) continue
+                offset += read
+            }
+        }
         if (!looksLikeJpeg(jpegBytes, 0)) {
             return null
         }

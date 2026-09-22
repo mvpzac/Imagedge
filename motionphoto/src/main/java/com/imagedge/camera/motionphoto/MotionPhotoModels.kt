@@ -7,19 +7,19 @@ data class MotionPhotoParseResult(
     val imageFile: File,
     val videoFile: File,
     val gainMapFile: File?,
-    val sourceBytes: Int,
-    val imageBytes: Int,
-    val videoBytes: Int,
-    val gainMapBytes: Int?,
+    val sourceBytes: Long,
+    val imageBytes: Long,
+    val videoBytes: Long,
+    val gainMapBytes: Long?,
     val imageMimeType: String,
     val videoMimeType: String,
     val gainMapMimeType: String?,
     val metadataSource: MetadataSource,
     val xmpSummary: XmpSummary,
     val gainMapSummary: GainMapSummary?,
-    val imageEndOffset: Int,
-    val videoStartOffset: Int,
-    val gainMapStartOffset: Int?,
+    val imageEndOffset: Long,
+    val videoStartOffset: Long,
+    val gainMapStartOffset: Long?,
 )
 
 /** Indicates which metadata convention was used to locate the embedded video. */
@@ -33,7 +33,7 @@ data class XmpSummary(
     val motionPhotoFlag: Int?,
     val motionPhotoVersion: Int?,
     val presentationTimestampUs: Long?,
-    val microVideoOffset: Int?,
+    val microVideoOffset: Long?,
     val items: List<ContainerItem>,
 )
 
@@ -41,8 +41,8 @@ data class XmpSummary(
 data class ContainerItem(
     val semantic: String?,
     val mimeType: String?,
-    val length: Int?,
-    val padding: Int?,
+    val length: Long?,
+    val padding: Long?,
 )
 
 /** Parsed Ultra HDR GainMap metadata when present in the embedded gain map JPEG. */
@@ -71,7 +71,7 @@ data class MotionPhotoComposeResult(
     val videoMimeType: String,
     val videoProcessingDescription: String,
     val preparedVideoFile: File?,
-    val totalBytes: Int,
+    val totalBytes: Long,
     val xmpPacket: String,
     val verificationResult: MotionPhotoParseResult,
 )

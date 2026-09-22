@@ -1,6 +1,7 @@
 package com.imagedge.camera.ui.theme
 
 import android.content.Context
+import androidx.core.content.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,7 +35,7 @@ class ThemeController @Inject constructor(
 
     fun setMode(mode: ThemeMode) {
         _mode.value = mode
-        prefs.edit().putString(KEY_MODE, mode.name).apply()
+        prefs.edit { putString(KEY_MODE, mode.name) }
     }
 
     companion object {

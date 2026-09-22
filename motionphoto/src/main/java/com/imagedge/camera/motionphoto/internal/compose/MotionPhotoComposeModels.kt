@@ -21,6 +21,6 @@ internal data class PreparedVideo(
 )
 
 internal data class UltraHdrInfo(
-    val gainMapLengthBytes: Int,
+    val gainMapLengthBytes: Long,
     val hdrgmVersion: String?,
 )

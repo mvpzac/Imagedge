@@ -11,8 +11,6 @@ import com.imagedge.camera.data.model.MediaItem
 import com.imagedge.camera.data.model.MediaSessionCache
 import com.imagedge.camera.data.model.isActive
 import com.imagedge.camera.data.remote.CameraRepository
-import com.imagedge.camera.data.remote.ChannelConnectionState
-import com.imagedge.camera.data.remote.ChannelType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +25,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -51,6 +51,12 @@ class DownloadManager @Inject constructor(
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Room persistence and in-memory queue publication must have one total order. */
+    private val queueMutationMutex = Mutex()
+
+    /** A retry waits for any earlier cancellation delete for the same id to commit first. */
+    private val pendingTaskDeletes = ConcurrentHashMap<String, Job>()
 
     /** 下载队列（串行消费） */
     private val queue = Channel<MediaItem>(Channel.UNLIMITED)
@@ -104,23 +110,26 @@ class DownloadManager @Inject constructor(
 
     /** 进程重启后恢复未完成的下载任务（Room 里的排队/下载中任务） */
     private suspend fun restorePendingTasks() {
-        val pending = runCatching { taskDao.getAll() }.getOrNull() ?: return
-        if (pending.isEmpty()) return
-        AppLog.i("download", "恢复 ${pending.size} 个待下载任务")
-        for (entity in pending) {
-            val item = entity.toMediaItem()
-            _tasks.update { list ->
-                if (list.any { it.id == item.thumbKey }) list
-                else list + DownloadTask(
-                    id = item.thumbKey,
-                    filename = item.filename,
-                    sizeBytes = item.sizeBytes,
-                    state = DownloadState.QUEUED
-                )
+        val restored = queueMutationMutex.withLock {
+            val pending = runCatching { taskDao.getAll() }.getOrNull() ?: return@withLock 0
+            if (pending.isEmpty()) return@withLock 0
+            AppLog.i("download", "恢复 ${pending.size} 个待下载任务")
+            for (entity in pending) {
+                val item = entity.toMediaItem()
+                _tasks.update { list ->
+                    if (list.any { it.id == item.thumbKey }) list
+                    else list + DownloadTask(
+                        id = item.thumbKey,
+                        filename = item.filename,
+                        sizeBytes = item.sizeBytes,
+                        state = DownloadState.QUEUED
+                    )
+                }
+                queue.trySend(item)
             }
-            queue.trySend(item)
+            pending.size
         }
-        startDownloadService()
+        if (restored > 0) startDownloadService()
     }
 
     /**
@@ -136,10 +145,8 @@ class DownloadManager @Inject constructor(
      * id 用 thumbKey——相机会复用 handle，同一 handle 指向不同照片时须能再次下载。
      */
     fun enqueue(item: MediaItem) {
-        val accepted = enqueueInternal(listOf(item))
-        if (accepted.isNotEmpty()) {
-            scope.launch { runCatching { taskDao.insert(DownloadTaskEntity.from(item)) } }
-            startDownloadService()
+        scope.launch {
+            if (enqueuePersisted(listOf(item))) startDownloadService()
         }
     }
 
@@ -152,17 +159,37 @@ class DownloadManager @Inject constructor(
      *
      * @return 实际入队的项（已在进行中的重复项会被过滤掉）
      */
-    private fun enqueueInternal(items: List<MediaItem>): List<MediaItem> {
-        if (items.isEmpty()) return emptyList()
+    private suspend fun enqueuePersisted(items: List<MediaItem>): Boolean {
+        if (items.isEmpty()) return false
+        // Cancellation removes the item from UI immediately, while Room deletion is asynchronous.
+        // Joining that exact delete prevents it from racing a user who instantly taps Retry.
+        items.asSequence()
+            .mapNotNull { pendingTaskDeletes[it.thumbKey] }
+            .distinct()
+            .toList()
+            .forEach { it.join() }
+        return queueMutationMutex.withLock {
         val accepted = ArrayList<MediaItem>(items.size)
         // 先按当前快照筛出真正要入队的，避免在 update 里做重复判断
         val snapshot = _tasks.value
+        val activeIds = snapshot.asSequence()
+            .filter { it.state.isActive }
+            .mapTo(mutableSetOf()) { it.id }
         for (item in items) {
             val id = item.thumbKey
-            if (snapshot.any { it.id == id && it.state.isActive }) continue
+            if (!activeIds.add(id)) continue
             accepted.add(item)
         }
-        if (accepted.isEmpty()) return emptyList()
+        if (accepted.isEmpty()) return@withLock false
+
+        // Room is the commit point. Publishing first lets a fast completion delete the row before
+        // a late insert, resurrecting a ghost task on the next process start.
+        val persisted = runCatching {
+            taskDao.insertAll(accepted.map { DownloadTaskEntity.from(it) })
+        }.onFailure {
+            AppLog.w("download", "任务落库失败，未加入队列：${it.message}")
+        }.isSuccess
+        if (!persisted) return@withLock false
 
         val indexById = snapshot.associateBy { it.id }.toMutableMap()
         _tasks.update { list ->
@@ -185,7 +212,8 @@ class DownloadManager @Inject constructor(
             next
         }
         for (item in accepted) queue.trySend(item)
-        return accepted
+        true
+        }
     }
 
     /** 重新下载指定任务（失败/完成后再次下载同一文件；等价于 [enqueue] 的重入队路径） */
@@ -202,13 +230,9 @@ class DownloadManager @Inject constructor(
      */
     fun enqueueAll(items: List<MediaItem>) {
         if (items.isEmpty()) return
-        val accepted = enqueueInternal(items)
-        if (accepted.isEmpty()) return
         scope.launch {
-            runCatching { taskDao.insertAll(accepted.map { DownloadTaskEntity.from(it) }) }
-                .onFailure { AppLog.w("download", "批量任务落库失败：${it.message}") }
+            if (enqueuePersisted(items)) startDownloadService()
         }
-        startDownloadService()
     }
 
     /** 清空已完成/失败的任务 */
@@ -238,15 +262,16 @@ class DownloadManager @Inject constructor(
             DownloadState.QUEUED -> {
                 cancelledIds.add(taskId)
                 _tasks.update { list -> list.filterNot { it.id == taskId } }
-                scope.launch { runCatching { taskDao.delete(taskId) } }
+                scheduleTaskDeletion(listOf(taskId))
                 AppLog.i("download", "已取消排队任务：${task.filename}")
             }
             DownloadState.DOWNLOADING -> {
                 // 先标记：download() 的 finally 据此判断是取消还是失败
                 cancelledIds.add(taskId)
                 _tasks.update { list -> list.filterNot { it.id == taskId } }
-                currentDownloadJob?.cancel()
-                scope.launch { runCatching { taskDao.delete(taskId) } }
+                val running = currentDownloadJob
+                running?.cancel()
+                scheduleTaskDeletion(listOf(taskId), waitFor = running)
                 AppLog.i("download", "已取消下载中任务：${task.filename}")
             }
             else -> Unit
@@ -258,6 +283,60 @@ class DownloadManager @Inject constructor(
         val ids = _tasks.value.filter { it.state.isActive }.map { it.id }
         for (id in ids) cancel(id)
         if (ids.isNotEmpty()) AppLog.i("download", "已取消全部进行中任务：${ids.size} 个")
+    }
+
+    /**
+     * Stop all transfers after Android revokes the dataSync foreground-service budget.
+     *
+     * PTP GetObject is a blocking whole-file operation, so calling Service.stopSelf() alone neither
+     * pauses nor stops it. We mark the tasks failed, remove their restart records and close the
+     * active channel to release the blocking socket read. The visible failed tasks can be retried
+     * after the user reconnects the camera.
+     */
+    fun stopAllForSystemTimeout() {
+        val active = _tasks.value.filter { it.state.isActive }
+        if (active.isEmpty()) return
+        val ids = active.map { it.id }
+        val idSet = ids.toHashSet()
+        cancelledIds.addAll(ids)
+        _tasks.update { list ->
+            list.map { task ->
+                if (task.id in idSet) {
+                    task.copy(
+                        state = DownloadState.FAILED,
+                        errorMessage = "系统后台传输时限已到，请重新连接相机后重试"
+                    )
+                } else task
+            }
+        }
+        val running = currentDownloadJob
+        running?.cancel()
+        scheduleTaskDeletion(ids, waitFor = running)
+        scope.launch {
+            // Closing the channel is what actually interrupts a blocking PTP/HTTP read.
+            runCatching { repository.disconnect() }
+                .onFailure { AppLog.w("download", "系统超时后断开相机失败：${it.message}") }
+        }
+    }
+
+    /** Serialize cancellation cleanup with re-enqueue and expose the pending delete to retries. */
+    private fun scheduleTaskDeletion(ids: List<String>, waitFor: Job? = null) {
+        if (ids.isEmpty()) return
+        val distinctIds = ids.distinct()
+        val deletion = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            // A running task deletes its own row in finally. Wait until that cleanup has completed
+            // before allowing a new task with the same id to persist.
+            waitFor?.join()
+            queueMutationMutex.withLock {
+                runCatching { taskDao.deleteAll(distinctIds) }
+                    .onFailure { AppLog.w("download", "取消任务落库失败：${it.message}") }
+            }
+        }
+        distinctIds.forEach { id -> pendingTaskDeletes[id] = deletion }
+        deletion.invokeOnCompletion {
+            distinctIds.forEach { id -> pendingTaskDeletes.remove(id, deletion) }
+        }
+        deletion.start()
     }
 
     /**
@@ -290,35 +369,30 @@ class DownloadManager @Inject constructor(
         val startTime = System.currentTimeMillis()
         val cameraModel = repository.deviceModel
         updateTask(taskId) { it.copy(state = DownloadState.DOWNLOADING, progress = 0) }
-        // 连接已断开（PTP 会话重建或超时自愈后句柄已失效）：直接失败，
-        // 不发起注定失败的请求，让用户尽快看到「请重新连接」的明确提示。
-        if (isCameraDisconnected()) {
-            AppLog.w("download", "相机连接已断开，跳过下载：${item.filename}")
-            updateTask(taskId) {
-                it.copy(
-                    state = DownloadState.FAILED,
-                    errorMessage = "相机连接已断开，请重新连接后再下载"
-                )
-            }
-            return
-        }
         var savedUri: Uri? = null
         var success = false
+        var failureMessage: String? = null
         try {
+            // Keep the preflight inside try/finally. Otherwise its early return leaves the Room row
+            // behind and the same task is restored and failed again on every process start.
+            if (isCameraDisconnected()) {
+                AppLog.w("download", "相机连接已断开，跳过下载：${item.filename}")
+                failureMessage = "相机连接已断开，请重新连接后再下载"
+                return
+            }
+            var lastProgressAt = 0L
+            var lastProgress = -1
             savedUri = repository.downloadToGallery(item) { loaded, total ->
                 val p = if (total > 0) (loaded * 100 / total).toInt() else 0
-                updateTask(taskId) { it.copy(progress = p) }
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (p == 100 || (p != lastProgress && now - lastProgressAt >= PROGRESS_UPDATE_INTERVAL_MS)) {
+                    lastProgress = p
+                    lastProgressAt = now
+                    updateTask(taskId) { it.copy(progress = p.coerceIn(0, 100)) }
+                }
             }
             success = savedUri != null
-            updateTask(taskId) {
-                it.copy(
-                    state = if (success) DownloadState.DONE else DownloadState.FAILED,
-                    progress = if (success) 100 else it.progress,
-                    errorMessage = if (success) null else (it.errorMessage ?: "下载失败"),
-                    // 成功时记下相册 Uri —— 分享环节据此打开原图（仅内存流转，不落库）
-                    savedUri = if (success) savedUri else null
-                )
-            }
+            if (!success) failureMessage = "下载失败"
         } catch (e: Exception) {
             // 用户取消：任务已从列表移除，不再标失败。
             // 这里必须吞掉 CancellationException——否则它会经 job.join() 抛给队列
@@ -326,12 +400,24 @@ class DownloadManager @Inject constructor(
             if (e is kotlinx.coroutines.CancellationException) {
                 AppLog.i("download", "下载已取消：${item.filename}")
             } else {
-                updateTask(taskId) { it.copy(state = DownloadState.FAILED, errorMessage = e.message ?: "下载失败") }
+                failureMessage = e.message ?: "下载失败"
             }
         } finally {
             val cancelled = cancelledIds.remove(taskId)
-            // 完成/失败/取消后都从 Room 移除（持久化只存排队中的任务）
-            runCatching { taskDao.delete(taskId) }
+            // Delete the restart row before exposing DONE/FAILED. An immediate retry therefore
+            // cannot insert a fresh row that this old completion subsequently deletes.
+            queueMutationMutex.withLock { runCatching { taskDao.delete(taskId) } }
+            if (!cancelled) {
+                updateTask(taskId) {
+                    it.copy(
+                        state = if (success) DownloadState.DONE else DownloadState.FAILED,
+                        progress = if (success) 100 else it.progress,
+                        errorMessage = if (success) null else (failureMessage ?: "下载失败"),
+                        // 成功时记下相册 Uri —— 分享环节据此打开原图（仅内存流转，不落库）
+                        savedUri = if (success) savedUri else null
+                    )
+                }
+            }
             // 追加传输记录（成功或失败都记，供「传输记录」页长按查看详情）；
             // 用户主动取消不算一次传输，不记
             if (!cancelled) {
@@ -352,19 +438,8 @@ class DownloadManager @Inject constructor(
         }
     }
 
-    /**
-     * 相机连接是否已断开（**仅 PTP 通道可信**）。
-     *
-     * PTP 事务超时自愈（forceClose）或保活失败都会把连接状态置为 DISCONNECTED，
-     * 而此时会话中的对象句柄已全部失效——继续下载只会拿到 0x2009。
-     *
-     * 注意 UPnP 通道没有状态跟踪，`connectionState` 恒为 DISCONNECTED，
-     * 不排除它的话会把 UPnP 通道下的所有下载误判为断连。
-     */
-    private fun isCameraDisconnected(): Boolean {
-        if (repository.currentChannelType != ChannelType.PTP_IP) return false
-        return repository.connectionState.value == ChannelConnectionState.DISCONNECTED
-    }
+    /** PTP 与 UPnP 都由仓库转发真实连接状态；断线后不再消费已经失效的下载任务。 */
+    private fun isCameraDisconnected(): Boolean = !repository.isConnected
 
     /** 把下载返回的 Uri 转成人类可读路径：MediaStore 用 RELATIVE_PATH+DISPLAY_NAME，SAF 回退文档 URI */
     private fun uriToReadablePath(uri: Uri?): String {
@@ -400,5 +475,9 @@ class DownloadManager @Inject constructor(
         _tasks.update { list ->
             list.map { if (it.id == id) transform(it) else it }
         }
+    }
+
+    private companion object {
+        const val PROGRESS_UPDATE_INTERVAL_MS = 150L
     }
 }

@@ -23,7 +23,8 @@ object AppLog {
     /**
      * 详细日志开关：控制 D/I 级是否输出。
      * 默认关闭 —— release 包不输出详细日志（金标安全标准 6.2.1 日志分级：
-     * 防止 logcat 泄露 SSID/IP/协议指令等敏感信息）；W/E 级始终输出。
+     * 防止 logcat 泄露 SSID/IP/URI/文件名/协议数据等敏感信息）。
+     * release 仅保留 W/E 的级别和 tag，不输出可变消息或异常堆栈。
      * App 启动时按 BuildConfig.DEBUG 置 true。
      */
     @Volatile
@@ -48,23 +49,28 @@ object AppLog {
 
     fun e(tag: String, message: String, throwable: Throwable? = null) {
         log('E', tag, message)
-        throwable?.printStackTrace()
+        if (verbose) throwable?.printStackTrace()
     }
 
     private fun log(level: Char, tag: String, message: String) {
-        // 详细日志门控：release 下 D/I 不输出，避免敏感信息经 logcat 泄露
+        // 详细日志门控：release 下 D/I 不输出，W/E 只保留级别。
         if ((level == 'D' || level == 'I') && !verbose) return
         val fullTag = "$PREFIX-$tag"
+        val safeMessage = if (verbose) message else when (level) {
+            'W' -> "warning"
+            'E' -> "error"
+            else -> return
+        }
         val method = androidLogMethods[level]
         if (method != null) {
             // logcat 单条上限约 4000 字符，超长截断
-            val truncated = if (message.length > 3800) message.take(3800) + "…(截断)" else message
+            val truncated = if (safeMessage.length > 3800) safeMessage.take(3800) + "…(截断)" else safeMessage
             runCatching {
                 method as java.lang.reflect.Method
                 method.invoke(null, fullTag, truncated)
-            }.onFailure { println("[$level][$fullTag] $message") }
+            }.onFailure { println("[$level][$fullTag] $safeMessage") }
         } else {
-            println("[$level][$fullTag] $message")
+            println("[$level][$fullTag] $safeMessage")
         }
     }
 }

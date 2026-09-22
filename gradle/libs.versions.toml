@@ -8,7 +8,7 @@ agp = "9.4.0"
 kotlin = "2.3.21"
 # KSP 2.3.11：与 Kotlin 2.3.21 配套
 ksp = "2.3.11"
-# core-ktx 1.19.0 要求 AGP ≥9.1 且 compileSdk ≥37，本项目 AGP 8.11.2 故维持 1.16.0
+# core-ktx 暂维持 1.16.0；后续依赖升级应通过版本机器人单独验证行为变化。
 coreKtx = "1.16.0"
 activityCompose = "1.11.0"
 # Compose BOM 2026.04.01 → material3 1.4.0 / compose 1.11.x（Material 3 Expressive，Android 16 适配）
@@ -23,8 +23,6 @@ room = "2.8.4"
 coroutines = "1.9.0"
 serialization = "1.7.3"
 okhttp = "4.12.0"
-ktor = "3.0.3"
-xmlutil = "0.91.1"
 coil = "2.7.0"
 media3 = "1.9.3"
 backdrop = "2.0.1"
@@ -65,12 +63,6 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 
 # 网络
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
-ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.ref = "ktor" }
-ktor-client-content-negotiation = { group = "io.ktor", name = "ktor-client-content-negotiation", version.ref = "ktor" }
-ktor-serialization-kotlinx-json = { group = "io.ktor", name = "ktor-serialization-kotlinx-json", version.ref = "ktor" }
-ktor-client-core = { group = "io.ktor", name = "ktor-client-core", version.ref = "ktor" }
-xmlutil-serialization = { group = "io.github.pdvrieze.xmlutil", name = "serialization", version.ref = "xmlutil" }
-
 # 图片
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 
@@ -108,3 +100,4 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
+cyclonedx = { id = "org.cyclonedx.bom", version = "3.4.1" }

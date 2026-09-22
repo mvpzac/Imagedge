@@ -3,6 +3,7 @@ package com.imagedge.camera.motionphoto.internal.xmp
 import com.imagedge.camera.motionphoto.MotionPhotoComposeException
 import java.io.StringReader
 import java.io.StringWriter
+import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 import javax.xml.transform.OutputKeys
 import javax.xml.transform.TransformerFactory
@@ -11,6 +12,9 @@ import javax.xml.transform.stream.StreamResult
 import org.xml.sax.InputSource
 
 internal object MotionPhotoVendorXmpBuilder {
+    // Android's XMLConstants stub omits the Java 8 access-control constants; use their standard URIs.
+    private const val ACCESS_EXTERNAL_DTD = "http://javax.xml.XMLConstants/property/accessExternalDTD"
+    private const val ACCESS_EXTERNAL_SCHEMA = "http://javax.xml.XMLConstants/property/accessExternalSchema"
     private const val G_CAMERA_NAMESPACE = "http://ns.google.com/photos/1.0/camera/"
     private const val CONTAINER_NAMESPACE = "http://ns.google.com/photos/1.0/container/"
     private const val ITEM_NAMESPACE = "http://ns.google.com/photos/1.0/container/item/"
@@ -26,11 +30,24 @@ internal object MotionPhotoVendorXmpBuilder {
         videoLengthBytes: Long,
         videoMimeType: String,
         presentationTimestampUs: Long,
-        gainMapLengthBytes: Int?,
+        gainMapLengthBytes: Long?,
         hdrgmVersion: String?,
     ): String {
+        require(currentXmp.length <= 1024 * 1024) { "The Motion Photo XMP is too large." }
+        require(!currentXmp.contains("<!DOCTYPE", ignoreCase = true) &&
+            !currentXmp.contains("<!ENTITY", ignoreCase = true)
+        ) { "XMP document type declarations are not allowed." }
         val factory = DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = true
+            isXIncludeAware = false
+            isExpandEntityReferences = false
+            setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
+            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+            setFeature("http://xml.org/sax/features/external-general-entities", false)
+            setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+            setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
+            setAttribute(ACCESS_EXTERNAL_DTD, "")
+            setAttribute(ACCESS_EXTERNAL_SCHEMA, "")
         }
         val document = factory.newDocumentBuilder()
             .parse(InputSource(StringReader(currentXmp)))
@@ -97,7 +114,7 @@ internal object MotionPhotoVendorXmpBuilder {
     private fun rewriteContainerDirectory(
         document: org.w3c.dom.Document,
         description: org.w3c.dom.Element,
-        gainMapLengthBytes: Int?,
+        gainMapLengthBytes: Long?,
         videoLengthBytes: Long,
         videoMimeType: String,
     ) {
@@ -128,7 +145,7 @@ internal object MotionPhotoVendorXmpBuilder {
                     document = document,
                     semantic = "GainMap",
                     mimeType = "image/jpeg",
-                    length = gainMapLengthBytes.toLong(),
+                    length = gainMapLengthBytes,
                     padding = null,
                 ),
             )

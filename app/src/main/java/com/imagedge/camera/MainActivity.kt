@@ -1,22 +1,13 @@
 package com.imagedge.camera
 
-import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
-import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
 import coil.imageLoader
-import com.imagedge.camera.core.common.AppLog
-import com.imagedge.camera.core.permission.AppPermissions
 import com.imagedge.camera.data.model.MediaSessionCache
 import com.imagedge.camera.data.remote.CameraRepository
 import com.imagedge.camera.feature.root.RootScreen
@@ -67,8 +58,6 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val themeMode by themeController.mode.collectAsState()
-            // 首次进入：统一申请运行所需权限（拒绝后不影响其他功能，用到时顶部弹窗说明）
-            RequestRequiredPermissions()
             ImagedgeTheme(
                 darkTheme = when (themeMode) {
                     ThemeMode.SYSTEM -> isSystemInDarkTheme()
@@ -99,29 +88,6 @@ class MainActivity : ComponentActivity() {
             // 这是进程内最大的一块原生内存占用（数百张位图），不释放会直接顶到查杀阈值。
             // 只丢弃引用，不 recycle —— 位图可能仍被屏幕上未销毁的 Image 持有。
             sessionCache.clearThumbnails()
-        }
-    }
-}
-
-/** 首次进入统一申请运行所需权限（按 SDK 版本动态筛选，已授予的跳过） */
-@Composable
-private fun RequestRequiredPermissions() {
-    val context = LocalContext.current
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        val denied = results.filterValues { !it }.keys
-        if (denied.isNotEmpty()) {
-            AppLog.i("permission", "用户未授予：${denied.joinToString()}")
-        }
-    }
-    LaunchedEffect(Unit) {
-        val needed = AppPermissions.ungranted(
-            android.os.Build.VERSION.SDK_INT
-        ) { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
-        if (needed.isNotEmpty()) {
-            AppLog.i("permission", "首次启动申请权限：$needed")
-            launcher.launch(needed.toTypedArray())
         }
     }
 }

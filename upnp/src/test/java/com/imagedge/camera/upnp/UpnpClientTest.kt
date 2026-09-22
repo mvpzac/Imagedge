@@ -2,6 +2,7 @@ package com.imagedge.camera.upnp
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 /**
@@ -14,7 +15,7 @@ import org.junit.Test
  */
 class UpnpClientTest {
 
-    private val client = UpnpClient("127.0.0.1")
+    private val client = UpnpClient("192.168.122.1")
 
     @Test
     fun parseDidlWithItemAndContainer() {
@@ -92,5 +93,30 @@ class UpnpClientTest {
     fun parseEmptyDidl() {
         val result = client.parseDidl("<DIDL-Lite></DIDL-Lite>")
         assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun rejectsExternalEntityDocuments() {
+        val xxe = """
+            <!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+            <DIDL-Lite><item id="1"><title>&xxe;</title></item></DIDL-Lite>
+        """.trimIndent()
+
+        assertThrows(Exception::class.java) { client.parseDidl(xxe) }
+    }
+
+    @Test
+    fun rejectsExcessiveXmlDepth() {
+        val deep = buildString {
+            repeat(70) { append("<n>") }
+            repeat(70) { append("</n>") }
+        }
+
+        assertThrows(IllegalArgumentException::class.java) { client.parseDidl(deep) }
+    }
+
+    @Test
+    fun rejectsPublicUpnpTargets() {
+        assertThrows(IllegalArgumentException::class.java) { UpnpClient("8.8.8.8") }
     }
 }

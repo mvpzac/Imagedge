@@ -35,6 +35,7 @@ import androidx.compose.material3.TextButton
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -102,8 +103,7 @@ fun RemoteShootingScreen(
         if (grants.values.all { it }) {
             viewModel.startBleScan()
         } else {
-            // 被拒：顶部弹窗诚实说明缺的是哪个权限、用来做什么
-            // （首次启动已统一申请过，这里只说明用途，不重复弹系统框）
+            // 被拒：顶部弹窗诚实说明缺的是哪个权限、用来做什么。
             val denied = grants.filterValues { !it }.keys.firstOrNull()
             if (denied != null && snackbarController != null) {
                 PermissionGate.check(context, denied, snackbarController)
@@ -128,6 +128,11 @@ fun RemoteShootingScreen(
     // LiveView 由 UI collect liveViewFrames 时按需连接（60152 裸流）
     LaunchedEffect(Unit) {
         viewModel.connect()
+    }
+    // BLE 扫描、配对广播和 GATT 只服务于当前遥控页。离页立即释放，
+    // 避免长时间占用蓝牙连接槽和在后台意外控制相机。
+    DisposableEffect(Unit) {
+        onDispose { viewModel.leaveScreen() }
     }
 
     Scaffold(
@@ -203,11 +208,22 @@ fun RemoteShootingScreen(
                     // ── 蓝牙遥控快门连接区（位于取景与快门之间：连接动作紧邻拍摄操作）──
                     when (val ble = bleState) {
                         is BleShutterState.Connected -> {
-                            Text(
-                                text = stringResource(R.string.ble_connected_prefix) + ble.name,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.ble_connected_prefix) + ble.name,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                AppLink(
+                                    text = stringResource(R.string.ble_disconnect_btn),
+                                    onClick = viewModel::disconnectBle,
+                                )
+                            }
                             // 相机实时状态（BLE ff02 通知：对焦/快门/录像）
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)

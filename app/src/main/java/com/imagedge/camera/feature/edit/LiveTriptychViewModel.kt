@@ -8,6 +8,8 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.scale
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.imagedge.camera.core.common.AppLog
@@ -336,7 +338,7 @@ class LiveTriptychViewModel @Inject constructor(
     ): Bitmap {
         val cellW = aspect.targetW
         val cellH = aspect.targetH
-        val result = Bitmap.createBitmap(cellW, cellH * slots.size, Bitmap.Config.ARGB_8888)
+        val result = createBitmap(cellW, cellH * slots.size)
         val canvas = Canvas(result)
         slots.forEachIndexed { index, slot ->
             // 格画面来源：重选封面 → 精确帧；未重选 → 原静态图
@@ -436,9 +438,7 @@ class LiveTriptychViewModel @Inject constructor(
         frame?.let { f ->
             if (f.width > maxWidth) {
                 val scale = maxWidth.toFloat() / f.width
-                Bitmap.createScaledBitmap(
-                    f, maxWidth, (f.height * scale).toInt().coerceAtLeast(1), true
-                ).also {
+                f.scale(maxWidth, (f.height * scale).toInt().coerceAtLeast(1)).also {
                     if (it !== f) f.recycle()
                 }
             } else f

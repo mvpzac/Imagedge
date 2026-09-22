@@ -5,11 +5,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.luminance
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -57,36 +56,45 @@ fun GlassBackdropLayer(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .drawBehind {
-                drawRect(base)
-                glows.forEach { it.draw(this) }
+            .drawWithCache {
+                // Brushes used to be rebuilt on every draw. Cache all four radial shaders until
+                // size/theme changes; this removes steady allocations from scroll/animation frames.
+                val radius = size.maxDimension * 0.55f
+                val prepared = glows.map { glow ->
+                    val center = Offset(size.width * glow.centerX, size.height * glow.centerY)
+                    PreparedGlow(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                glow.color.copy(alpha = glow.alpha),
+                                glow.color.copy(alpha = 0f)
+                            ),
+                            center = center,
+                            radius = radius
+                        ),
+                        center = center
+                    )
+                }
+                onDrawBehind {
+                    drawRect(base)
+                    prepared.forEach { glow ->
+                        drawCircle(
+                            brush = glow.brush,
+                            radius = radius,
+                            center = glow.center
+                        )
+                    }
+                }
             }
             .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)
     )
 }
 
 /** 一团光晕：中心色、强度、归一化中心坐标 */
-private class Glow(
+private data class Glow(
     val color: Color,
     val alpha: Float,
     val centerX: Float,
     val centerY: Float
-) {
-    fun draw(scope: DrawScope) {
-        val w = scope.size.width
-        val h = scope.size.height
-        val center = Offset(w * centerX, h * centerY)
-        // 半径取最长边的 ~55%：比之前收紧一档——玻璃变轻之后，
-        // 背景需要更明显的明暗过渡才折射得出层次（但仍在离屏外弥散，无硬边）
-        val radius = scope.size.maxDimension * 0.55f
-        scope.drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(color.copy(alpha = alpha), color.copy(alpha = 0f)),
-                center = center,
-                radius = radius
-            ),
-            radius = radius,
-            center = center
-        )
-    }
-}
+)
+
+private data class PreparedGlow(val brush: Brush, val center: Offset)

@@ -1,8 +1,6 @@
 package com.imagedge.camera.ui.glass
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.VectorConverter
-import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.spring
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.graphics.luminance
@@ -16,7 +14,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ShaderBrush
@@ -37,7 +34,7 @@ import com.kyant.backdrop.isRuntimeShaderSupported
  *    （手势已经在那里处理，重复注册会互相抢事件）；
  * 2. 只在玻璃可用（[GlassLevel] != NONE）时绘制：降级设备上玻璃本身已退回普通表面，
  *    再叠一层白光会显得突兀；
- * 3. 松手时光点**弹回按下点**而不是留在原地，配合弹簧回弹有「光被甩回去」的余韵。
+ * 3. 拖动时直接更新绘制坐标，松手只做透明度动画，避免为每个指针采样启动协程。
  *
  * 技术细节：AGSL（`RuntimeShader`）需要 Android 13+；更低版本退回
  * 一层均匀的白光叠加（观感弱一些但不会缺失反馈）。
@@ -47,12 +44,11 @@ internal class GlassHighlightState {
     /** 按压进度 0..1：驱动高光强度 */
     val progress = Animatable(0f, 0.001f)
 
-    /** 光点位置（元素本地坐标） */
-    val position = Animatable(Offset.Zero, Offset.VectorConverter, Offset.VisibilityThreshold)
+    /** 光点位置只失效绘制层；不作为 LaunchedEffect key 触发每帧重组/协程。 */
+    var position by mutableStateOf(Offset.Zero)
+        private set
 
     private val pressSpec = spring<Float>(dampingRatio = 0.5f, stiffness = 300f, visibilityThreshold = 0.001f)
-    private val positionSpec =
-        spring<Offset>(dampingRatio = 0.5f, stiffness = 300f, visibilityThreshold = Offset.VisibilityThreshold)
 
     /**
      * 高光着色器：以光点为中心画一团径向渐隐的白光。
@@ -79,21 +75,20 @@ internal class GlassHighlightState {
         null
     }
 
+    private val shaderBrush: ShaderBrush? = shader?.let { ShaderBrush(it.asComposeShader()) }
+
     /** 光点吸附到手指位置（拖动中即时跟随，不做动画——动画会让高光「拖后腿」） */
-    suspend fun follow(point: Offset) {
-        position.snapTo(point)
-    }
+    fun follow(point: Offset) { position = point }
 
     /** 按下：高光淡入到按下点 */
     suspend fun press(at: Offset) {
-        position.snapTo(at)
+        position = at
         progress.animateTo(1f, pressSpec)
     }
 
-    /** 松手：高光淡出，光点弹回按下点 */
-    suspend fun release(returnTo: Offset) {
+    /** 松手：只淡出。省去一个与视觉收益不成比例的位置动画。 */
+    suspend fun release() {
         progress.animateTo(0f, pressSpec)
-        position.animateTo(returnTo, positionSpec)
     }
 
     /**
@@ -103,8 +98,8 @@ internal class GlassHighlightState {
     fun Modifier.highlightLayer(intensity: Float = 1f): Modifier = drawWithContent {
         val p = progress.value
         if (p > 0.01f) {
-            val light = position.value
-            if (shader != null) {
+            val light = position
+            if (shader != null && shaderBrush != null) {
                 // 整体提亮一档：模拟玻璃表面被照亮的漫反射
                 drawRect(Color.White.copy(alpha = 0.18f * intensity * p), blendMode = BlendMode.Plus)
                 shader.apply {
@@ -117,7 +112,7 @@ internal class GlassHighlightState {
                         light.y.coerceIn(0f, size.height)
                     )
                 }
-                drawRect(ShaderBrush(shader.asComposeShader()), blendMode = BlendMode.Plus)
+                drawRect(shaderBrush, blendMode = BlendMode.Plus)
             } else {
                 // Android 13 以下没有 AGSL：退回均匀白光，压力反馈仍在
                 drawRect(Color.White.copy(alpha = 0.25f * intensity * p), blendMode = BlendMode.Plus)
@@ -155,13 +150,9 @@ internal fun Modifier.glassPressTracking(state: GlassHighlightState): Modifier {
 
     var pressed by remember { mutableStateOf(false) }
     var pressPoint by remember { mutableStateOf(Offset.Zero) }
-    var touchPoint by remember { mutableStateOf(Offset.Zero) }
 
     LaunchedEffect(pressed) {
-        if (pressed) state.press(pressPoint) else state.release(pressPoint)
-    }
-    LaunchedEffect(touchPoint, pressed) {
-        if (pressed) state.follow(touchPoint)
+        if (pressed) state.press(pressPoint) else state.release()
     }
 
     val intensity = highlightIntensity()
@@ -175,9 +166,9 @@ internal fun Modifier.glassPressTracking(state: GlassHighlightState): Modifier {
                     if (change.pressed && !pressed) {
                         pressed = true
                         pressPoint = change.position
-                        touchPoint = change.position
+                        state.follow(change.position)
                     } else if (change.pressed) {
-                        touchPoint = change.position
+                        state.follow(change.position)
                     } else if (pressed) {
                         pressed = false
                     }

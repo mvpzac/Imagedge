@@ -213,10 +213,24 @@ class PtpChannel @Inject constructor() : CameraChannel {
         keepAliveJob = null
         eventJob?.cancel()
         eventJob = null
-        runCatching { client?.disconnect() }
-            .onFailure { runCatching { client?.forceClose() } }
+        val closingClient = client
+        // Detach first so no new operation can capture the client while shutdown is in progress.
         client = null
         _connectionState.value = ChannelConnectionState.DISCONNECTED
+        if (closingClient != null) {
+            if (ptpMutex.tryLock()) {
+                try {
+                    runCatching { closingClient.disconnect() }
+                        .onFailure { runCatching { closingClient.forceClose() } }
+                } finally {
+                    ptpMutex.unlock()
+                }
+            } else {
+                // An operation owns the command stream. Sending CloseSession concurrently would
+                // interleave packets; force-close the sockets to release its blocking read instead.
+                runCatching { closingClient.forceClose() }
+            }
+        }
     }
 
     /**

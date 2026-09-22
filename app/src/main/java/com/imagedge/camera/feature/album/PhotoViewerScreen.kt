@@ -56,6 +56,8 @@ import com.imagedge.camera.ui.components.AppButton
 import com.imagedge.camera.ui.components.AppButtonType
 import com.imagedge.camera.ui.components.AppIconButton
 import com.imagedge.camera.ui.theme.Spacing
+import com.imagedge.camera.core.permission.rememberNotificationPermissionRequester
+import com.imagedge.camera.ui.feedback.SnackbarController
 
 /**
  * <pre>
@@ -71,12 +73,15 @@ import com.imagedge.camera.ui.theme.Spacing
 @Composable
 fun PhotoViewerScreen(
     onBack: () -> Unit = {},
+    snackbarController: SnackbarController,
     viewModel: PhotoViewerViewModel = hiltViewModel()
 ) {
     val items = viewModel.items
     val previews by viewModel.previews.collectAsStateWithLifecycle()
     val loading by viewModel.loading.collectAsStateWithLifecycle()
     val videoStates by viewModel.videoStates.collectAsStateWithLifecycle()
+    val requestNotificationPermission =
+        rememberNotificationPermissionRequester(snackbarController)
     val pagerState = rememberPagerState(
         initialPage = viewModel.startIndex,
         pageCount = { items.size }
@@ -140,7 +145,10 @@ fun PhotoViewerScreen(
                 ) {
                     AppButton(
                         text = stringResource(R.string.viewer_download),
-                        onClick = { viewModel.enqueueDownload(current) },
+                        onClick = {
+                            requestNotificationPermission()
+                            viewModel.enqueueDownload(current)
+                        },
                         fullWidth = false,
                         type = AppButtonType.PRIMARY
                     )

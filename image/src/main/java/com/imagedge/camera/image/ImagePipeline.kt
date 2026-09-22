@@ -6,6 +6,8 @@ import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.scale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -54,11 +56,9 @@ class ImagePipeline(val steps: List<EditStep>) {
             val scale = (maxLongEdge.toFloat() / maxOf(source.width, source.height))
                 .coerceAtMost(1f)
             val preview = if (scale < 1f) {
-                Bitmap.createScaledBitmap(
-                    source,
+                source.scale(
                     (source.width * scale).toInt().coerceAtLeast(1),
                     (source.height * scale).toInt().coerceAtLeast(1),
-                    true
                 )
             } else {
                 source
@@ -199,7 +199,7 @@ class ImagePipeline(val steps: List<EditStep>) {
     }
 
     private fun applyColor(source: Bitmap, matrix: ColorMatrix): Bitmap {
-        val out = Bitmap.createBitmap(
+        val out = createBitmap(
             source.width,
             source.height,
             source.config ?: Bitmap.Config.ARGB_8888

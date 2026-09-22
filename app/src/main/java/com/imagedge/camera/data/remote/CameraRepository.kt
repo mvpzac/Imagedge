@@ -6,7 +6,9 @@ import android.net.Uri
 import android.os.Environment
 import android.provider.DocumentsContract
 import android.provider.MediaStore
+import androidx.core.net.toUri
 import com.imagedge.camera.core.common.AppLog
+import com.imagedge.camera.core.io.BoundedOutputStream
 import com.imagedge.camera.data.model.CameraSettings
 import com.imagedge.camera.data.model.MediaItem
 import com.imagedge.camera.data.remote.wifi.CameraWifiManager
@@ -16,14 +18,19 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.io.OutputStream
+import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -45,6 +52,10 @@ data class ConnectionResult(
 /** 日志 tag */
 private const val TAG = "camera"
 
+/** Defensive ceiling for a single camera object; unknown-size streams use a tighter limit. */
+private const val MAX_TRANSFER_BYTES = 64L * 1024 * 1024 * 1024
+private const val MAX_UNKNOWN_TRANSFER_BYTES = 8L * 1024 * 1024 * 1024
+
 @Singleton
 class CameraRepository @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -53,23 +64,36 @@ class CameraRepository @Inject constructor(
     private val upnpChannel: UpnpChannel
 ) {
 
+    @Volatile
     private var activeChannel: CameraChannel? = null
 
     /** 仓库级作用域：承载跨页面存活的延迟任务（如整卡延迟退出） */
     private val repoScope = CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
 
-    val isConnected: Boolean get() = activeChannel != null
+    private val _connectionState = MutableStateFlow(ChannelConnectionState.DISCONNECTED)
+    val connectionState: StateFlow<ChannelConnectionState> = _connectionState.asStateFlow()
+
+    init {
+        // 仅转发当前被路由选中的通道，避免 PTP 降级到 UPnP 后 UI 仍恒显“已断开”。
+        repoScope.launch {
+            ptpChannel.connectionState.collect { state ->
+                if (activeChannel === ptpChannel) _connectionState.value = state
+            }
+        }
+        repoScope.launch {
+            upnpChannel.connectionState.collect { state ->
+                if (activeChannel === upnpChannel) _connectionState.value = state
+            }
+        }
+    }
+
+    val isConnected: Boolean get() =
+        activeChannel != null && _connectionState.value == ChannelConnectionState.CONNECTED
 
     val currentChannelType: ChannelType? get() = activeChannel?.channelType
 
     /** 当前连接的相机型号（未连接返回空串） */
     val deviceModel: String get() = activeChannel?.deviceModel ?: ""
-
-    /**
-     * 连接状态流（转发 PTP 通道；UPnP 通道暂无状态跟踪，恒为 DISCONNECTED——
-     * UPnP 是历史兼容通道，实际路由始终优先 PTP/IP）
-     */
-    val connectionState: StateFlow<ChannelConnectionState> get() = ptpChannel.connectionState
 
     /** 相机内容变化事件（选片推送 / 内容集重建，用于事件驱动立即刷新） */
     val contentEvents: Flow<Unit> get() = ptpChannel.contentEvents
@@ -115,6 +139,7 @@ class CameraRepository @Inject constructor(
 
         val targetHost = host ?: wifiManager.getCurrentGatewayIp()
             ?: throw IllegalStateException("未找到相机 WiFi 网关，请先连接相机热点")
+        requirePrivateIpv4(targetHost)
         AppLog.i(TAG, "连接相机 $targetHost（先 PTP/IP，失败降级 UPnP）")
 
         wifiManager.bindProcessToWifi()
@@ -123,6 +148,7 @@ class CameraRepository @Inject constructor(
         try {
             ptpChannel.connect(targetHost)
             activeChannel = ptpChannel
+            _connectionState.value = ptpChannel.connectionState.value
             AppLog.i(TAG, "PTP/IP 连接成功，型号=${ptpChannel.deviceModel}")
             return@withContext ConnectionResult(ptpChannel.channelType, ptpChannel.deviceModel)
         } catch (ptpError: Exception) {
@@ -131,10 +157,12 @@ class CameraRepository @Inject constructor(
             try {
                 upnpChannel.connect(targetHost)
                 activeChannel = upnpChannel
+                _connectionState.value = upnpChannel.connectionState.value
                 AppLog.i(TAG, "UPnP 连接成功，型号=${upnpChannel.deviceModel}")
                 return@withContext ConnectionResult(upnpChannel.channelType, upnpChannel.deviceModel)
             } catch (upnpError: Exception) {
                 activeChannel = null
+                _connectionState.value = ChannelConnectionState.DISCONNECTED
                 AppLog.e(TAG, "UPnP 连接失败（${upnpError.message}）")
                 // P1-13：两条通道都失败时必须解绑进程网络。
                 // 否则进程一直绑在已失效的相机 WiFi 上，用户切回家宽/蜂窝后，
@@ -153,6 +181,7 @@ class CameraRepository @Inject constructor(
     suspend fun disconnect() = withContext(Dispatchers.IO) {
         activeChannel?.disconnect()
         activeChannel = null
+        _connectionState.value = ChannelConnectionState.DISCONNECTED
         wifiManager.unbindProcessNetwork()
     }
 
@@ -371,17 +400,18 @@ class CameraRepository @Inject constructor(
         val channel = activeChannel ?: return@withContext null
 
         val resolver = context.contentResolver
-        val mimeType = inferMimeType(item.filename)
+        val displayName = sanitizeDisplayName(item.filename)
+        val mimeType = inferMimeType(displayName)
 
         // 用户在设置页选择了自定义目录（SAF）：写入该目录（默认路径见下方 MediaStore 分支）
         val treeUriStr = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
             .getString("download_tree_uri", null)
         if (treeUriStr != null) {
-            val treeUri = Uri.parse(treeUriStr)
+            val treeUri = treeUriStr.toUri()
             // SAF 树目录：createDocument 建文件（重名自动追加 " (1)"）
             val dirId = DocumentsContract.getTreeDocumentId(treeUri)
             val dirUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, dirId)
-            val fileUri = DocumentsContract.createDocument(resolver, dirUri, mimeType, item.filename)
+            val fileUri = DocumentsContract.createDocument(resolver, dirUri, mimeType, displayName)
                 ?: throw IllegalStateException("无法在所选目录创建文件（权限或路径无效）")
             val output: OutputStream = resolver.openOutputStream(fileUri)
                 ?: run {
@@ -393,7 +423,7 @@ class CameraRepository @Inject constructor(
             // 否则相册里会留下一堆打不开的 0 字节文件，且永不清理、越积越多（P1-5）
             try {
                 output.use { stream ->
-                    channel.download(item, stream) { loaded, total -> onProgress(loaded, total) }
+                    downloadVerified(channel, item, stream, onProgress)
                 }
             } catch (e: Exception) {
                 runCatching { DocumentsContract.deleteDocument(resolver, fileUri) }
@@ -409,7 +439,7 @@ class CameraRepository @Inject constructor(
         }
 
         val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, item.filename)
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
             put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
             put(
                 MediaStore.MediaColumns.RELATIVE_PATH,
@@ -433,7 +463,7 @@ class CameraRepository @Inject constructor(
         // 下载失败时删除 MediaStore 条目，避免相册里留下 0 字节半成品（P1-5）
         try {
             output.use { stream ->
-                channel.download(item, stream) { loaded, total -> onProgress(loaded, total) }
+                downloadVerified(channel, item, stream, onProgress)
             }
             // 写完才发布条目（IS_PENDING=0），此后图库才可见完整文件
             runCatching {
@@ -475,15 +505,16 @@ class CameraRepository @Inject constructor(
      */
     suspend fun commitToGallery(item: MediaItem, source: File): Uri? = withContext(Dispatchers.IO) {
         val channel = activeChannel ?: return@withContext null
-        val mimeType = inferMimeType(item.filename)
+        val displayName = sanitizeDisplayName(item.filename)
+        val mimeType = inferMimeType(displayName)
         val resolver = context.contentResolver
         val treeUriStr = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
             .getString("download_tree_uri", null)
         if (treeUriStr != null) {
-            val treeUri = Uri.parse(treeUriStr)
+            val treeUri = treeUriStr.toUri()
             val dirId = DocumentsContract.getTreeDocumentId(treeUri)
             val dirUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, dirId)
-            val fileUri = DocumentsContract.createDocument(resolver, dirUri, mimeType, item.filename)
+            val fileUri = DocumentsContract.createDocument(resolver, dirUri, mimeType, displayName)
                 ?: throw IllegalStateException("无法在所选目录创建文件（权限或路径无效）")
             // 注意：不能用 `?.use {}` 静默跳过——打不开流时必须删掉刚建的文档，
             // 否则会返回一个 0 字节废文件，调用方还以为提交成功了（P1-5）
@@ -496,7 +527,7 @@ class CameraRepository @Inject constructor(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         }
         val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, item.filename)
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
             put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
             put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DCIM}/Imagedge")
             // 与 downloadToGallery 同样：先 pending，搬完再发布；并写入拍摄时间（P0）
@@ -542,8 +573,9 @@ class CameraRepository @Inject constructor(
      * 下载媒体到内存（大图查看器用：JPEG 全量 / RAW 提取内嵌预览）
      * 注意大对象内存开销，调用方负责缓存淘汰。
      *
-     * 硬上限 [maxBytes]（默认 256MB，覆盖 24MP RAW 的 ~25MB 与内嵌预览）：
-     * ByteArrayOutputStream 会无上限扩容，且 toByteArray() 再复制一份，峰值 = 2× 文件大小。
+     * 硬上限 [maxBytes]（默认 96MB，覆盖常见 RAW 与内嵌预览）：
+     * 上限由 [BoundedOutputStream] 对实际收到的字节执行，不能只信任相机上报的 size。
+     * ByteArrayOutputStream + toByteArray() 仍会产生复制，因此这里不接受视频或超大原图。
      * 视频/超大文件必须走 [downloadToFile] 落盘，绝不进堆。
      * 注意 sizeBytes 为 0（相机未上报）或 >2GB（toInt 溢出为负）时一律拒绝，
      * 避免 ByteArray(负数) 抛 NegativeArraySizeException。
@@ -552,14 +584,20 @@ class CameraRepository @Inject constructor(
      */
     suspend fun downloadToMemory(
         item: MediaItem,
-        maxBytes: Long = 256L * 1024 * 1024
+        maxBytes: Long = 96L * 1024 * 1024
     ): ByteArray = withContext(Dispatchers.IO) {
         val channel = activeChannel ?: throw IllegalStateException("未连接相机")
         require(item.sizeBytes in 1..maxBytes) {
             "文件大小未知或过大（${item.sizeBytes} 字节，上限 $maxBytes），请改用 downloadToFile 落盘"
         }
-        val output = ByteArrayOutputStream(item.sizeBytes.toInt())
-        channel.download(item, output) { _, _ -> }
+        val output = ByteArrayOutputStream(minOf(item.sizeBytes, 1024L * 1024L).toInt())
+        val bounded = BoundedOutputStream(output, minOf(item.sizeBytes, maxBytes))
+        channel.download(item, bounded) { _, _ -> }
+        if (bounded.bytesWritten != item.sizeBytes) {
+            throw IOException(
+                "相机返回长度与对象信息不一致：实际 ${bounded.bytesWritten}，声明 ${item.sizeBytes}"
+            )
+        }
         output.toByteArray()
     }
 
@@ -573,13 +611,33 @@ class CameraRepository @Inject constructor(
     ) = withContext(Dispatchers.IO) {
         val channel = activeChannel ?: throw IllegalStateException("未连接相机")
         FileOutputStream(file).use { stream ->
-            channel.download(item, stream) { loaded, total -> onProgress(loaded, total) }
+            downloadVerified(channel, item, stream, onProgress)
+        }
+    }
+
+    /** Enforce byte limits against the stream actually received, not camera-controlled metadata. */
+    private suspend fun downloadVerified(
+        channel: CameraChannel,
+        item: MediaItem,
+        output: OutputStream,
+        onProgress: (Long, Long) -> Unit,
+    ) {
+        require(item.sizeBytes <= MAX_TRANSFER_BYTES) {
+            "文件过大（${item.sizeBytes} 字节，上限 $MAX_TRANSFER_BYTES）"
+        }
+        val expected = item.sizeBytes.takeIf { it > 0 }
+        val bounded = BoundedOutputStream(output, expected ?: MAX_UNKNOWN_TRANSFER_BYTES)
+        channel.download(item, bounded) { loaded, total -> onProgress(loaded, total) }
+        if (expected != null && bounded.bytesWritten != expected) {
+            throw IOException(
+                "相机返回长度与对象信息不一致：实际 ${bounded.bytesWritten}，声明 $expected"
+            )
         }
     }
 
     /** 按扩展名推断 MIME 类型 */
     private fun inferMimeType(filename: String): String {
-        val lower = filename.lowercase()
+        val lower = filename.lowercase(Locale.US)
         return when {
             lower.endsWith(".arw") -> "image/x-sony-arw"
             lower.endsWith(".jpg") || lower.endsWith(".jpeg") -> "image/jpeg"
@@ -595,5 +653,39 @@ class CameraRepository @Inject constructor(
             lower.endsWith(".mts") || lower.endsWith(".m2ts") -> "video/mp2t"
             else -> "application/octet-stream"
         }
+    }
+
+    /** 相机/UPnP 元数据属于不可信输入，不将路径分隔符、控制字符或超长名称交给 MediaStore/SAF。 */
+    private fun sanitizeDisplayName(raw: String): String {
+        val cleaned = raw
+            .substringAfterLast('/')
+            .substringAfterLast('\\')
+            .map { character ->
+                when {
+                    character.code < 0x20 || character.code == 0x7F -> '_'
+                    character in charArrayOf('/', '\\', ':', '*', '?', '"', '<', '>', '|') -> '_'
+                    else -> character
+                }
+            }
+            .joinToString("")
+            .trim()
+            .trim('.')
+            .take(180)
+        return cleaned.ifBlank { "IMAGEDGE_MEDIA" }
+    }
+
+    /** Cleartext camera transports are deliberately restricted to local IPv4 targets. */
+    private fun requirePrivateIpv4(host: String) {
+        val parts = host.split('.')
+        val octets = parts.mapNotNull { it.toIntOrNull() }
+        val wellFormed = parts.size == 4 && octets.size == 4 && octets.all { it in 0..255 }
+        val local = wellFormed && when (octets[0]) {
+            10 -> true
+            172 -> octets[1] in 16..31
+            192 -> octets[1] == 168
+            169 -> octets[1] == 254
+            else -> false
+        }
+        require(local) { "相机地址必须是私有或链路本地 IPv4 地址" }
     }
 }

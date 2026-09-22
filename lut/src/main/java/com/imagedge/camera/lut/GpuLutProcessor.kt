@@ -501,7 +501,9 @@ class GpuLutProcessor(
         }
 
         override fun close() {
-            runCatching { EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT) }
+            // GL objects must be deleted while this engine's context is current. Unbinding first
+            // makes glDelete* silently fail on several drivers and leaves cleanup to context loss.
+            runCatching { EGL14.eglMakeCurrent(display, surface, surface, context) }
             runCatching {
                 val textures = intArrayOf(srcTexId, dstTexId, lutTexId).filter { it != 0 }.toIntArray()
                 if (textures.isNotEmpty()) GLES30.glDeleteTextures(textures.size, textures, 0)
@@ -510,6 +512,7 @@ class GpuLutProcessor(
                 if (vaoId != 0) GLES30.glDeleteVertexArrays(1, intArrayOf(vaoId), 0)
                 if (program != 0) GLES30.glDeleteProgram(program)
             }
+            runCatching { EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT) }
             runCatching { EGL14.eglDestroySurface(display, surface) }
             runCatching { EGL14.eglDestroyContext(display, context) }
             runCatching { EGL14.eglTerminate(display) }

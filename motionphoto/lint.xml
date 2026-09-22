@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- Media3 Transformer/Muxer is intentionally the implementation layer of this module. -->
+    <issue id="UnsafeOptInUsageError">
+        <option
+            name="opt-in"
+            value="androidx.media3.common.util.UnstableApi" />
+    </issue>
+</lint>

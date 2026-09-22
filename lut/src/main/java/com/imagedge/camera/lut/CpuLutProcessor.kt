@@ -1,5 +1,8 @@
 package com.imagedge.camera.lut
 
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
+
 /**
  * <pre>
  *     author : Imagedge Team
@@ -50,6 +53,7 @@ class CpuLutProcessor : LutProcessor {
 
         var p = 0
         while (p < pixels.size) {
+            if (p and CANCELLATION_CHECK_MASK == 0) coroutineContext.ensureActive()
             // RGBA8 →（可选）逐通道调色 → 归一化 RGB
             val r8: Int
             val g8: Int
@@ -139,7 +143,7 @@ class CpuLutProcessor : LutProcessor {
     }
 
     /** 只做基础调色（无 LUT）的快路径：逐通道查表 + 饱和度 */
-    private fun applyAdjustOnlyInPlace(
+    private suspend fun applyAdjustOnlyInPlace(
         pixels: ByteArray,
         out: ByteArray,
         table: IntArray,
@@ -148,6 +152,7 @@ class CpuLutProcessor : LutProcessor {
         val saturationF = AdjustUniforms.of(adjust).saturation
         var p = 0
         while (p < pixels.size) {
+            if (p and CANCELLATION_CHECK_MASK == 0) coroutineContext.ensureActive()
             val r8 = table[pixels[p].toInt() and 0xFF]
             val g8 = table[256 + (pixels[p + 1].toInt() and 0xFF)]
             val b8 = table[512 + (pixels[p + 2].toInt() and 0xFF)]
@@ -202,5 +207,10 @@ class CpuLutProcessor : LutProcessor {
     private fun mixFloat(base: Float, transformed: Float, strength: Float): Byte {
         val v = base + (transformed - base) * strength
         return v.coerceIn(0f, 255f).toInt().toByte()
+    }
+
+    private companion object {
+        /** Check every 4096 pixels (RGBA = 16 KiB) without adding a modulo to the hot path. */
+        const val CANCELLATION_CHECK_MASK = 0x3FFF
     }
 }

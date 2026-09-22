@@ -9,7 +9,6 @@ import com.imagedge.camera.motionphoto.MotionPhotoComposeException
 import com.imagedge.camera.motionphoto.MotionPhotoComposeResult
 import com.imagedge.camera.motionphoto.internal.io.MotionPhotoTempFiles
 import com.imagedge.camera.motionphoto.internal.parse.MotionPhotoParseEngine
-import com.imagedge.camera.motionphoto.internal.xmp.extractPreferredMotionPhotoXmp
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -66,7 +65,10 @@ internal object MotionPhotoComposeEngine {
         }
 
         val xmpPacket = withContext(Dispatchers.IO) {
-            extractPreferredMotionPhotoXmp(composedFile.readBytes()).orEmpty()
+            MotionPhotoJpegEditor.readPreferredMotionPhotoXmp(
+                composedFile,
+                preparedVideo.preparedFile.length(),
+            ).orEmpty()
         }
         val verificationResult = withContext(Dispatchers.IO) {
             MotionPhotoParseEngine.parse(context, Uri.fromFile(composedFile))
@@ -84,7 +86,7 @@ internal object MotionPhotoComposeEngine {
             videoMimeType = preparedVideo.outputMimeType,
             videoProcessingDescription = preparedVideo.processingDescription,
             preparedVideoFile = preparedVideo.preparedFile,
-            totalBytes = composedFile.length().toInt(),
+            totalBytes = composedFile.length(),
             xmpPacket = xmpPacket,
             verificationResult = verificationResult,
         )

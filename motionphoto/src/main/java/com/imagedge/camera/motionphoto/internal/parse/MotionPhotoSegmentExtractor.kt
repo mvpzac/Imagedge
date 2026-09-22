@@ -1,278 +1,298 @@
 package com.imagedge.camera.motionphoto.internal.parse
 
+import com.imagedge.camera.motionphoto.ContainerItem
 import com.imagedge.camera.motionphoto.MetadataSource
 import com.imagedge.camera.motionphoto.MotionPhotoParseException
 import com.imagedge.camera.motionphoto.XmpSummary
 import com.imagedge.camera.motionphoto.internal.format.MotionPhotoMimeSniffer
-import com.imagedge.camera.motionphoto.internal.format.indexOfSubarray
+import com.imagedge.camera.motionphoto.internal.format.inferIsoBaseMediaMime
 import com.imagedge.camera.motionphoto.internal.format.looksLikeIsoBaseMedia
 import com.imagedge.camera.motionphoto.internal.format.looksLikeJpeg
+import java.io.File
+import java.io.RandomAccessFile
 import java.nio.charset.StandardCharsets
 
+/**
+ * 只计算文件范围，不把 Motion Photo 整体或视频段读入堆内存。
+ */
 internal object MotionPhotoSegmentExtractor {
-    fun extract(
-        sourceBytes: ByteArray,
-        xmpSummary: XmpSummary,
-    ): Extraction {
-        if (xmpSummary.items.size > 1) {
-            return extractFromContainerDirectory(sourceBytes, xmpSummary)
+    fun extract(sourceFile: File, xmpSummary: XmpSummary): Extraction {
+        val sourceSize = sourceFile.length()
+        if (sourceSize <= 0L) throw MotionPhotoParseException("The selected file is empty.")
+        return when {
+            xmpSummary.items.size > 1 -> extractFromContainerDirectory(sourceFile, sourceSize, xmpSummary)
+            (xmpSummary.microVideoOffset ?: 0L) > 0L ->
+                extractFromLegacyOffset(sourceFile, sourceSize, xmpSummary, xmpSummary.microVideoOffset!!)
+            else -> throw MotionPhotoParseException("No usable video location metadata was found in the XMP.")
         }
-
-        val legacyOffset = xmpSummary.microVideoOffset
-        if (legacyOffset != null && legacyOffset > 0) {
-            return extractFromLegacyMicroVideoOffset(sourceBytes, xmpSummary, legacyOffset)
-        }
-
-        throw MotionPhotoParseException("No usable video location metadata was found in the XMP.")
     }
 
     private fun extractFromContainerDirectory(
-        sourceBytes: ByteArray,
+        sourceFile: File,
+        sourceSize: Long,
         xmpSummary: XmpSummary,
     ): Extraction {
-        val primaryItem = xmpSummary.items.firstOrNull()
+        val primary = xmpSummary.items.firstOrNull()
             ?: throw MotionPhotoParseException("The Container directory is empty.")
-        val primaryEndOffset = calculatePrimaryEndOffset(sourceBytes.size, xmpSummary.items)
-        if (primaryEndOffset !in 1 until sourceBytes.size) {
-            throw MotionPhotoParseException(
-                "The primary image length calculated from the Container directory is invalid.",
-            )
+        val primaryEnd = calculatePrimaryEndOffset(sourceSize, xmpSummary.items)
+        if (primaryEnd <= 0L || primaryEnd >= sourceSize) {
+            throw MotionPhotoParseException("The primary image length calculated from the Container directory is invalid.")
         }
-
-        val imageMimeType = primaryItem.mimeType ?: MotionPhotoMimeSniffer.inferPrimaryMime(sourceBytes)
         val image = BinarySegment(
-            bytes = sourceBytes.copyOfRange(0, primaryEndOffset),
-            mimeType = imageMimeType,
-            startOffset = 0,
-            endOffset = primaryEndOffset,
+            sourceFile = sourceFile,
+            mimeType = primary.mimeType ?: inferPrimaryMime(sourceFile),
+            startOffset = 0L,
+            endOffset = primaryEnd,
         )
         validatePrimaryImage(image)
 
-        val extractedItems = extractSecondaryItems(sourceBytes, xmpSummary.items, primaryEndOffset)
-        val rawVideoSegment = extractedItems.lastOrNull {
+        val secondary = extractSecondaryItems(sourceFile, sourceSize, xmpSummary.items, primaryEnd)
+        val rawVideo = secondary.lastOrNull {
             it.item.semantic.equals("MotionPhoto", ignoreCase = true)
         }?.segment ?: throw MotionPhotoParseException(
             "No MotionPhoto video item was found in the Container directory.",
         )
-        val video = normalizeVideoSegment(rawVideoSegment)
+        val video = normalizeVideoSegment(rawVideo)
         validateVideoSegment(video)
-
-        val gainMap = extractedItems.firstOrNull {
+        val gainMap = secondary.firstOrNull {
             it.item.semantic.equals("GainMap", ignoreCase = true)
         }?.segment
         gainMap?.let(::validateGainMapSegment)
-
-        return Extraction(
-            image = image,
-            video = video,
-            gainMap = gainMap,
-            metadataSource = MetadataSource.CONTAINER_DIRECTORY,
-        )
+        return Extraction(image, video, gainMap, MetadataSource.CONTAINER_DIRECTORY)
     }
 
-    private fun extractFromLegacyMicroVideoOffset(
-        sourceBytes: ByteArray,
+    private fun extractFromLegacyOffset(
+        sourceFile: File,
+        sourceSize: Long,
         xmpSummary: XmpSummary,
-        legacyOffset: Int,
+        legacyOffset: Long,
     ): Extraction {
-        val videoStartOffset = sourceBytes.size - legacyOffset
-        if (videoStartOffset !in 1 until sourceBytes.size) {
-            throw MotionPhotoParseException(
-                "The legacy MicroVideoOffset points outside the file bounds.",
-            )
+        val videoStart = sourceSize - legacyOffset
+        if (videoStart <= 0L || videoStart >= sourceSize) {
+            throw MotionPhotoParseException("The legacy MicroVideoOffset points outside the file bounds.")
         }
-
-        val imageMimeType = xmpSummary.items.firstOrNull()?.mimeType
-            ?: MotionPhotoMimeSniffer.inferPrimaryMime(sourceBytes)
-        val primaryEndOffset = determinePrimaryEndOffset(sourceBytes, imageMimeType, videoStartOffset)
-        val image = BinarySegment(
-            bytes = sourceBytes.copyOfRange(0, primaryEndOffset),
-            mimeType = imageMimeType,
-            startOffset = 0,
-            endOffset = primaryEndOffset,
-        )
-        val video = BinarySegment(
-            bytes = sourceBytes.copyOfRange(videoStartOffset, sourceBytes.size),
-            mimeType = "video/mp4",
-            startOffset = videoStartOffset,
-            endOffset = sourceBytes.size,
-        )
-
+        val imageMime = xmpSummary.items.firstOrNull()?.mimeType ?: inferPrimaryMime(sourceFile)
+        val primaryEnd = determinePrimaryEndOffset(sourceFile, imageMime, videoStart)
+        val image = BinarySegment(sourceFile, imageMime, 0L, primaryEnd)
+        val video = BinarySegment(sourceFile, "video/mp4", videoStart, sourceSize)
         validatePrimaryImage(image)
         validateVideoSegment(video)
-
-        return Extraction(
-            image = image,
-            video = video,
-            gainMap = null,
-            metadataSource = MetadataSource.LEGACY_MICRO_VIDEO_OFFSET,
-        )
+        return Extraction(image, video, null, MetadataSource.LEGACY_MICRO_VIDEO_OFFSET)
     }
 
-    private fun calculatePrimaryEndOffset(
-        sourceSize: Int,
-        items: List<com.imagedge.camera.motionphoto.ContainerItem>,
-    ): Int {
-        val secondaryLengthSum = items.drop(1).sumOf { maxOf(it.length ?: 0, 0) }
-        val paddingSum = items.sumOf { maxOf(it.padding ?: 0, 0) }
-        return sourceSize - secondaryLengthSum - paddingSum
+    private fun calculatePrimaryEndOffset(sourceSize: Long, items: List<ContainerItem>): Long {
+        val secondaryLength = checkedSum(items.drop(1).map { nonNegative(it.length, "Length") })
+        val padding = checkedSum(items.map { nonNegative(it.padding, "Padding") })
+        return try {
+            Math.subtractExact(Math.subtractExact(sourceSize, secondaryLength), padding)
+        } catch (_: ArithmeticException) {
+            throw MotionPhotoParseException("The Container directory size fields overflow.")
+        }
     }
 
     private fun extractSecondaryItems(
-        sourceBytes: ByteArray,
-        items: List<com.imagedge.camera.motionphoto.ContainerItem>,
-        primaryEndOffset: Int,
+        sourceFile: File,
+        sourceSize: Long,
+        items: List<ContainerItem>,
+        primaryEnd: Long,
     ): List<ExtractedItem> {
-        var cursor = primaryEndOffset + (items.firstOrNull()?.padding ?: 0)
-        var previousSegment: BinarySegment? = null
-        val extractedItems = mutableListOf<ExtractedItem>()
-
-        for (item in items.drop(1)) {
-            val length = item.length
-                ?: throw MotionPhotoParseException("A secondary item is missing Length.")
-            val segment = if (length == 0) {
-                previousSegment ?: throw MotionPhotoParseException(
-                    "A shared resource with Length=0 has no previous item to reuse.",
-                )
-            } else {
-                // 用 Long 加法：Int 溢出会让畸形的大 Length 绕过边界检查
-                val endOffsetLong = cursor.toLong() + length.toLong()
-                if (length < 0 || cursor !in 0 until sourceBytes.size || endOffsetLong > sourceBytes.size) {
-                    throw MotionPhotoParseException("A secondary item exceeds the file bounds.")
+        var cursor = checkedAdd(primaryEnd, nonNegative(items.firstOrNull()?.padding, "Padding"))
+        var previous: BinarySegment? = null
+        return buildList {
+            for (item in items.drop(1)) {
+                val length = item.length
+                    ?: throw MotionPhotoParseException("A secondary item is missing Length.")
+                val segment = if (length == 0L) {
+                    previous ?: throw MotionPhotoParseException(
+                        "A shared resource with Length=0 has no previous item to reuse.",
+                    )
+                } else {
+                    if (length < 0L || cursor < 0L || cursor >= sourceSize) {
+                        throw MotionPhotoParseException("A secondary item exceeds the file bounds.")
+                    }
+                    val end = checkedAdd(cursor, length)
+                    if (end > sourceSize) {
+                        throw MotionPhotoParseException("A secondary item exceeds the file bounds.")
+                    }
+                    BinarySegment(
+                        sourceFile = sourceFile,
+                        mimeType = item.mimeType ?: inferMimeAt(sourceFile, cursor),
+                        startOffset = cursor,
+                        endOffset = end,
+                    ).also {
+                        previous = it
+                        cursor = checkedAdd(end, nonNegative(item.padding, "Padding"))
+                        if (cursor > sourceSize) {
+                            throw MotionPhotoParseException("A secondary item padding exceeds the file bounds.")
+                        }
+                    }
                 }
-                val endOffset = endOffsetLong.toInt()
-                BinarySegment(
-                    bytes = sourceBytes.copyOfRange(cursor, endOffset),
-                    mimeType = item.mimeType ?: MotionPhotoMimeSniffer.inferSecondaryMime(sourceBytes, cursor),
-                    startOffset = cursor,
-                    endOffset = endOffset,
-                ).also {
-                    previousSegment = it
-                    cursor = endOffset + (item.padding ?: 0)
-                }
+                add(ExtractedItem(item, segment))
             }
-            extractedItems += ExtractedItem(item = item, segment = segment)
         }
+    }
 
-        return extractedItems
+    private fun normalizeVideoSegment(segment: BinarySegment): BinarySegment {
+        if (looksLikeIsoAt(segment.sourceFile, segment.startOffset)) return segment
+        val ftyp = findPattern(
+            segment.sourceFile,
+            segment.startOffset,
+            segment.endOffset,
+            "ftyp".toByteArray(StandardCharsets.US_ASCII),
+        ) ?: throw MotionPhotoParseException("No video container start was found inside the MotionPhoto item.")
+        val isoStart = ftyp - 4L
+        if (isoStart < segment.startOffset || !looksLikeIsoAt(segment.sourceFile, isoStart)) {
+            throw MotionPhotoParseException("The video boundaries inside the MotionPhoto item are invalid.")
+        }
+        val footer = findPattern(
+            segment.sourceFile,
+            isoStart,
+            segment.endOffset,
+            "SEFH".toByteArray(StandardCharsets.US_ASCII),
+        )
+        val isoEnd = footer?.takeIf { it > isoStart } ?: segment.endOffset
+        return segment.copy(startOffset = isoStart, endOffset = isoEnd)
     }
 
     private fun validatePrimaryImage(segment: BinarySegment) {
-        if (segment.mimeType.contains("jpeg", ignoreCase = true) && !looksLikeJpeg(segment.bytes, 0)) {
+        if (segment.mimeType.contains("jpeg", true) && !looksLikeJpegAt(segment.sourceFile, segment.startOffset)) {
             throw MotionPhotoParseException("The extracted primary image is not a valid JPEG.")
         }
     }
 
     private fun validateVideoSegment(segment: BinarySegment) {
-        if (!looksLikeIsoBaseMedia(segment.bytes, 0)) {
-            throw MotionPhotoParseException(
-                "The located video segment is not a recognizable MP4/MOV container.",
-            )
+        if (!looksLikeIsoAt(segment.sourceFile, segment.startOffset)) {
+            throw MotionPhotoParseException("The located video segment is not a recognizable MP4/MOV container.")
         }
-    }
-
-    private fun normalizeVideoSegment(segment: BinarySegment): BinarySegment {
-        if (looksLikeIsoBaseMedia(segment.bytes, 0)) {
-            return segment
-        }
-
-        val isoStart = findIsoBaseMediaStart(segment.bytes)
-            ?: throw MotionPhotoParseException(
-                "No video container start was found inside the MotionPhoto item.",
-            )
-        val samsungFooterStart = findSamsungFooterStart(segment.bytes)
-        val isoEnd = samsungFooterStart?.takeIf { it > isoStart } ?: segment.bytes.size
-        if (isoEnd <= isoStart) {
-            throw MotionPhotoParseException("The video boundaries inside the MotionPhoto item are invalid.")
-        }
-
-        return BinarySegment(
-            bytes = segment.bytes.copyOfRange(isoStart, isoEnd),
-            mimeType = segment.mimeType,
-            startOffset = segment.startOffset + isoStart,
-            endOffset = segment.startOffset + isoEnd,
-        )
     }
 
     private fun validateGainMapSegment(segment: BinarySegment) {
-        if (segment.mimeType.contains("jpeg", ignoreCase = true) && !looksLikeJpeg(segment.bytes, 0)) {
+        if (segment.mimeType.contains("jpeg", true) && !looksLikeJpegAt(segment.sourceFile, segment.startOffset)) {
             throw MotionPhotoParseException("The GainMap segment is not a valid JPEG.")
         }
     }
 
-    private fun determinePrimaryEndOffset(
-        sourceBytes: ByteArray,
-        imageMimeType: String,
-        upperBoundExclusive: Int,
-    ): Int {
-        if (imageMimeType.contains("jpeg", ignoreCase = true) || looksLikeJpeg(sourceBytes, 0)) {
-            return findJpegEndOffset(sourceBytes, 0, upperBoundExclusive) ?: upperBoundExclusive
+    private fun determinePrimaryEndOffset(file: File, mime: String, upperBound: Long): Long {
+        if (mime.contains("jpeg", true) || looksLikeJpegAt(file, 0L)) {
+            return findJpegEndOffset(file, upperBound) ?: upperBound
         }
-        return upperBoundExclusive
+        return upperBound
     }
 
-    private fun findJpegEndOffset(
-        sourceBytes: ByteArray,
-        startOffset: Int,
-        upperBoundExclusive: Int,
-    ): Int? {
-        // 按 JPEG marker 结构逐段跳转定位顶层 EOI：
-        // 裸扫 0xFF 0xD9 会被 EXIF 内嵌缩略图 / ICC 等负载中的字节误伤（主图截断在头部）
-        if (startOffset + 2 > upperBoundExclusive) return null
-        if (sourceBytes[startOffset] != 0xFF.toByte() || sourceBytes[startOffset + 1] != 0xD8.toByte()) {
-            return null
-        }
-        var offset = startOffset + 2
-        while (offset + 1 < upperBoundExclusive) {
-            if (sourceBytes[offset] != 0xFF.toByte()) return null
-            val marker = sourceBytes[offset + 1].toInt() and 0xFF
-            when {
-                marker == 0xFF -> offset += 1                    // 填充字节
-                marker == 0x00 -> return null                    // 段结构中非法（填充只出现在扫描数据里）
-                marker == 0xD9 -> return offset + 2              // 顶层 EOI
-                marker == 0x01 || marker == 0xD8 || marker in 0xD0..0xD7 -> offset += 2  // 独立标记
-                marker == 0xDA -> {                              // SOS：长度头 + 熵编码数据
-                    if (offset + 4 > upperBoundExclusive) return null
-                    val headerLen = ((sourceBytes[offset + 2].toInt() and 0xFF) shl 8) or
-                        (sourceBytes[offset + 3].toInt() and 0xFF)
-                    var p = offset + 2 + headerLen
-                    if (headerLen < 2 || p > upperBoundExclusive) return null
-                    var nextMarker = -1
-                    while (p + 1 < upperBoundExclusive) {
-                        val b = sourceBytes[p].toInt() and 0xFF
-                        val n = sourceBytes[p + 1].toInt() and 0xFF
-                        // FF00 是字节填充、FFD0-D7 是重启标记：都不是段边界
-                        if (b == 0xFF && n != 0x00 && n !in 0xD0..0xD7) {
-                            nextMarker = p
-                            break
+    /** JPEG marker 结构流式扫描；不会把压缩像素数据放入 ByteArray。 */
+    private fun findJpegEndOffset(file: File, upperBound: Long): Long? =
+        RandomAccessFile(file, "r").use { raf ->
+            if (upperBound < 2L || raf.readUnsignedByte() != 0xFF || raf.readUnsignedByte() != 0xD8) {
+                return@use null
+            }
+            var offset = 2L
+            while (offset + 1L < upperBound) {
+                raf.seek(offset)
+                if (raf.readUnsignedByte() != 0xFF) return@use null
+                val marker = raf.readUnsignedByte()
+                when {
+                    marker == 0xFF -> offset += 1L
+                    marker == 0x00 -> return@use null
+                    marker == 0xD9 -> return@use offset + 2L
+                    marker == 0x01 || marker == 0xD8 || marker in 0xD0..0xD7 -> offset += 2L
+                    marker == 0xDA -> {
+                        if (offset + 4L > upperBound) return@use null
+                        val length = raf.readUnsignedShort()
+                        if (length < 2) return@use null
+                        var cursor = offset + 2L + length
+                        if (cursor > upperBound) return@use null
+                        var previousWasFf = false
+                        var found = -1L
+                        raf.seek(cursor)
+                        while (cursor < upperBound) {
+                            val current = raf.readUnsignedByte()
+                            if (previousWasFf && current != 0x00 && current !in 0xD0..0xD7) {
+                                found = cursor - 1L
+                                break
+                            }
+                            previousWasFf = current == 0xFF
+                            cursor++
                         }
-                        p++
+                        if (found < 0L) return@use null
+                        offset = found
                     }
-                    if (nextMarker < 0) return null
-                    offset = nextMarker
+                    else -> {
+                        if (offset + 4L > upperBound) return@use null
+                        val length = raf.readUnsignedShort()
+                        if (length < 2) return@use null
+                        offset = checkedAdd(offset + 2L, length.toLong())
+                        if (offset > upperBound) return@use null
+                    }
                 }
-                else -> {                                        // 长度前缀段：整体跳过
-                    if (offset + 4 > upperBoundExclusive) return null
-                    val len = ((sourceBytes[offset + 2].toInt() and 0xFF) shl 8) or
-                        (sourceBytes[offset + 3].toInt() and 0xFF)
-                    if (len < 2) return null
-                    offset += 2 + len
+            }
+            null
+        }
+
+    private fun inferPrimaryMime(file: File): String =
+        MotionPhotoMimeSniffer.inferPrimaryMime(readAt(file, 0L, 16))
+
+    private fun inferMimeAt(file: File, offset: Long): String {
+        val header = readAt(file, offset, 16)
+        return when {
+            looksLikeJpeg(header, 0) -> "image/jpeg"
+            looksLikeIsoBaseMedia(header, 0) -> inferIsoBaseMediaMime(header)
+            else -> "application/octet-stream"
+        }
+    }
+
+    private fun looksLikeJpegAt(file: File, offset: Long): Boolean =
+        looksLikeJpeg(readAt(file, offset, 2), 0)
+
+    private fun looksLikeIsoAt(file: File, offset: Long): Boolean =
+        looksLikeIsoBaseMedia(readAt(file, offset, 12), 0)
+
+    private fun readAt(file: File, offset: Long, count: Int): ByteArray =
+        RandomAccessFile(file, "r").use { raf ->
+            if (offset < 0L || offset >= raf.length()) return@use ByteArray(0)
+            raf.seek(offset)
+            val result = ByteArray(minOf(count.toLong(), raf.length() - offset).toInt())
+            raf.readFully(result)
+            result
+        }
+
+    private fun findPattern(file: File, start: Long, end: Long, pattern: ByteArray): Long? {
+        if (pattern.isEmpty() || start < 0L || end <= start) return null
+        RandomAccessFile(file, "r").use { raf ->
+            raf.seek(start)
+            val buffer = ByteArray(64 * 1024)
+            var absolute = start
+            var matched = 0
+            while (absolute < end) {
+                val read = raf.read(buffer, 0, minOf(buffer.size.toLong(), end - absolute).toInt())
+                if (read <= 0) break
+                for (index in 0 until read) {
+                    val byte = buffer[index]
+                    if (byte == pattern[matched]) {
+                        matched++
+                        if (matched == pattern.size) {
+                            return absolute + index - pattern.size + 1L
+                        }
+                    } else {
+                        matched = if (byte == pattern[0]) 1 else 0
+                    }
                 }
+                absolute += read
             }
         }
         return null
     }
 
-    private fun findIsoBaseMediaStart(sourceBytes: ByteArray): Int? {
-        for (offset in 0..<(sourceBytes.size - 8).coerceAtLeast(0)) {
-            if (looksLikeIsoBaseMedia(sourceBytes, offset)) {
-                return offset
-            }
-        }
-        return null
+    private fun nonNegative(value: Long?, field: String): Long {
+        val actual = value ?: 0L
+        if (actual < 0L) throw MotionPhotoParseException("A Container $field value is negative.")
+        return actual
     }
 
-    private fun findSamsungFooterStart(sourceBytes: ByteArray): Int? {
-        return indexOfSubarray(sourceBytes, "SEFH".toByteArray(StandardCharsets.US_ASCII))
+    private fun checkedSum(values: List<Long>): Long = values.fold(0L, ::checkedAdd)
+
+    private fun checkedAdd(left: Long, right: Long): Long = try {
+        Math.addExact(left, right)
+    } catch (_: ArithmeticException) {
+        throw MotionPhotoParseException("The Container directory size fields overflow.")
     }
 }

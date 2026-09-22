@@ -186,7 +186,7 @@ class ExifFrameViewModel @Inject constructor(
      * 完整通道再补 EXIF + 1600px 基准图 + 实况检测。
      */
     fun onImagePicked(uri: Uri) {
-        AppLog.w("exifframe", "picked: $uri")
+        AppLog.i("exifframe", "已选择待处理媒体")
         // 选中即取持久化读权限（系统照片选择器授予的临时权限在进程重启后会失效）
         runCatching {
             context.contentResolver.takePersistableUriPermission(

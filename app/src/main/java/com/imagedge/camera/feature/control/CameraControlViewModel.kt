@@ -381,6 +381,18 @@ class CameraControlViewModel @Inject constructor(
         }
     }
 
+    /** 离开遥控页时终止 BLE 扫描/配对/GATT，不断开仍供相册使用的 Wi-Fi/PTP 会话。 */
+    fun leaveScreen() {
+        bleShutter.disconnect()
+        _state.update { it.copy(isConnected = false, taking = false) }
+    }
+
+    override fun onCleared() {
+        // UI 正常导航会调 leaveScreen；此处覆盖进程内非正常销毁路径。
+        bleShutter.disconnect()
+        super.onCleared()
+    }
+
     /** 设置 ISO（PTP DeviceProp 0xD21E，接收相机原始值：低 24 位 = ISO，0x00FFFFFF = Auto） */
     fun setIso(raw: Long) {
         _state.update { it.copy(isoRaw = raw) }

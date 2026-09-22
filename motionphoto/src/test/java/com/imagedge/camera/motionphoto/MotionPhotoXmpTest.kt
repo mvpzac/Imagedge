@@ -4,6 +4,8 @@ import com.imagedge.camera.motionphoto.internal.xmp.decodeXmp
 import com.imagedge.camera.motionphoto.internal.xmp.extractAllXmpPackets
 import com.imagedge.camera.motionphoto.internal.xmp.extractPreferredMotionPhotoXmp
 import com.imagedge.camera.motionphoto.internal.xmp.looksLikeMotionPhotoXmp
+import com.imagedge.camera.motionphoto.internal.xmp.parseMotionPhotoXmp
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -53,5 +55,27 @@ class MotionPhotoXmpTest {
         assertEquals("abc", decodeXmp(utf8Bom))
         assertEquals("ab", decodeXmp("a\u0000b".toByteArray()))
         assertEquals("xyz", decodeXmp("xyz".toByteArray()))
+    }
+
+    @Test
+    fun `parses offsets larger than signed int without overflow`() {
+        val xmp = packet(
+            """
+            <rdf:Description xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                xmlns:GCamera="http://ns.google.com/photos/1.0/camera/"
+                GCamera:MotionPhoto="1"
+                GCamera:MicroVideoOffset="4294967296" />
+            """.trimIndent(),
+        )
+
+        assertEquals(4_294_967_296L, parseMotionPhotoXmp(xmp).microVideoOffset)
+    }
+
+    @Test
+    fun `rejects document type declarations`() {
+        val xmp = "<!DOCTYPE x [<!ENTITY leak SYSTEM 'file:///etc/passwd'>]>" +
+            packet("<rdf:A>&leak;</rdf:A>")
+
+        assertThrows(IllegalArgumentException::class.java) { parseMotionPhotoXmp(xmp) }
     }
 }

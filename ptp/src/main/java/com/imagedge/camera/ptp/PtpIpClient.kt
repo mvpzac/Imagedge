@@ -39,6 +39,9 @@ private const val EVENT_POLL_TIMEOUT_MS = 3_000
  */
 private const val MAX_OBJECT_HANDLES = 100_000
 
+/** A camera normally exposes one or two storages; keep malformed counts from allocating freely. */
+private const val MAX_STORAGE_IDS = 32
+
 /**
  * 走内存缓冲的事务数据上限（P2-3）。
  * 内存路径只承接小对象（缩略图/属性表/对象信息，通常 < 1MB）；
@@ -131,7 +134,7 @@ class PtpIpClient(
      * 非 @Synchronized：只会被 [connect] 调用，锁在 [connect] 上。
      */
     private fun connectHandshake(useEventConnection: Boolean) {
-        AppLog.i(TAG, "连接 PTP/IP $host:$port（GUID=${guid.joinToString("") { "%02X".format(it) }}，事件连接=$useEventConnection）")
+        AppLog.i(TAG, "连接 PTP/IP（事件连接=$useEventConnection）")
 
         // ① 命令 socket
         val cmd = Socket()
@@ -458,7 +461,7 @@ class PtpIpClient(
             sendPacket(DataPacket(tid, payload))
             sendPacket(EndData(tid, ByteArray(0)))
 
-            val response = readOperationResponse()
+            val response = readOperationResponse(tid)
             if (response.responseCode != PtpResponseCode.OK) {
                 AppLog.w(
                     TAG,
@@ -474,11 +477,30 @@ class PtpIpClient(
     }
 
     /** 读取命令连接上的 OperationResponse（跳过非响应包；与 executeTransaction 同模式） */
-    private fun readOperationResponse(): OperationResponse {
+    private fun readOperationResponse(expectedTransactionId: Long): OperationResponse {
         while (true) {
             when (val packet = readPacket()) {
-                is OperationResponse -> return packet
-                else -> continue
+                is OperationResponse -> {
+                    requireTransactionId(
+                        packet.transactionId,
+                        expectedTransactionId,
+                        "OperationResponse",
+                    )
+                    return packet
+                }
+                is StartData -> {
+                    requireTransactionId(packet.transactionId, expectedTransactionId, "StartData")
+                    throw PtpMalformedPacketException("Unexpected StartData while waiting for response")
+                }
+                is DataPacket -> {
+                    requireTransactionId(packet.transactionId, expectedTransactionId, "Data")
+                    throw PtpMalformedPacketException("Unexpected Data while waiting for response")
+                }
+                is EndData -> {
+                    requireTransactionId(packet.transactionId, expectedTransactionId, "EndData")
+                    throw PtpMalformedPacketException("Unexpected EndData while waiting for response")
+                }
+                else -> throw PtpMalformedPacketException("Unexpected command packet while waiting for response")
             }
         }
     }
@@ -506,7 +528,13 @@ class PtpIpClient(
     fun getStorageIds(): List<Long> {
         val data = executeDataTransaction(PtpOperationCode.GET_STORAGE_IDS)
         val buffer = PtpBuffer.reader(data)
-        val count = buffer.readUInt32().toInt()
+        val countRaw = buffer.readUInt32()
+        if (countRaw > MAX_STORAGE_IDS.toLong() || countRaw > buffer.remaining / 4L) {
+            throw PtpMalformedPacketException(
+                "GetStorageIds returned invalid count: $countRaw (remaining=${buffer.remaining})"
+            )
+        }
+        val count = countRaw.toInt()
         val ids = (0 until count).map { buffer.readUInt32() }
         AppLog.i(TAG, "存储数量：$count（${ids.joinToString()}）")
         return ids
@@ -522,14 +550,15 @@ class PtpIpClient(
             longArrayOf(storageId, 0, parent)
         )
         val buffer = PtpBuffer.reader(data)
-        val count = buffer.readUInt32().toInt()
+        val countRaw = buffer.readUInt32()
         // P2-2：count 来自相机且无符号 32 位回读，畸形值（流错位时常见 0xFFFFFFFF → -1）
         // 会让 `(0 until count).map` 分配 42 亿元素或直接抛 NegativeArraySizeException。
-        if (count < 0 || count > MAX_OBJECT_HANDLES) {
+        if (countRaw > MAX_OBJECT_HANDLES.toLong() || countRaw > buffer.remaining / 4L) {
             throw PtpMalformedPacketException(
-                "GetObjectHandles 返回非法数量：$count（上限 $MAX_OBJECT_HANDLES）——流可能已错位"
+                "GetObjectHandles 返回非法数量：$countRaw（上限 $MAX_OBJECT_HANDLES，剩余 ${buffer.remaining} 字节）——流可能已错位"
             )
         }
+        val count = countRaw.toInt()
         AppLog.i(TAG, "存储 $storageId 对象数量：$count（parent=0x${parent.toString(16)}）")
         return (0 until count).map { buffer.readUInt32() }
     }
@@ -678,7 +707,10 @@ class PtpIpClient(
         // 读响应（可能先收到 StartData/Data/EndData，再是 OperationResponse；无数据阶段直接是 Response）
         while (true) {
             when (val packet = readPacket()) {
-                is OperationResponse -> return packet
+                is OperationResponse -> {
+                    requireTransactionId(packet.transactionId, tid, "OperationResponse")
+                    return packet
+                }
                 else -> continue
             }
         }
@@ -700,14 +732,33 @@ class PtpIpClient(
 
         var dataLength = 0L
         var received = 0L
+        var started = false
+        var ended = false
         val memoryBuffer = if (output == null) PtpBuffer.writer() else null
 
         while (true) {
             when (val packet = readPacket()) {
                 is StartData -> {
+                    requireTransactionId(packet.transactionId, tid, "StartData")
+                    if (started) throw PtpMalformedPacketException("Duplicate StartData for transaction $tid")
+                    if (packet.dataLength < 0) {
+                        throw PtpMalformedPacketException("Negative data length for transaction $tid")
+                    }
+                    if (output == null && packet.dataLength > MAX_IN_MEMORY_BYTES) {
+                        throw PtpMalformedPacketException(
+                            "事务 0x${operationCode.toString(16)} 声明长度超出内存上限" +
+                                "（${packet.dataLength} > $MAX_IN_MEMORY_BYTES）"
+                        )
+                    }
                     dataLength = packet.dataLength
+                    started = true
                 }
                 is DataPacket -> {
+                    requireTransactionId(packet.transactionId, tid, "Data")
+                    if (!started || ended) {
+                        throw PtpMalformedPacketException("Data outside active data phase for transaction $tid")
+                    }
+                    ensureTransactionBytes(operationCode, received, packet.payload.size, dataLength, output == null)
                     received += packet.payload.size
                     if (output != null) {
                         output.write(packet.payload)
@@ -724,6 +775,11 @@ class PtpIpClient(
                     onProgress.onDataLoaded(received, if (dataLength > 0) dataLength else received)
                 }
                 is EndData -> {
+                    requireTransactionId(packet.transactionId, tid, "EndData")
+                    if (!started || ended) {
+                        throw PtpMalformedPacketException("Unexpected EndData for transaction $tid")
+                    }
+                    ensureTransactionBytes(operationCode, received, packet.payload.size, dataLength, output == null)
                     received += packet.payload.size
                     if (packet.payload.isNotEmpty()) {
                         if (output != null) {
@@ -732,8 +788,11 @@ class PtpIpClient(
                             memoryBuffer?.writeBytes(packet.payload)
                         }
                     }
+                    ended = true
+                    onProgress.onDataLoaded(received, if (dataLength > 0) dataLength else received)
                 }
                 is OperationResponse -> {
+                    requireTransactionId(packet.transactionId, tid, "OperationResponse")
                     if (packet.responseCode != PtpResponseCode.OK) {
                         AppLog.e(
                             TAG,
@@ -744,11 +803,51 @@ class PtpIpClient(
                             PtpResponseCode.description(packet.responseCode)
                         )
                     }
+                    if (started && !ended) {
+                        throw PtpMalformedPacketException("Response arrived before EndData for transaction $tid")
+                    }
+                    if (started && received != dataLength) {
+                        throw PtpMalformedPacketException(
+                            "事务 0x${operationCode.toString(16)} 长度不匹配：received=$received, declared=$dataLength"
+                        )
+                    }
                     output?.flush()
                     return memoryBuffer?.toByteArray() ?: ByteArray(0)
                 }
                 else -> continue
             }
+        }
+    }
+
+    private fun requireTransactionId(actual: Long, expected: Long, packetName: String) {
+        if (actual != expected) {
+            throw PtpMalformedPacketException(
+                "$packetName transaction id mismatch: expected=$expected, actual=$actual"
+            )
+        }
+    }
+
+    private fun ensureTransactionBytes(
+        operationCode: Int,
+        received: Long,
+        incoming: Int,
+        declared: Long,
+        inMemory: Boolean,
+    ) {
+        val next = received + incoming.toLong()
+        if (next < received) {
+            throw PtpMalformedPacketException("Transaction byte count overflow")
+        }
+        if (next > declared) {
+            throw PtpMalformedPacketException(
+                "事务 0x${operationCode.toString(16)} 数据超过声明长度（$next > $declared）"
+            )
+        }
+        if (inMemory && next > MAX_IN_MEMORY_BYTES) {
+            throw PtpMalformedPacketException(
+                "事务 0x${operationCode.toString(16)} 数据超出内存上限" +
+                    "（$next > $MAX_IN_MEMORY_BYTES）——大对象必须走流式输出"
+            )
         }
     }
 

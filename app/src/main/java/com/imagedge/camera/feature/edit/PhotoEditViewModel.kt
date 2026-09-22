@@ -21,7 +21,10 @@ import com.imagedge.camera.ui.feedback.Haptics
 import com.imagedge.camera.ui.feedback.SnackbarController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,6 +40,10 @@ import androidx.core.graphics.createBitmap
 import androidx.core.graphics.scale
 import androidx.core.net.toUri
 import java.io.File
+import java.util.Collections
+import java.util.IdentityHashMap
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.coroutineContext
 import javax.inject.Inject
 
 /**
@@ -188,7 +195,12 @@ class PhotoEditViewModel @Inject constructor(
      * 或直接抛 ConcurrentModificationException。
      */
     private val lutCache = java.util.concurrent.ConcurrentHashMap<String, CubeLut>()
+    private var loadJob: Job? = null
     private var applyJob: Job? = null
+    private var thumbnailJob: Job? = null
+    private var exportJob: Job? = null
+    private val sourceGeneration = AtomicLong(0)
+    private val renderGeneration = AtomicLong(0)
 
     /** 滤镜处理协程无挂起点、cancel 停不住；用互斥串行化，防新旧任务并发践踏复用缓冲 */
     private val applyMutex = Mutex()
@@ -203,9 +215,6 @@ class PhotoEditViewModel @Inject constructor(
 
     /** 缩略图渲染源（128px 级的小图，供每个滤镜生成预览） */
     private var thumbSource: Bitmap? = null
-
-    /** 当前编辑的源图 URI（导出时需要重新按全分辨率解码） */
-    private var sourceUri: Uri? = null
 
     /**
      * 预览处理源（降采样副本）。交互式滤镜/强度调整在它上面跑，比全分辨率快约 6 倍；
@@ -274,29 +283,65 @@ class PhotoEditViewModel @Inject constructor(
 
     /** 选择图片（系统图片选择器返回的 content uri） */
     fun loadPicked(uri: Uri) {
-        sourceUri = uri
-        viewModelScope.launch(Dispatchers.IO) {
+        val generation = sourceGeneration.incrementAndGet()
+        loadJob?.cancel()
+        thumbnailJob?.cancel()
+        applyJob?.cancel()
+        renderGeneration.incrementAndGet()
+        loadJob = viewModelScope.launch(Dispatchers.IO) {
+            var decoded: Bitmap? = null
+            var preview: Bitmap? = null
+            var thumb: Bitmap? = null
+            var published = false
             try {
-                val bitmap = decodeFromUri(uri, LUT_DECODE_MAX_DIM) ?: run {
-                    _state.update { it.copy(message = "图片解码失败（格式不支持或文件不可读）") }
+                decoded = decodeFromUri(uri, LUT_DECODE_MAX_DIM) ?: run {
+                    if (sourceGeneration.get() == generation) {
+                        _state.update { it.copy(message = "图片解码失败（格式不支持或文件不可读）") }
+                    }
                     return@launch
                 }
-                previewSource = createPreviewSource(bitmap)
-                thumbSource = createScaled(bitmap, LUT_THUMB_MAX_DIM)
+                coroutineContext.ensureActive()
+                preview = createPreviewSource(decoded!!)
+                thumb = createScaled(decoded!!, LUT_THUMB_MAX_DIM)
+                coroutineContext.ensureActive()
+                if (sourceGeneration.get() != generation) return@launch
+
+                val previousState = _state.value
+                val previousPreview = previewSource
+                val previousThumb = thumbSource
+                previewSource = preview
+                thumbSource = thumb
+                convPixels = null
+                convRgba = null
+                convOutPixels = null
                 _state.update {
                     PhotoEditState(
                         sourceUri = uri,
-                        original = bitmap,
+                        original = decoded,
                         strength = it.strength,
                         adjust = it.adjust,
                         thumbnails = emptyMap()
                     )
                 }
-                applyCurrentFilter()
-                buildThumbnails()
+                published = true
+                releaseBitmapsLater(
+                    buildList {
+                        addAll(bitmapsIn(previousState))
+                        previousPreview?.let(::add)
+                        previousThumb?.let(::add)
+                    }
+                )
+                applyCurrentFilter(generation)
+                buildThumbnails(generation)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                AppLog.w("lut", "选图失败：${e.message}")
-                _state.update { it.copy(message = "选图失败：${e.message}") }
+                if (sourceGeneration.get() == generation) {
+                    AppLog.w("lut", "选图失败：${e.message}")
+                    _state.update { it.copy(message = "选图失败：${e.message}") }
+                }
+            } finally {
+                if (!published) recycleUnique(listOfNotNull(decoded, preview, thumb))
             }
         }
     }
@@ -368,44 +413,62 @@ class PhotoEditViewModel @Inject constructor(
      * 用**用户自己的照片**给每个滤镜渲染一张缩略图（强度取满、不含基础调色）。
      * 结果写进 state，UI 的滤镜条直接显示效果预览。
      */
-    private fun buildThumbnails() {
+    private fun buildThumbnails(expectedGeneration: Long = sourceGeneration.get()) {
         val source = thumbSource ?: return
+        thumbnailJob?.cancel()
         _state.update { it.copy(thumbsLoading = true) }
-        viewModelScope.launch(Dispatchers.Default) {
-            val w = source.width
-            val h = source.height
-            val size = w * h
-            val pixels = IntArray(size)
-            source.getPixels(pixels, 0, w, 0, 0, w, h)
-            val rgba = ByteArray(size * 4)
-            for (i in 0 until size) {
-                val px = pixels[i]
-                rgba[i * 4] = (px shr 16 and 0xFF).toByte()
-                rgba[i * 4 + 1] = (px shr 8 and 0xFF).toByte()
-                rgba[i * 4 + 2] = (px and 0xFF).toByte()
-                rgba[i * 4 + 3] = (px shr 24 and 0xFF).toByte()
-            }
+        thumbnailJob = viewModelScope.launch(Dispatchers.Default) {
             val thumbs = HashMap<String, Bitmap>()
-            // 原图项直接用源缩略图
-            thumbs[FILTER_NONE] = source
-            for (option in _filters.value) {
-                if (option.key == FILTER_NONE) continue
-                val lut = option.lut ?: lutCache[option.key] ?: continue
-                runCatching {
-                    val out = processor.apply(rgba.copyOf(), w, h, lut.data, lut.size, 100, ColorAdjust.NONE)
-                    val bmp = createBitmap(w, h)
-                    val outPixels = IntArray(size)
-                    for (i in 0 until size) {
-                        outPixels[i] = (out[i * 4 + 3].toInt() and 0xFF) shl 24 or
-                            ((out[i * 4].toInt() and 0xFF) shl 16) or
-                            ((out[i * 4 + 1].toInt() and 0xFF) shl 8) or
-                            (out[i * 4 + 2].toInt() and 0xFF)
+            try {
+                val w = source.width
+                val h = source.height
+                val size = w * h
+                val pixels = IntArray(size)
+                source.getPixels(pixels, 0, w, 0, 0, w, h)
+                val rgba = ByteArray(size * 4)
+                for (i in 0 until size) {
+                    val px = pixels[i]
+                    rgba[i * 4] = (px shr 16 and 0xFF).toByte()
+                    rgba[i * 4 + 1] = (px shr 8 and 0xFF).toByte()
+                    rgba[i * 4 + 2] = (px and 0xFF).toByte()
+                    rgba[i * 4 + 3] = (px shr 24 and 0xFF).toByte()
+                }
+                // 原图项直接用源缩略图
+                thumbs[FILTER_NONE] = source
+                val options = _filters.value
+                for (option in options) {
+                    coroutineContext.ensureActive()
+                    if (sourceGeneration.get() != expectedGeneration || thumbSource !== source) return@launch
+                    if (option.key == FILTER_NONE) continue
+                    val lut = option.lut ?: lutCache[option.key] ?: continue
+                    runCatching {
+                        // CpuLutProcessor does not mutate its input; avoid one RGBA copy per LUT.
+                        val out = processor.apply(rgba, w, h, lut.data, lut.size, 100, ColorAdjust.NONE)
+                        val bmp = createBitmap(w, h)
+                        val outPixels = IntArray(size)
+                        for (i in 0 until size) {
+                            outPixels[i] = (out[i * 4 + 3].toInt() and 0xFF) shl 24 or
+                                ((out[i * 4].toInt() and 0xFF) shl 16) or
+                                ((out[i * 4 + 1].toInt() and 0xFF) shl 8) or
+                                (out[i * 4 + 2].toInt() and 0xFF)
+                        }
+                        bmp.setPixels(outPixels, 0, w, 0, 0, w, h)
+                        thumbs[option.key] = bmp
+                    }.onFailure {
+                        if (it is CancellationException) throw it
+                        AppLog.w("lut", "缩略图渲染失败 ${option.label}：${it.message}")
                     }
-                    bmp.setPixels(outPixels, 0, w, 0, 0, w, h)
-                    thumbs[option.key] = bmp
-                }.onFailure { AppLog.w("lut", "缩略图渲染失败 ${option.label}：${it.message}") }
+                }
+                coroutineContext.ensureActive()
+                if (sourceGeneration.get() != expectedGeneration || thumbSource !== source) return@launch
+                val old = _state.value.thumbnails.values.toList()
+                _state.update { it.copy(thumbnails = thumbs, thumbsLoading = false) }
+                releaseBitmapsLater(old)
+            } finally {
+                if (sourceGeneration.get() != expectedGeneration || thumbSource !== source || !coroutineContext.isActive) {
+                    recycleUnique(thumbs.values.filter { it !== source })
+                }
             }
-            _state.update { it.copy(thumbnails = thumbs, thumbsLoading = false) }
         }
     }
 
@@ -462,65 +525,85 @@ class PhotoEditViewModel @Inject constructor(
         }
     }
 
-    private fun applyCurrentFilter() {
-        val original = _state.value.original ?: return
+    private fun applyCurrentFilter(expectedGeneration: Long = sourceGeneration.get()) {
+        val snapshot = _state.value
+        val original = snapshot.original ?: return
         // 预览源优先：交互式处理在降采样副本上跑，比全分辨率快约 6 倍
         val processSource = previewSource ?: original
-        val option = _filters.value.firstOrNull { it.key == _state.value.selectedKey }
+        val option = _filters.value.firstOrNull { it.key == snapshot.selectedKey }
             ?: return
         val lut = option.lut ?: lutCache[option.key]
-        val snapshot = _state.value
         val adjust = snapshot.adjust
         val strength = snapshot.strength
         val crop = snapshot.crop
         val geoSteps = geometrySteps(snapshot)
+        val request = renderGeneration.incrementAndGet()
         applyJob?.cancel()
         _state.update { it.copy(processing = true) }
         applyJob = viewModelScope.launch(Dispatchers.Default) {
+            var geometryOnly: Bitmap? = null
+            var cropped: Bitmap? = null
+            var coloredCropped: Bitmap? = null
+            var coloredFull: Bitmap? = null
+            var published = false
             // 处理全程无挂起点，cancel() 停不住已在跑的任务；用互斥串行化，
             // 避免新旧任务并发读写复用的像素缓冲造成画面错乱
-            applyMutex.withLock {
-                if (!isActive) return@launch
-                try {
+            try {
+                applyMutex.withLock {
+                    coroutineContext.ensureActive()
+                    if (sourceGeneration.get() != expectedGeneration ||
+                        renderGeneration.get() != request || previewSource !== processSource
+                    ) return@withLock
                     // 1) 几何：拉直 → 旋转 → 翻转（**不裁剪**，裁剪模式的底图要用它）
-                    val geometryOnly = if (geoSteps.isEmpty()) {
+                    geometryOnly = if (geoSteps.isEmpty()) {
                         processSource
                     } else {
                         ImagePipeline(geoSteps).renderGeometry(processSource)
                     }
+                    coroutineContext.ensureActive()
                     // 2) 裁剪（坐标基于几何后的画面）
-                    val cropped = if (crop.isFull) {
+                    cropped = if (crop.isFull) {
                         geometryOnly
                     } else {
-                        ImagePipeline(listOf(EditStep.Crop(crop))).renderGeometry(geometryOnly)
+                        ImagePipeline(listOf(EditStep.Crop(crop))).renderGeometry(geometryOnly!!)
                     }
                     // 3) 颜色：调色 + LUT（一次像素遍历）
-                    val coloredCropped = applyPipelineTo(cropped, lut, strength, adjust)
+                    coloredCropped = applyPipelineTo(cropped!!, lut, strength, adjust)
+                    coroutineContext.ensureActive()
                     // 裁剪模式的底图 = 几何 + 颜色（让用户带着最终观感去框选）
-                    val coloredFull = if (cropped === geometryOnly) {
+                    coloredFull = if (cropped === geometryOnly) {
                         coloredCropped
                     } else {
-                        applyPipelineTo(geometryOnly, lut, strength, adjust)
+                        applyPipelineTo(geometryOnly!!, lut, strength, adjust)
                     }
-                    // 中间产物回收（绝不回收 previewSource 本身）
-                    if (cropped !== geometryOnly && cropped !== processSource) runCatching { cropped.recycle() }
-                    if (geometryOnly !== processSource) runCatching { geometryOnly.recycle() }
-                    // 被取消的旧任务不得落结果：否则会把新滤镜的 selectedKey/状态覆盖回去
-                    if (isActive) {
-                        _state.update {
-                            it.copy(
-                                filtered = coloredCropped,
-                                cropBase = coloredFull,
-                                processing = false
-                            )
-                        }
+                    coroutineContext.ensureActive()
+                    if (sourceGeneration.get() != expectedGeneration ||
+                        renderGeneration.get() != request || previewSource !== processSource
+                    ) return@withLock
+                    val oldFiltered = _state.value.filtered
+                    val oldCropBase = _state.value.cropBase
+                    _state.update {
+                        it.copy(
+                            filtered = coloredCropped,
+                            cropBase = coloredFull,
+                            processing = false
+                        )
                     }
-                } catch (e: kotlin.coroutines.cancellation.CancellationException) {
-                    throw e
-                } catch (e: Exception) {
+                    published = true
+                    releaseBitmapsLater(listOfNotNull(oldFiltered, oldCropBase))
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (sourceGeneration.get() == expectedGeneration && renderGeneration.get() == request) {
                     AppLog.w("edit", "渲染失败：${e.message}")
                     _state.update { it.copy(processing = false, message = "处理失败：${e.message}") }
                 }
+            } finally {
+                recycleUnique(
+                    listOfNotNull(cropped, geometryOnly).filter { it !== processSource }
+                )
+                if (!published) recycleUnique(listOfNotNull(coloredCropped, coloredFull))
             }
         }
     }
@@ -713,51 +796,78 @@ class PhotoEditViewModel @Inject constructor(
      *    再提交到相册，并写入 IS_PENDING / DATE_TAKEN。
      */
     fun save() {
-        if (_state.value.original == null) return
-        val uri = sourceUri
+        val editSnapshot = _state.value
+        if (editSnapshot.original == null) return
+        val uri = editSnapshot.sourceUri
         if (uri == null) {
             _state.update { it.copy(message = "源图已失效，请重新选择照片") }
             return
         }
-        if (_state.value.exporting) return
-        viewModelScope.launch {
+        if (exportJob?.isActive == true || editSnapshot.exporting) return
+        val generation = sourceGeneration.get()
+        exportJob = viewModelScope.launch {
             _state.update { it.copy(exporting = true, message = null, saved = false) }
             try {
                 val savedName = withContext(Dispatchers.IO) {
-                    // 1) 全分辨率（或内存允许的最大分辨率）重算
-                    val exportSource = decodeFromUri(uri, exportMaxDim())
-                        ?: throw IllegalStateException("源图解码失败，请重新选择照片")
-                    val option = _filters.value.firstOrNull { it.key == _state.value.selectedKey }
-                    val lut = option?.lut ?: option?.key?.let { lutCache[it] }
-                    val adjust = _state.value.adjust
-                    val strength = _state.value.strength
-                    // 几何（含裁剪）在全分辨率上先做，再按条带调色——
-                    // 导出必须与预览用同一套几何参数，否则「框选的不是导出的」
-                    val snapshot = _state.value
-                    val steps = geometrySteps(snapshot) + EditStep.Crop(snapshot.crop)
-                    val geometryApplied = ImagePipeline(steps).renderGeometry(exportSource)
-                    val rendered = renderFullResolution(geometryApplied, lut, strength, adjust)
-                    if (geometryApplied !== exportSource) runCatching { geometryApplied.recycle() }
-                    runCatching { exportSource.recycle() }
-                    // 2) 写入缓存文件 → 复制 EXIF → 提交相册
-                    val temp = File.createTempFile("lutexport", ".jpg", context.cacheDir)
-                    temp.outputStream().use { out ->
-                        rendered.compress(Bitmap.CompressFormat.JPEG, 96, out)
+                    var exportSource: Bitmap? = null
+                    var geometryApplied: Bitmap? = null
+                    var rendered: Bitmap? = null
+                    var temp: File? = null
+                    try {
+                        // 1) 全分辨率（或内存允许的最大分辨率）重算
+                        val decoded = decodeFromUri(uri, exportMaxDim())
+                            ?: throw IllegalStateException("源图解码失败，请重新选择照片")
+                        exportSource = decoded
+                        coroutineContext.ensureActive()
+                        val option = _filters.value.firstOrNull { it.key == editSnapshot.selectedKey }
+                        val lut = option?.lut ?: option?.key?.let { lutCache[it] }
+                        val adjust = editSnapshot.adjust
+                        val strength = editSnapshot.strength
+                        // 几何（含裁剪）在全分辨率上先做，再按条带调色——
+                        // 导出必须与预览用同一套几何参数，否则「框选的不是导出的」
+                        val steps = geometrySteps(editSnapshot) + EditStep.Crop(editSnapshot.crop)
+                        val transformed = ImagePipeline(steps).renderGeometry(decoded)
+                        geometryApplied = transformed
+                        coroutineContext.ensureActive()
+                        val result = renderFullResolution(transformed, lut, strength, adjust)
+                        rendered = result
+                        coroutineContext.ensureActive()
+
+                        // 2) 写入缓存文件 → 复制 EXIF → 提交相册
+                        temp = File.createTempFile("lutexport", ".jpg", context.cacheDir)
+                        temp.outputStream().use { out ->
+                            check(result.compress(Bitmap.CompressFormat.JPEG, 96, out)) {
+                                "JPEG 编码失败"
+                            }
+                        }
+                        coroutineContext.ensureActive()
+                        copyExif(uri, temp)
+                        coroutineContext.ensureActive()
+                        val name = "IMAGEDGE_EDIT_${System.currentTimeMillis()}.jpg"
+                        commitToGallery(temp, name)
+                        name
+                    } finally {
+                        recycleUnique(listOfNotNull(rendered, geometryApplied, exportSource))
+                        temp?.let { runCatching { it.delete() } }
                     }
-                    rendered.recycle()
-                    copyExif(uri, temp)
-                    val name = "IMAGEDGE_EDIT_${System.currentTimeMillis()}.jpg"
-                    commitToGallery(temp, name)
-                    temp.delete()
-                    name
                 }
-                _state.update { it.copy(exporting = false, saved = true, message = "已保存到相册：$savedName") }
+                if (sourceGeneration.get() == generation) {
+                    _state.update { it.copy(exporting = false, saved = true, message = "已保存到相册：$savedName") }
+                }
                 haptics.thud()
                 snackbarController.show("已保存到相册：$savedName")
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                AppLog.w("lut", "导出失败：${e.message}")
-                _state.update { it.copy(exporting = false, message = "保存失败：${e.message}") }
-                haptics.double()
+                if (sourceGeneration.get() == generation) {
+                    AppLog.w("lut", "导出失败：${e.message}")
+                    _state.update { it.copy(exporting = false, message = "保存失败：${e.message}") }
+                    haptics.double()
+                }
+            } finally {
+                if (sourceGeneration.get() == generation) {
+                    _state.update { it.copy(exporting = false) }
+                }
             }
         }
     }
@@ -918,7 +1028,65 @@ class PhotoEditViewModel @Inject constructor(
             ?.time
     }.getOrNull()
 
+    override fun onCleared() {
+        sourceGeneration.incrementAndGet()
+        renderGeneration.incrementAndGet()
+        loadJob?.cancel()
+        thumbnailJob?.cancel()
+        applyJob?.cancel()
+        exportJob?.cancel()
+        recycleUnique(
+            buildList {
+                addAll(bitmapsIn(_state.value))
+                previewSource?.let(::add)
+                thumbSource?.let(::add)
+            }
+        )
+        previewSource = null
+        thumbSource = null
+        convPixels = null
+        convRgba = null
+        convOutPixels = null
+        super.onCleared()
+    }
+
+    private fun bitmapsIn(state: PhotoEditState): List<Bitmap> = buildList {
+        state.original?.let(::add)
+        state.filtered?.let(::add)
+        state.cropBase?.let(::add)
+        addAll(state.thumbnails.values)
+    }
+
+    /**
+     * Give Compose a few frames to release the previous state, then recycle only bitmaps that are
+     * not retained by the current state or the current processing sources.
+     */
+    private fun releaseBitmapsLater(candidates: Collection<Bitmap>) {
+        if (candidates.isEmpty()) return
+        viewModelScope.launch(Dispatchers.Main.immediate) {
+            delay(BITMAP_RELEASE_GRACE_MS)
+            val retained = identityBitmapSet().apply {
+                addAll(bitmapsIn(_state.value))
+                previewSource?.let(::add)
+                thumbSource?.let(::add)
+            }
+            recycleUnique(candidates.filter { it !in retained })
+        }
+    }
+
+    private fun recycleUnique(bitmaps: Collection<Bitmap>) {
+        val unique = identityBitmapSet()
+        for (bitmap in bitmaps) {
+            if (unique.add(bitmap) && !bitmap.isRecycled) runCatching { bitmap.recycle() }
+        }
+    }
+
+    private fun identityBitmapSet(): MutableSet<Bitmap> =
+        Collections.newSetFromMap(IdentityHashMap<Bitmap, Boolean>())
+
     companion object {
+        private const val BITMAP_RELEASE_GRACE_MS = 250L
+
         /** 导出时复制的 EXIF 字段（拍摄参数 + 时间 + 作者信息） */
         private val COPY_EXIF_TAGS = arrayOf(
             ExifInterface.TAG_MAKE,

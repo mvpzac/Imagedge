@@ -16,6 +16,7 @@ import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.Build
+import androidx.core.util.size
 import android.os.ParcelUuid
 import com.imagedge.camera.core.common.AppLog
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -106,6 +107,8 @@ class SonyBleShutter @Inject constructor(
     val cameraStatus: StateFlow<BleCameraStatus> = _cameraStatus.asStateFlow()
 
     private var scanner: android.bluetooth.le.BluetoothLeScanner? = null
+    @Volatile
+    private var scanActive = false
     private var gatt: BluetoothGatt? = null
     private var commandChar: BluetoothGattCharacteristic? = null
     private var statusChar: BluetoothGattCharacteristic? = null
@@ -188,13 +191,15 @@ class SonyBleShutter @Inject constructor(
     @SuppressLint("MissingPermission")
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
+            // stopScan 后系统仍可能投递已排队的结果，不得因迟到回调重新连接。
+            if (!scanActive) return
             // 应用层过滤：解析厂商数据前 2 字节 == 0x012D（Sony）。
             // 不用系统 ScanFilter——部分机型广播格式差异会导致系统层匹配不到，
             // 全量扫描 + 自解析便于诊断（日志打印全部广播名）。
             val record = result.scanRecord ?: return
             val mfg = record.manufacturerSpecificData
             var sonyHit = false
-            for (i in 0 until mfg.size()) {
+            for (i in 0 until mfg.size) {
                 if (mfg.keyAt(i) == SONY_MANUFACTURER_ID) {
                     sonyHit = true
                     break
@@ -214,6 +219,8 @@ class SonyBleShutter @Inject constructor(
         }
 
         override fun onScanFailed(errorCode: Int) {
+            if (!scanActive) return
+            scanActive = false
             AppLog.e(TAG, "BLE 扫描失败：$errorCode")
             _state.value = BleShutterState.Disconnected
         }
@@ -228,6 +235,7 @@ class SonyBleShutter @Inject constructor(
             return
         }
         scanner = bluetoothLeScanner
+        scanActive = true
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
@@ -246,8 +254,10 @@ class SonyBleShutter @Inject constructor(
 
     @SuppressLint("MissingPermission")
     fun stopScan() {
+        scanActive = false
         handler.removeCallbacksAndMessages(null)
         runCatching { scanner?.stopScan(scanCallback) }
+        scanner = null
     }
 
     // ── 连接 ─────────────────────────────────────────────────────────
@@ -307,11 +317,7 @@ class SonyBleShutter @Inject constructor(
         writing = false
         _state.value = BleShutterState.Connecting(name)
         AppLog.i(TAG, "BLE 连接：$name（${device.address}）")
-        gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
-        } else {
-            device.connectGatt(context, false, gattCallback)
-        }
+        gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
     }
 
     @SuppressLint("MissingPermission")
@@ -339,6 +345,11 @@ class SonyBleShutter @Inject constructor(
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
+                    if (g !== gatt) {
+                        runCatching { g.disconnect() }
+                        runCatching { g.close() }
+                        return
+                    }
                     AppLog.i(TAG, "GATT 已连接，开始服务发现")
                     g.discoverServices()
                 }
@@ -348,19 +359,26 @@ class SonyBleShutter @Inject constructor(
                     // 仅当断开的就是当前持有的实例才清空引用：
                     // 否则会把一次「旧连接的迟到回调」误当成当前连接断开，
                     // 让刚建好的连接被判定为已断开（P1-2 配套修复）
-                    if (g === gatt) gatt = null
-                    commandChar = null
-                    statusChar = null
-                    synchronized(writeQueue) { writeQueue.clear() }
-                    writing = false
-                    _cameraStatus.value = BleCameraStatus()
-                    _state.value = BleShutterState.Disconnected
+                    if (g === gatt) {
+                        gatt = null
+                        commandChar = null
+                        statusChar = null
+                        writeHandler.removeCallbacks(writeTimeoutRunnable)
+                        synchronized(writeQueue) { writeQueue.clear() }
+                        writing = false
+                        _cameraStatus.value = BleCameraStatus()
+                        _state.value = BleShutterState.Disconnected
+                    }
                 }
             }
         }
 
         @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
+            if (g !== gatt) {
+                runCatching { g.close() }
+                return
+            }
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 AppLog.e(TAG, "服务发现失败：$status")
                 g.disconnect()
@@ -423,6 +441,7 @@ class SonyBleShutter @Inject constructor(
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray
         ) {
+            if (g !== gatt) return
             if (characteristic.uuid != STATUS_CHAR_UUID || value.size < 3) return
             // 状态字节：value[1]=类型（0x3f 对焦 / 0xa0 快门 / 0xd5 录像），value[2] 的 0x20 位=值
             when (value[1]) {
@@ -437,6 +456,7 @@ class SonyBleShutter @Inject constructor(
             characteristic: BluetoothGattCharacteristic,
             status: Int
         ) {
+            if (g !== gatt) return
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 AppLog.w(TAG, "命令写入失败：$status")
             }

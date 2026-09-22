@@ -133,8 +133,10 @@ fun Modifier.glassSurface(
                 lens(
                     refractionHeight.toPx(),
                     refractionAmount.toPx(),
-                    depthEffect = GlassSpec.DepthEffect,
-                    chromaticAberration = GlassSpec.ChromaticAberration
+                    // Small controls can appear dozens of times in one frame. Keep refraction but
+                    // skip the two costliest edge passes; containers retain the full glass look.
+                    depthEffect = GlassSpec.DepthEffect && profile == GlassProfile.CONTAINER,
+                    chromaticAberration = GlassSpec.ChromaticAberration && profile == GlassProfile.CONTAINER
                 )
             }
         },

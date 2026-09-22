@@ -85,16 +85,18 @@ class DownloadService : Service() {
     /**
      * Android 15+（API 35）对 dataSync 前台服务有 6 小时/天 的运行上限（P0）。
      *
-     * 系统在超时前回调本方法，此后**必须**停止前台服务：继续运行会被判为违规
-     * （应用被强制停止，后台传输任务一起丢）。这里主动降级——撤下前台状态、
-     * 留一条「传输已暂停」的可点击通知，用户回到前台重新入队即可续传。
+     * 系统在超时前回调本方法，此后**必须**停止前台服务：继续运行会被判为违规。
+     * DownloadManager 有独立 IO scope，所以仅 stopSelf() 不会停止真实传输；先显式停止
+     * 队列并断开相机，再撤下前台状态。PTP 整文件读取不支持安全断点续传，因此任务
+     * 标记失败并允许用户重连后重试，不能用「已暂停」误导用户。
      */
     @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
     override fun onTimeout(startId: Int, fgsType: Int) {
-        AppLog.w(TAG, "前台服务达到 dataSync 时限（6 小时预算），暂停传输前台服务")
+        AppLog.w(TAG, "前台服务达到 dataSync 时限（6 小时预算），停止全部传输")
+        downloadManager.stopAllForSystemTimeout()
         runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
         runCatching {
-            notificationManager.notify(TIMEOUT_NOTIFICATION_ID, buildPausedNotification())
+            notificationManager.notify(TIMEOUT_NOTIFICATION_ID, buildStoppedNotification())
         }
         stopSelf()
     }
@@ -119,12 +121,12 @@ class DownloadService : Service() {
             .build()
     }
 
-    /** 「已暂停」通知：前台服务降级后保留，提示用户回到应用继续 */
-    private fun buildPausedNotification(): Notification =
+    /** 超时停止通知：提示用户重新连接并重试。 */
+    private fun buildStoppedNotification(): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_lucide_camera)
-            .setContentTitle("传输已暂停")
-            .setContentText("后台传输达到系统时限，回到 Imagedge 可继续传输")
+            .setContentTitle("传输已停止")
+            .setContentText("后台传输达到系统时限，请重新连接相机后重试")
             .applyContentIntent()
             .setOngoing(false)
             .setAutoCancel(true)

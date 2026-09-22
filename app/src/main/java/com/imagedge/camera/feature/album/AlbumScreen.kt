@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.imagedge.camera.R
+import com.imagedge.camera.core.permission.rememberNotificationPermissionRequester
 import com.imagedge.camera.data.model.MediaItem
 import com.imagedge.camera.data.remote.ChannelConnectionState
 import com.imagedge.camera.ptp.PhotoType
@@ -59,6 +60,7 @@ import java.util.Date
 import java.util.Locale
 import com.imagedge.camera.ui.components.AppChipRow
 import com.imagedge.camera.ui.theme.Spacing
+import com.imagedge.camera.ui.feedback.SnackbarController
 
 /**
  * <pre>
@@ -81,6 +83,7 @@ fun AlbumScreen(
     onOpenViewer: (Int) -> Unit = {},
     onOpenDownloads: () -> Unit = {},
     onBack: () -> Unit = {},
+    snackbarController: SnackbarController,
     viewModel: AlbumViewModel = hiltViewModel()
 ) {
     val items by viewModel.items.collectAsStateWithLifecycle()
@@ -90,6 +93,8 @@ fun AlbumScreen(
     val connectionState by viewModel.connectionState.collectAsStateWithLifecycle()
     val reconnecting by viewModel.reconnecting.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
+    val requestNotificationPermission =
+        rememberNotificationPermissionRequester(snackbarController)
 
     // 类型筛选（全部 / 照片 / 视频 / RAW）
     var filter by remember { mutableStateOf(MediaFilter.ALL) }
@@ -125,7 +130,10 @@ fun AlbumScreen(
         floatingActionButton = {
             if (selected.isNotEmpty()) {
                 ExtendedFloatingActionButton(
-                    onClick = { viewModel.downloadSelected() },
+                    onClick = {
+                        requestNotificationPermission()
+                        viewModel.downloadSelected()
+                    },
                     content = {
                         Text(stringResource(R.string.album_btn_download, selected.size))
                     }

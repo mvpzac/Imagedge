@@ -8,6 +8,12 @@ import com.imagedge.camera.motionphoto.internal.xmp.looksLikeUltraHdrXmp
 import com.imagedge.camera.motionphoto.internal.xmp.MotionPhotoVendorXmpBuilder
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.util.UUID
 
 internal object MotionPhotoJpegEditor {
     private const val OPLUS_USER_COMMENT = "oplus_10485792"
@@ -17,6 +23,10 @@ internal object MotionPhotoJpegEditor {
     private const val JPEG_SOS = 0xDA
     private const val JPEG_EOI = 0xD9
     private const val XMP_HEADER = "http://ns.adobe.com/xap/1.0/\u0000"
+    // Header rewriting temporarily needs several JPEG-sized buffers. Keep the primary-image cap
+    // conservative; the appended video is streamed and is not included in this limit.
+    private const val MAX_PRIMARY_JPEG_BYTES = 64L * 1024L * 1024L
+    private const val COPY_BUFFER_BYTES = 256 * 1024
 
     fun alignVendorCompatibleMotionPhotoXmp(
         motionPhotoFile: File,
@@ -25,85 +35,163 @@ internal object MotionPhotoJpegEditor {
         presentationTimestampUs: Long,
         ultraHdrInfo: UltraHdrInfo?,
     ) {
-        val sourceBytes = motionPhotoFile.readBytes()
-        val currentMotionPhotoXmp = extractPreferredMotionPhotoXmp(sourceBytes)
-            ?: throw MotionPhotoComposeException("No Motion Photo XMP was found in the Media3 output.")
-        val alignedXmp = MotionPhotoVendorXmpBuilder.buildAlignedXmp(
-            currentXmp = currentMotionPhotoXmp,
-            videoLengthBytes = videoLengthBytes,
-            videoMimeType = videoMimeType,
-            presentationTimestampUs = presentationTimestampUs,
-            gainMapLengthBytes = ultraHdrInfo?.gainMapLengthBytes,
-            hdrgmVersion = ultraHdrInfo?.hdrgmVersion,
-        )
-        val patchedBytes = findStandaloneUltraHdrXmpPacket(sourceBytes)?.let { ultraHdrXmp ->
-            removeJpegXmpPacket(
-                // 合并路径只按精确匹配定位 UltraHDR 段：若混入 motion-photo 模糊匹配，
-                // 且 Motion Photo XMP 段字节序在前，会先替换错段导致后续移除失败
-                replaceJpegXmpPacket(sourceBytes, ultraHdrXmp, alignedXmp, matchMotionPhotoLike = false),
-                currentMotionPhotoXmp,
+        rewritePrimaryJpeg(motionPhotoFile, videoLengthBytes) { sourceBytes ->
+            val currentMotionPhotoXmp = extractPreferredMotionPhotoXmp(sourceBytes)
+                ?: throw MotionPhotoComposeException("No Motion Photo XMP was found in the Media3 output.")
+            val alignedXmp = MotionPhotoVendorXmpBuilder.buildAlignedXmp(
+                currentXmp = currentMotionPhotoXmp,
+                videoLengthBytes = videoLengthBytes,
+                videoMimeType = videoMimeType,
+                presentationTimestampUs = presentationTimestampUs,
+                gainMapLengthBytes = ultraHdrInfo?.gainMapLengthBytes,
+                hdrgmVersion = ultraHdrInfo?.hdrgmVersion,
             )
-        } ?: replaceJpegXmpPacket(sourceBytes, currentMotionPhotoXmp, alignedXmp)
-        motionPhotoFile.writeBytes(patchedBytes)
+            findStandaloneUltraHdrXmpPacket(sourceBytes)?.let { ultraHdrXmp ->
+                removeJpegXmpPacket(
+                    // 合并路径只按精确匹配定位 UltraHDR 段，避免先替换错段。
+                    replaceJpegXmpPacket(
+                        sourceBytes,
+                        ultraHdrXmp,
+                        alignedXmp,
+                        matchMotionPhotoLike = false,
+                    ),
+                    currentMotionPhotoXmp,
+                )
+            } ?: replaceJpegXmpPacket(sourceBytes, currentMotionPhotoXmp, alignedXmp)
+        }
     }
 
     fun alignWechatCompatibleJpegHeaders(
         motionPhotoFile: File,
         videoLengthBytes: Long,
     ) {
-        val sourceBytes = motionPhotoFile.readBytes()
-        val imageLength = sourceBytes.size - videoLengthBytes.toInt()
-        if (imageLength <= 0 || imageLength > sourceBytes.size) {
+        rewritePrimaryJpeg(motionPhotoFile, videoLengthBytes) { jpegBytes ->
+            val segments = parseJpegSegments(jpegBytes)
+            val xmpSegment = segments.firstOrNull { it.kind == JpegSegmentKind.MOTION_PHOTO_XMP }
+                ?: throw MotionPhotoComposeException("No Motion Photo XMP segment was found to preserve.")
+            val jfifSegment = segments.firstOrNull { it.kind == JpegSegmentKind.JFIF }
+            val iccSegments = segments.filter { it.kind == JpegSegmentKind.ICC }
+            val passthroughSegments = segments.filter {
+                it.kind == JpegSegmentKind.OTHER_APP || it.kind == JpegSegmentKind.STRUCTURAL
+            }
+            val dimensions = readJpegDimensions(segments)
+            val exifSegment = buildWechatLikeExifSegment(dimensions.first, dimensions.second)
+
+            val reorderedSegments = buildList {
+                add(exifSegment)
+                add(xmpSegment.bytes)
+                jfifSegment?.let { add(it.bytes) }
+                addAll(iccSegments.map { it.bytes })
+                addAll(passthroughSegments.map { it.bytes })
+            }
+            val sosAndCompressedData = jpegBytes.copyOfRange(segments.last().endOffset, jpegBytes.size)
+            val provisionalImageLength = 2 + reorderedSegments.sumOf { it.size } + sosAndCompressedData.size
+            // MP Entry 的 Individual Image Size 必须包含 MPF 段本身。
+            val mpfSegmentSize = buildWechatLikeMpfSegment(0).size
+            val mpfSegment = buildWechatLikeMpfSegment(provisionalImageLength + mpfSegmentSize)
+            val finalSegments = buildList {
+                add(exifSegment)
+                add(xmpSegment.bytes)
+                jfifSegment?.let { add(it.bytes) }
+                add(mpfSegment)
+                addAll(iccSegments.map { it.bytes })
+                addAll(passthroughSegments.map { it.bytes })
+            }
+
+            val rebuiltImage = ByteArrayOutputStream(provisionalImageLength).apply {
+                write(0xFF)
+                write(JPEG_SOI)
+                finalSegments.forEach(::write)
+                write(sosAndCompressedData)
+            }.toByteArray()
+            rebuiltImage
+        }
+    }
+
+    fun readPreferredMotionPhotoXmp(motionPhotoFile: File, videoLengthBytes: Long): String? =
+        extractPreferredMotionPhotoXmp(readPrimaryJpeg(motionPhotoFile, videoLengthBytes))
+
+    /**
+     * 只在内存中编辑 JPEG 主图；后缀 MP4 从原文件流式复制到临时文件。
+     * 临时文件完整落盘后再替换，异常时不会留下半个成品。
+     */
+    private inline fun rewritePrimaryJpeg(
+        motionPhotoFile: File,
+        videoLengthBytes: Long,
+        transform: (ByteArray) -> ByteArray,
+    ) {
+        val originalLength = motionPhotoFile.length()
+        val imageLength = checkedImageLength(originalLength, videoLengthBytes)
+        val rewrittenImage = transform(readPrimaryJpeg(motionPhotoFile, videoLengthBytes))
+        val temporary = File(
+            motionPhotoFile.parentFile,
+            ".${motionPhotoFile.name}.${UUID.randomUUID()}.rewrite",
+        )
+        try {
+            FileOutputStream(temporary).use { output ->
+                output.write(rewrittenImage)
+                FileInputStream(motionPhotoFile).use { input ->
+                    input.channel.position(imageLength)
+                    copyExactly(input, output, videoLengthBytes)
+                }
+                output.fd.sync()
+            }
+            try {
+                Files.move(
+                    temporary.toPath(),
+                    motionPhotoFile.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            } catch (_: Exception) {
+                Files.move(
+                    temporary.toPath(),
+                    motionPhotoFile.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            }
+        } finally {
+            temporary.delete()
+        }
+    }
+
+    private fun readPrimaryJpeg(file: File, videoLengthBytes: Long): ByteArray {
+        val imageLength = checkedImageLength(file.length(), videoLengthBytes)
+        if (imageLength > MAX_PRIMARY_JPEG_BYTES || imageLength > Int.MAX_VALUE.toLong()) {
+            throw MotionPhotoComposeException("The primary JPEG is too large to edit safely.")
+        }
+        val result = ByteArray(imageLength.toInt())
+        FileInputStream(file).use { input ->
+            var offset = 0
+            while (offset < result.size) {
+                val read = input.read(result, offset, result.size - offset)
+                if (read < 0) throw IOException("Unexpected end of Motion Photo JPEG.")
+                if (read == 0) continue
+                offset += read
+            }
+        }
+        return result
+    }
+
+    private fun checkedImageLength(fileLength: Long, videoLengthBytes: Long): Long {
+        if (videoLengthBytes < 0L || videoLengthBytes >= fileLength) {
             throw MotionPhotoComposeException(
                 "Failed to calculate the primary JPEG range from the video length.",
             )
         }
+        return fileLength - videoLengthBytes
+    }
 
-        val jpegBytes = sourceBytes.copyOfRange(0, imageLength)
-        val segments = parseJpegSegments(jpegBytes)
-        val xmpSegment = segments.firstOrNull { it.kind == JpegSegmentKind.MOTION_PHOTO_XMP }
-            ?: throw MotionPhotoComposeException("No Motion Photo XMP segment was found to preserve.")
-        val jfifSegment = segments.firstOrNull { it.kind == JpegSegmentKind.JFIF }
-        val iccSegments = segments.filter { it.kind == JpegSegmentKind.ICC }
-        val passthroughSegments = segments.filter {
-            it.kind == JpegSegmentKind.OTHER_APP || it.kind == JpegSegmentKind.STRUCTURAL
+    private fun copyExactly(input: FileInputStream, output: FileOutputStream, byteCount: Long) {
+        val buffer = ByteArray(COPY_BUFFER_BYTES)
+        var remaining = byteCount
+        while (remaining > 0L) {
+            val read = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+            if (read < 0) throw IOException("Unexpected end of Motion Photo video.")
+            if (read == 0) continue
+            output.write(buffer, 0, read)
+            remaining -= read.toLong()
         }
-        val dimensions = readJpegDimensions(segments)
-        val exifSegment = buildWechatLikeExifSegment(dimensions.first, dimensions.second)
-
-        val reorderedSegments = buildList {
-            add(exifSegment)
-            add(xmpSegment.bytes)
-            jfifSegment?.let { add(it.bytes) }
-            addAll(iccSegments.map { it.bytes })
-            addAll(passthroughSegments.map { it.bytes })
-        }
-        val sosAndCompressedData = jpegBytes.copyOfRange(segments.last().endOffset, jpegBytes.size)
-        val provisionalImageLength = 2 + reorderedSegments.sumOf { it.size } + sosAndCompressedData.size
-        // MP Entry 的 Individual Image Size 必须包含 MPF 段本身：成品主图 =
-        // provisional + MPF 段，否则依赖 MPF 定位视频的解析器偏移整整差一个段长
-        val mpfSegmentSize = buildWechatLikeMpfSegment(0).size
-        val mpfSegment = buildWechatLikeMpfSegment(provisionalImageLength + mpfSegmentSize)
-        val finalSegments = buildList {
-            add(exifSegment)
-            add(xmpSegment.bytes)
-            jfifSegment?.let { add(it.bytes) }
-            add(mpfSegment)
-            addAll(iccSegments.map { it.bytes })
-            addAll(passthroughSegments.map { it.bytes })
-        }
-
-        val rebuiltImage = ByteArrayOutputStream(provisionalImageLength).apply {
-            write(0xFF)
-            write(JPEG_SOI)
-            finalSegments.forEach(::write)
-            write(sosAndCompressedData)
-        }.toByteArray()
-        val output = ByteArrayOutputStream(sourceBytes.size + exifSegment.size + mpfSegment.size).apply {
-            write(rebuiltImage)
-            write(sourceBytes, imageLength, sourceBytes.size - imageLength)
-        }.toByteArray()
-        motionPhotoFile.writeBytes(output)
     }
 
     private fun findStandaloneUltraHdrXmpPacket(jpegBytes: ByteArray): String? {

@@ -2,6 +2,31 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.0-alpha06] - 2026-09-23
+
+> 全面安全、稳定性与流畅性加固；液态玻璃渲染热路径优化。
+
+### Security / 安全
+
+- 加固 PTP/IP 包长、事务 ID、数据阶段与对象大小校验，所有相机下载改为有界流。
+- UPnP 仅允许私有/链路本地目标及同源控制 URL，禁用重定向与凭据 URL；XML 解析限制大小、深度、节点数并阻止 XXE。
+- Motion Photo 全链路改用 `Long` 与文件流，限制 XMP/媒体大小，阻止恶意 XML 和大文件内存耗尽。
+- 发布日志脱敏；CI 固定 Action 提交 SHA，并新增依赖校验、SBOM、依赖审查和密钥扫描。
+
+### Fixed / 修复
+
+- 修复下载超时仍在后台继续、数据库幽灵任务、取消/重试竞态、断线状态错误和进度刷新过密。
+- 修复 PTP 断线死锁、Wi-Fi 过期回调、BLE 扫描/GATT 生命周期泄漏及页面离开后仍保持连接。
+- 修复照片编辑渲染竞态、取消泄漏、Bitmap 生命周期和 GPU 资源销毁顺序。
+- 视频缓存改为内容哈希、原子写入、长度校验与 LRU 清理；运行时权限改为按功能请求。
+- 移除 Lint 基线并清零有效 Lint 问题，新增协议、XML、大文件及有界流回归测试。
+
+### Performance / 性能
+
+- 玻璃画刷与高光 Shader 改为绘制缓存，拖动期间不再重复创建协程。
+- 小尺寸玻璃控件跳过高成本景深/色散，底部导航避免重复抓取和第二次玻璃背景绘制。
+- 设计缩放不再缩小触控目标，并使用窗口尺寸响应式计算。
+
 ## [0.2.0-alpha05] - 2026-09-11
 
 > 液态玻璃效果对齐上游最佳实践 + 切页性能优化。

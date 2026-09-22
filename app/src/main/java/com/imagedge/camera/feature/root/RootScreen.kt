@@ -9,6 +9,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -42,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -173,6 +175,9 @@ fun RootScreen(
     val pageBackdrop = rememberLayerBackdrop()
     val navBackdrop = rememberLayerBackdrop()
     val captureBackdrop = glassLevel.warrantsBackdropCapture()
+    // Secondary pages have no bottom bar. Do not capture the entire animated NavHost when nobody
+    // consumes that backdrop; this removes a full-screen offscreen pass from the heaviest screens.
+    val captureNavBackdrop = captureBackdrop && showBottomBar
 
     // 玻璃等级只在这里算一次，通过 CompositionLocal 下发：
     // 组件各自调 rememberGlassLevel() 会各自注册省电广播接收器（一屏 5~10 个），
@@ -208,7 +213,7 @@ fun RootScreen(
                     .fillMaxSize()
                     // 采集页面内容，供悬浮导航栏折射（NavHost 不含导航栏自身）
                     .then(
-                        if (captureBackdrop) {
+                        if (captureNavBackdrop) {
                             Modifier.layerBackdrop(navBackdrop)
                         } else {
                             Modifier
@@ -234,6 +239,7 @@ fun RootScreen(
                 composable(Route.ALBUM_SELECTION) {
                     AlbumScreen(
                         browseMode = BrowseMode.SELECTION,
+                        snackbarController = snackbarController,
                         onOpenDownloads = { navController.navigate(Route.DOWNLOAD) },
                         onOpenViewer = { index -> navController.navigate(Route.photoViewer(index)) },
                         onBack = { navController.popBackStack() }
@@ -242,6 +248,7 @@ fun RootScreen(
                 composable(Route.ALBUM_FULL_CARD) {
                     AlbumScreen(
                         browseMode = BrowseMode.FULL_CARD,
+                        snackbarController = snackbarController,
                         onOpenDownloads = { navController.navigate(Route.DOWNLOAD) },
                         onOpenViewer = { index -> navController.navigate(Route.photoViewer(index)) },
                         onBack = { navController.popBackStack() }
@@ -269,7 +276,10 @@ fun RootScreen(
                     ExifFrameScreen(onBack = { navController.popBackStack() })
                 }
                 composable(Route.PHOTO_VIEWER) {
-                    PhotoViewerScreen(onBack = { navController.popBackStack() })
+                    PhotoViewerScreen(
+                        onBack = { navController.popBackStack() },
+                        snackbarController = snackbarController,
+                    )
                 }
                 composable(RootDestination.SETTINGS.route) {
                     SettingsScreen(
@@ -307,7 +317,7 @@ fun RootScreen(
         // 这样页面内容才能真正延伸到导航栏下方——滚动时列表项从底下穿过、被玻璃折射。
         if (showBottomBar) {
             FloatingNavBar(
-                backdrop = if (captureBackdrop) navBackdrop else null,
+                backdrop = if (captureNavBackdrop) navBackdrop else null,
                 glassLevel = glassLevel,
                 selectedRoute = currentDestination?.route,
                 onSelect = { destination ->
@@ -435,13 +445,15 @@ private fun FloatingNavBar(
                             .padding(vertical = 11.dp)
                             .height(44.dp)
                             .width(indicatorWidth)
-                            // 磁吸指示器也改成玻璃：与主胶囊同样折射页面背景，
-                            // 但用主色着色，于是呈现为「被点亮的一小块玻璃」。
-                            // 它引用的是页面背景层（不含导航栏本体），不会产生自引用递归。
-                            .glassPill(
-                                backdrop = backdrop,
-                                level = glassLevel,
-                                surfaceColor = MaterialTheme.colorScheme.primary
+                            // The outer pill already performs backdrop blur/refraction. A second
+                            // drawBackdrop for this animated indicator doubled the GPU work while it
+                            // moves; a translucent tint preserves the lit-glass look in one pass.
+                            .clip(PillShape)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.22f))
+                            .border(
+                                Dp.Hairline,
+                                Color.White.copy(alpha = if (useGlass) 0.24f else 0.12f),
+                                PillShape
                             )
                     )
                     Row(

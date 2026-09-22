@@ -5,6 +5,9 @@ import com.imagedge.camera.data.model.MediaItem
 import com.imagedge.camera.ptp.PhotoType
 import com.imagedge.camera.upnp.UpnpClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.io.OutputStream
 import javax.inject.Inject
@@ -25,6 +28,8 @@ class UpnpChannel @Inject constructor() : CameraChannel {
     private var client: UpnpClient? = null
 
     override val channelType: ChannelType = ChannelType.UPNP
+    private val _connectionState = MutableStateFlow(ChannelConnectionState.DISCONNECTED)
+    override val connectionState: StateFlow<ChannelConnectionState> = _connectionState.asStateFlow()
     override var deviceModel: String = "Sony Camera"
         private set
 
@@ -40,41 +45,87 @@ class UpnpChannel @Inject constructor() : CameraChannel {
             .onFailure { AppLog.w("upnp", "X_TransferStart 失败（非致命）：${it.message}") }
         client = newClient
         deviceModel = "Sony Camera"
+        _connectionState.value = ChannelConnectionState.CONNECTED
     }
 
     override suspend fun disconnect() = withContext(Dispatchers.IO) {
-        runCatching { client?.endTransfer() }
+        val closingClient = client
         client = null
+        _connectionState.value = ChannelConnectionState.DISCONNECTED
+        closingClient?.cancelActiveCall()
+        runCatching { closingClient?.endTransfer() }
+        Unit
     }
 
     override suspend fun listMedia(): List<MediaItem> = withContext(Dispatchers.IO) {
         val c = client ?: throw IllegalStateException("未连接相机")
         val items = mutableListOf<MediaItem>()
-        browseRecursive(c, "0", items)
+        browseAll(c, items)
         items
     }
 
-    /** 递归浏览目录（根 "0" 开始，深入 container） */
-    private fun browseRecursive(c: UpnpClient, objectId: String, out: MutableList<MediaItem>) {
-        val result = c.browse(objectId)
-        for (entry in result.items) {
-            if (entry.isDirectory) {
-                entry.id?.let { browseRecursive(c, it, out) }
-            } else {
-                entry.url?.let { url ->
-                    out.add(
-                        MediaItem(
-                            handle = 0,
-                            channelKey = url,
-                            filename = inferFilename(entry.title, url, entry.contentType),
-                            sizeBytes = entry.size ?: 0,
-                            photoType = inferPhotoType(entry.contentType, url),
-                            captureDate = null
-                        )
-                    )
+    /** Iterative, paginated browse with cycle and resource limits. */
+    private fun browseAll(c: UpnpClient, out: MutableList<MediaItem>) {
+        data class PendingContainer(val id: String, val depth: Int)
+
+        val pending = ArrayDeque<PendingContainer>().apply { add(PendingContainer("0", 0)) }
+        val visited = mutableSetOf<String>()
+        val mediaKeys = mutableSetOf<String>()
+        var pages = 0
+        while (pending.isNotEmpty()) {
+            val container = pending.removeFirst()
+            if (!visited.add(container.id)) continue
+            check(container.depth <= MAX_BROWSE_DEPTH) { "UPnP 目录深度超过上限" }
+            check(visited.size <= MAX_CONTAINERS) { "UPnP 目录数量超过上限" }
+
+            var startIndex = 0
+            while (true) {
+                check(++pages <= MAX_BROWSE_PAGES) { "UPnP 分页数量超过上限" }
+                val result = c.browse(container.id, startIndex, BROWSE_PAGE_SIZE)
+                for (entry in result.items) {
+                    if (entry.isDirectory) {
+                        entry.id?.takeIf { id -> id.isNotBlank() && id.length <= 512 && id !in visited }?.let {
+                            pending.addLast(PendingContainer(it, container.depth + 1))
+                        }
+                    } else {
+                        entry.url?.let { url ->
+                            if (mediaKeys.add(url)) {
+                                check(out.size < MAX_MEDIA_ITEMS) { "UPnP 媒体数量超过上限" }
+                                out.add(
+                                    MediaItem(
+                                        handle = 0,
+                                        channelKey = url,
+                                        filename = inferFilename(entry.title, url, entry.contentType),
+                                        sizeBytes = entry.size ?: 0,
+                                        photoType = inferPhotoType(entry.contentType, url),
+                                        captureDate = null
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+                val returned = result.numberReturned.takeIf { it > 0 } ?: result.items.size
+                if (returned <= 0) break
+                val next = startIndex + returned
+                check(next > startIndex) { "UPnP 分页索引未前进" }
+                startIndex = next
+                if (result.totalMatches > 0) {
+                    if (startIndex >= result.totalMatches) break
+                } else if (returned < BROWSE_PAGE_SIZE) {
+                    // 有些 DMS 不上报 TotalMatches；只在这种情况下用“短页”判定结尾。
+                    break
                 }
             }
         }
+    }
+
+    private companion object {
+        const val BROWSE_PAGE_SIZE = 100
+        const val MAX_BROWSE_DEPTH = 32
+        const val MAX_CONTAINERS = 10_000
+        const val MAX_MEDIA_ITEMS = 100_000
+        const val MAX_BROWSE_PAGES = 20_000
     }
 
     override suspend fun getThumbnail(item: MediaItem): ByteArray? = withContext(Dispatchers.IO) {

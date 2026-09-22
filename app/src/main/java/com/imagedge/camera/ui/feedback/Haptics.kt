@@ -6,6 +6,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.Settings
+import androidx.core.content.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -37,7 +38,7 @@ class Haptics @Inject constructor(
 
     fun setEnabled(value: Boolean) {
         _enabled.value = value
-        prefs.edit().putBoolean(KEY_ENABLED, value).apply()
+        prefs.edit { putBoolean(KEY_ENABLED, value) }
     }
 
     fun tick() = vibrate(Pattern.TICK)

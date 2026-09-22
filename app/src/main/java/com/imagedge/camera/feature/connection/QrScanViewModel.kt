@@ -52,18 +52,19 @@ class QrScanViewModel @Inject constructor(
         val info = parseWifiQr(content)
         if (info == null) {
             // 诊断：打印原始内容，确认索尼二维码的实际格式
-            AppLog.i(TAG, "QR 原始内容（非标准 WIFI 格式）：" + content.take(300))
+            // QR 原文可包含 Wi-Fi 密码，任何构建类型都不记录内容。
+            AppLog.i(TAG, "QR 内容不是受支持的 Wi-Fi 格式")
             _state.value = QrScanUiState.Error("二维码不是 WiFi 连接格式")
             return
         }
-        AppLog.i(TAG, "QR 解析成功：ssid=" + info.ssid + "，bssid=" + info.bssid)
+        AppLog.i(TAG, "QR 解析成功（凭据已隐藏）")
 
         // 认证方式决定「要不要传凭据、传哪种凭据」（P0）：
         // 原先无条件 setWpa2Passphrase(password ?: "")，开放热点/WEP/SAE 二维码
         // 都会以空密码走 WPA2 发起请求，必然失败且提示误导用户去查密码。
         val auth = info.auth
         if (auth == WifiAuth.WEP) {
-            AppLog.w(TAG, "二维码为 WEP 加密，无法自动配网：${info.ssid}")
+            AppLog.w(TAG, "二维码为 WEP 加密，无法自动配网")
             _state.value = QrScanUiState.Error(
                 "该二维码使用 WEP 加密，Android 不支持自动配网，请在系统 Wi-Fi 设置中手动连接"
             )
@@ -71,7 +72,7 @@ class QrScanViewModel @Inject constructor(
         }
         val passphrase = info.password
         if (auth != WifiAuth.OPEN && passphrase.isNullOrEmpty()) {
-            AppLog.w(TAG, "二维码缺少密码：ssid=${info.ssid}，auth=${info.authType}")
+            AppLog.w(TAG, "二维码缺少密码（auth=${info.authType}）")
             _state.value = QrScanUiState.Error(
                 "二维码未包含 Wi-Fi 密码（认证方式：${info.authType ?: "未标注"}），请在系统 Wi-Fi 设置中手动连接"
             )
@@ -84,7 +85,7 @@ class QrScanViewModel @Inject constructor(
         // （二维码 M 字段可能非热点 BSSID）。SSID 公式优先，BSSID 兜底。
         fun onFail(msg: String?) {
             if (info.bssid != null) {
-                AppLog.w(TAG, "SSID 公式未连上，回退 BSSID 匹配：" + info.bssid)
+                AppLog.w(TAG, "SSID 匹配未连上，回退 BSSID 匹配")
                 wifiManager.connectToCameraHotspot(null, passphrase, info.bssid, auth) { ok2, msg2 ->
                     if (ok2) {
                         _state.value = QrScanUiState.Success(info.ssid)

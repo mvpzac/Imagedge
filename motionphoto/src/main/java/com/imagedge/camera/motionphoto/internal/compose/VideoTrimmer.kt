@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.Presentation
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.Effects
@@ -34,6 +35,7 @@ import kotlin.coroutines.resumeWithException
  *
  * 三拼（批次 B）复用本器：多段必须**同规格**输出，拼接点才无缝。
  */
+@UnstableApi
 internal object VideoTrimmer {
 
     /** 单段最大时长（用户需求：不超过 5 秒） */

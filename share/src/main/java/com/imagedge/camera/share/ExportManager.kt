@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.core.graphics.scale
 import android.graphics.Matrix
 import android.net.Uri
 import android.os.Build
@@ -215,7 +216,7 @@ class ExportManager(private val context: Context) {
         }
         val nw = (w * scale).toInt().coerceAtLeast(1)
         val nh = (h * scale).toInt().coerceAtLeast(1)
-        return Bitmap.createScaledBitmap(bitmap, nw, nh, true)
+        return bitmap.scale(nw, nh)
     }
 
     /** 按 EXIF Orientation 旋转（含镜像与转置） */

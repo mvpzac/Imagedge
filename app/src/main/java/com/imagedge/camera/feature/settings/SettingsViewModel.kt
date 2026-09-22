@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import android.net.Uri
+import androidx.core.content.edit
+import androidx.core.net.toUri
 import com.imagedge.camera.data.lut.LutType
 import com.imagedge.camera.data.lut.UserLutStore
 import com.imagedge.camera.data.model.ConnectionPhase
@@ -123,12 +125,12 @@ class SettingsViewModel @Inject constructor(
                     android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
         }
-        prefs.edit().putString(KEY_DOWNLOAD_TREE, uri.toString()).apply()
+        prefs.edit { putString(KEY_DOWNLOAD_TREE, uri.toString()) }
         _downloadDirLabel.value = describeDir(uri.toString())
     }
 
     fun restoreDefaultDir() {
-        prefs.edit().remove(KEY_DOWNLOAD_TREE).apply()
+        prefs.edit { remove(KEY_DOWNLOAD_TREE) }
         _downloadDirLabel.value = DEFAULT_LABEL
     }
 
@@ -138,7 +140,7 @@ class SettingsViewModel @Inject constructor(
     private fun describeDir(uriStr: String?): String {
         if (uriStr == null) return DEFAULT_LABEL
         return runCatching {
-            "已选择：" + android.provider.DocumentsContract.getTreeDocumentId(Uri.parse(uriStr))
+            "已选择：" + android.provider.DocumentsContract.getTreeDocumentId(uriStr.toUri())
         }.getOrDefault("已选择自定义目录")
     }
 

@@ -3,6 +3,7 @@ package com.imagedge.camera.data.lut
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.core.content.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
@@ -38,7 +39,7 @@ class UserLutStore @Inject constructor(
 
     /** 声明某个 LUT 的适用类型（导入后由用户选择，决定它归入编辑页哪一排） */
     fun setType(name: String, type: LutType) {
-        typePrefs.edit().putString(name, type.name).apply()
+        typePrefs.edit { putString(name, type.name) }
     }
 
     /** 已保存的 LUT 文件名列表（按名称排序） */
@@ -75,7 +76,7 @@ class UserLutStore @Inject constructor(
     /** 删除（同时清除类型声明，避免残留映射到不存在的文件） */
     fun delete(name: String): Boolean {
         val ok = File(dir, name).delete()
-        if (ok) typePrefs.edit().remove(name).apply()
+        if (ok) typePrefs.edit { remove(name) }
         return ok
     }
 

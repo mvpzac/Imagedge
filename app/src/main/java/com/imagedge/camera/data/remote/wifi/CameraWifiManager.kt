@@ -11,6 +11,7 @@ import android.net.wifi.WifiNetworkSpecifier
 import com.imagedge.camera.core.common.AppLog
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.net.NetworkInterface
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -35,13 +36,21 @@ class CameraWifiManager @Inject constructor(
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
     /** 保持 NetworkCallback 引用，避免被 GC */
+    @Volatile
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    /**
+     * 每次新建或释放 requestNetwork 都递增。系统可能在 unregister 后继续投递已排队的
+     * onAvailable/onUnavailable；回调只有在代数仍匹配时才能改写当前网络状态。
+     */
+    private val requestGeneration = AtomicLong(0L)
 
     /**
      * 配网建立的相机网络。关键约束：WifiNetworkSpecifier 的连接只在
      * requestNetwork 请求存活期间有效——释放请求即断开热点连接。
      * 因此成功后必须保持请求（回调）存活，直到用户主动断开。
      */
+    @Volatile
     private var cameraNetwork: Network? = null
 
     /** 上次释放配网请求的时间戳（用于规避「刚断开就重连」的系统竞态） */
@@ -119,6 +128,7 @@ class CameraWifiManager @Inject constructor(
         // 立刻 requestNetwork 会被直接判为 onUnavailable（用户"断开后再扫码连不上"的元凶之一）
         val sinceRelease = android.os.SystemClock.elapsedRealtime() - lastReleaseAt
         releaseNetworkRequest()
+        val generation = requestGeneration.incrementAndGet()
 
         // 至少要有 SSID 或 BSSID 之一；BSSID 匹配不受设备名影响，优先使用
         check(ssid != null || bssid != null) { "SSID 与 BSSID 均为空" }
@@ -149,9 +159,11 @@ class CameraWifiManager @Inject constructor(
 
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
+                if (!isCurrentRequest(this, generation)) return
                 // P2-9：回调在系统 Binder 线程执行，且 network 到达时可能已被系统拆除
                 //（快速切换热点场景），bindProcessToNetwork 会抛异常——不捕获会直接崩进程
                 runCatching {
+                    if (!isCurrentRequest(this, generation)) return@runCatching
                     cameraNetwork = network
                     connectivityManager.bindProcessToNetwork(network)
                     AppLog.i(TAG, "相机热点已连接：network=$network")
@@ -163,12 +175,16 @@ class CameraWifiManager @Inject constructor(
             }
 
             override fun onLost(network: Network) {
+                if (!isCurrentRequest(this, generation) || cameraNetwork != network) return
                 AppLog.w(TAG, "相机热点连接丢失：network=$network")
                 cameraNetwork = null
             }
 
             override fun onUnavailable() {
+                if (!isCurrentRequest(this, generation)) return
                 AppLog.w(TAG, "相机热点不可用（requestNetwork → onUnavailable）")
+                networkCallback = null
+                cameraNetwork = null
                 onResult(false, "连接相机热点失败，请检查 SSID 与密码")
             }
         }
@@ -178,7 +194,9 @@ class CameraWifiManager @Inject constructor(
         val postDelay = if (sinceRelease < 1500L) 800L else 0L
         if (postDelay > 0L) {
             AppLog.i(TAG, "距上次释放仅 ${sinceRelease}ms，延迟 ${postDelay}ms 后重新配网")
-            mainHandler.postDelayed({ requestNetwork(request, callback) }, postDelay)
+            mainHandler.postDelayed({
+                if (isCurrentRequest(callback, generation)) requestNetwork(request, callback)
+            }, postDelay)
         } else {
             requestNetwork(request, callback)
         }
@@ -204,13 +222,20 @@ class CameraWifiManager @Inject constructor(
      * 配网成功后 UI 层销毁弹窗不得调用，否则刚建立的连接被系统拆除。
      */
     fun releaseNetworkRequest() {
+        requestGeneration.incrementAndGet()
         // 移除待执行的延迟配网，避免释放后又冒出一个 request 把刚断的连接重新拉起
         mainHandler.removeCallbacksAndMessages(null)
-        runCatching { networkCallback?.let { connectivityManager.unregisterNetworkCallback(it) } }
+        val callback = networkCallback
         networkCallback = null
+        runCatching { callback?.let { connectivityManager.unregisterNetworkCallback(it) } }
         cameraNetwork = null
         lastReleaseAt = android.os.SystemClock.elapsedRealtime()
     }
+
+    private fun isCurrentRequest(
+        callback: ConnectivityManager.NetworkCallback,
+        generation: Long,
+    ): Boolean = networkCallback === callback && requestGeneration.get() == generation
 
     /** 解绑进程网络 */
     fun unbindProcessNetwork() {
