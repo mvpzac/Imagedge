@@ -2,6 +2,37 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+> 相机能力模型（T0）：参数可调性与可选档位全部改由相机上报的描述符决定。
+
+### Added / 新增
+
+- 新增 `CameraIdentity(model, firmware, transport, mode)` 与 `CameraCapabilities`：每项能力
+  判为 unknown / unsupported / readOnly / writable，并保留判定依据（属性码、证据类型、诊断说明）。
+- 遥控页展示相机身份（型号 · 固件 · 连接方式 · 功能模式），并逐项说明参数为什么不可调整。
+- `:ptp` 描述符解析支持 FormFlag=0x01（Range：min/max/step），并按 dataType 提供符号扩展。
+- 新增 `docs/camera-capability-matrix.md`：判定规则、属性码登记表、通道能力与未验证项。
+
+### Changed / 变更
+
+- **移除全部硬编码可写档位表**（ISO / 光圈 / 快门 fallback 预设、7 档白平衡、19 档曝光补偿）。
+  这些档位从未与相机核对过：f/3.5-5.6 套头上会出现 f/1.8，白平衡与曝光补偿也是照抄值表。
+  现在相机没上报取值形式就禁用该项并说明原因，不再猜。
+- 参数下发拆成「决策 + 执行」：只有 `PropertyWriteDecision.Send` 才触达通道，属性码与值宽度
+  均取自相机描述符（此前按属性码硬编码 2/4 字节）。
+- `CameraSettings` 只保留当前值，能力信息迁往 `CameraCapabilities`；曝光补偿统一为已符号扩展的
+  INT16（此前 `-0.3EV` 依赖调用方自行按 16 位补码解释）。
+- 断线（保活失败 / 事务超时自愈 / 用户断开）立即把界面拉回「未知」，不再继续显示上一轮的可写档位。
+
+### Fixed / 修复
+
+- **请求超时不再被当成「不支持」**：0x9209 读取失败时能力为 UNKNOWN 且标记陈旧，
+  下一次成功读取即恢复；陈旧快照一律禁止下发命令。
+- BLE 相机状态（对焦/快门/录像）改为三态：断线后显示「未知」而不是伪造的「未录像」——
+  相机可能仍在录制，只是已断开看不见。
+- UPnP（「发送到智能手机」）通道下不再让遥控快门按下去毫无反应，明确提示该通道不支持遥控拍摄。
+
 ## [0.2.0-alpha06] - 2026-09-23
 
 > 全面安全、稳定性与流畅性加固；液态玻璃渲染热路径优化。

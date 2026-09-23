@@ -17,8 +17,15 @@ import kotlinx.coroutines.withTimeoutOrNull
 import androidx.lifecycle.viewModelScope
 import com.imagedge.camera.data.ble.BleShutterState
 import com.imagedge.camera.data.ble.SonyBleShutter
+import com.imagedge.camera.data.model.CameraCapabilities
+import com.imagedge.camera.data.model.CameraCapability
+import com.imagedge.camera.data.model.CameraIdentity
 import com.imagedge.camera.data.model.CameraSettings
+import com.imagedge.camera.data.model.CapabilityDetail
+import com.imagedge.camera.data.model.CapabilityState
 import com.imagedge.camera.data.remote.CameraRepository
+import com.imagedge.camera.data.remote.CameraSnapshot
+import com.imagedge.camera.data.remote.ChannelConnectionState
 import com.imagedge.camera.data.remote.LiveViewRepository
 import com.imagedge.camera.data.transfer.DownloadManager
 import com.imagedge.camera.ui.feedback.Haptics
@@ -34,11 +41,25 @@ import javax.inject.Inject
 /**
  * <pre>
  *     author : Imagedge Team
- *     time   : 2026/08/27
+ *     time   : 2026-08-27
  *     desc   : 相机控制 ViewModel（连接 / 拍照 / 参数调节）
- *     version: 1.0
+ *     version: 2.0 —— 参数控制全面改为能力驱动（T0）：不再有任何硬编码可写档位
  * </pre>
  */
+
+/**
+ * 单个拍摄参数在界面上的呈现。
+ *
+ * 三态由相机能力快照决定：可写且有档位 → 选择器；只读/不支持 → 只读文本；
+ * 未知（未探测或读取超时）→ 禁用并解释。[editable] 为 false 时本 ViewModel 不下发命令，
+ * [CameraRepository] 层还有同一份校验兜底——「界面禁用」与「不会发命令」必须是同一件事。
+ */
+data class ParamUiState(
+    val currentLabel: String?,
+    val options: List<Pair<String, Long>>,
+    val detail: CapabilityDetail,
+    val editable: Boolean
+)
 
 /** 控制状态 */
 data class ControlState(
@@ -46,76 +67,15 @@ data class ControlState(
     val connecting: Boolean = false,
     val taking: Boolean = false,
     val message: String? = null,
-    // ── ISO/光圈/快门：能力驱动（相机 0x9209 上报 supported 枚举表 → UI 下拉可选项）──
-    // 当前原始值 + 可选项（标签 → 原始值）；supported 为空时回退到硬编码预设（见 CameraPresets）
-    val isoRaw: Long? = null,
-    val isoOptions: List<Pair<String, Long>> = emptyList(),
-    val fNumberRaw: Long? = null,
-    val fNumberOptions: List<Pair<String, Long>> = emptyList(),
-    val shutterRaw: Long? = null,
-    val shutterOptions: List<Pair<String, Long>> = emptyList(),
-    // ── 扩展参数回显（0x9209 相机上报为准；null=相机未返回）──
-    val shootModeLabel: String? = null,
-    /** 照相模式原始值（选中态判断用） */
-    val shootModeCode: Long? = null,
-    /** 照相模式可选项（相机 0x9209 上报的 supported 枚举表，空/只读 = 不可远程调整） */
-    val shootModeOptions: List<Pair<String, Long>> = emptyList(),
-    val whiteBalance: String? = null,
-    val exposureBias: String? = null
+    /** 相机身份（型号 / 固件 / 传输方式 / 功能模式），未连接时为 [CameraIdentity.UNKNOWN] */
+    val identity: CameraIdentity = CameraIdentity.UNKNOWN,
+    /** 能力快照是否陈旧（本轮尚未成功探测）——此时只可展示，不可据此下发命令 */
+    val capabilitiesStale: Boolean = true,
+    /** 各拍摄参数的呈现状态（键为能力项，未探测时为空表） */
+    val params: Map<CameraCapability, ParamUiState> = emptyMap(),
+    /** PTP 遥控拍摄是否可用（BLE 快门是另一条独立通路，不由此项决定） */
+    val captureAvailable: Boolean = false
 )
-
-/** 参数预设档位（照相模式不在此列：其选项以相机 0x9209 上报的枚举表为准，见 ControlState）。
- *  ISO/光圈/快门 fallback 预设：相机未上报 supported 时使用，值为可直接下发的原始值。
- *  注意 Auto 的 raw 是 0x00FFFFFF（旧的 isoToRaw("Auto")=0 会导致无法设回 Auto，已修正）。 */
-object CameraPresets {
-    val ISO_PRESETS: List<Pair<String, Long>> = listOf(
-        "Auto" to 0x00FFFFFFL,
-        "100" to 100L, "200" to 200L, "400" to 400L, "800" to 800L,
-        "1600" to 1600L, "3200" to 3200L, "6400" to 6400L, "12800" to 12800L
-    )
-    val FNUMBER_PRESETS: List<Pair<String, Long>> = listOf(
-        "1.8" to 180L, "2.0" to 200L, "2.8" to 280L, "4.0" to 400L,
-        "5.6" to 560L, "8.0" to 800L, "11" to 1100L, "16" to 1600L, "22" to 2200L
-    )
-    val SHUTTER_PRESETS: List<Pair<String, Long>> = listOf(
-        "1/4000" to (1L shl 16 or 4000L),
-        "1/2000" to (1L shl 16 or 2000L),
-        "1/1000" to (1L shl 16 or 1000L),
-        "1/500" to (1L shl 16 or 500L),
-        "1/250" to (1L shl 16 or 250L),
-        "1/125" to (1L shl 16 or 125L),
-        "1/60" to (1L shl 16 or 60L),
-        "1/30" to (1L shl 16 or 30L),
-        "1/15" to (1L shl 16 or 15L),
-        "1/8" to (1L shl 16 or 8L),
-        "1/4" to (1L shl 16 or 4L),
-        "1/2" to (1L shl 16 or 2L),
-        "1\"" to (10L shl 16 or 10L)
-    )
-
-    /** 白平衡（0x5005 枚举值表：官方 EnumWhiteBalanceMode） */
-    val WB_OPTIONS = listOf(
-        "自动" to 3L,
-        "日光" to 5L,
-        "阴影" to 14L,
-        "阴天" to 13L,
-        "白炽灯" to 7L,
-        "荧光灯" to 6L,
-        "闪光灯" to 8L
-    )
-
-    /** 曝光补偿（0x5010，INT16 EV×1000；±3.0EV 1/3 步） */
-    val EB_OPTIONS: List<Pair<String, Long>> = listOf(
-        "+3.0" to 3000L, "+2.7" to 2700L, "+2.3" to 2300L, "+2.0" to 2000L,
-        "+1.7" to 1700L, "+1.3" to 1300L, "+1.0" to 1000L, "+0.7" to 700L,
-        "+0.3" to 300L, "0.0" to 0L,
-        "-0.3" to (-300L).and(0xFFFFL), "-0.7" to (-700L).and(0xFFFFL),
-        "-1.0" to (-1000L).and(0xFFFFL), "-1.3" to (-1300L).and(0xFFFFL),
-        "-1.7" to (-1700L).and(0xFFFFL), "-2.0" to (-2000L).and(0xFFFFL),
-        "-2.3" to (-2300L).and(0xFFFFL), "-2.7" to (-2700L).and(0xFFFFL),
-        "-3.0" to (-3000L).and(0xFFFFL)
-    )
-}
 
 /**
  * LiveView 取景目标尺寸（3:2）。
@@ -167,7 +127,7 @@ class CameraControlViewModel @Inject constructor(
     /** BLE 快门连接状态（Disconnected/Scanning/Connecting/Connected） */
     val bleState = bleShutter.state
 
-    /** 相机实时状态（ff02 通知：对焦/快门/录像） */
+    /** 相机实时状态（ff02 通知：对焦/快门/录像，三态；断线后为未知而非「未录像」） */
     val cameraStatus = bleShutter.cameraStatus
 
     /** 已认知的相册内容指纹集合，用于「拍摄后增量拉取」差异对比 */
@@ -190,11 +150,29 @@ class CameraControlViewModel @Inject constructor(
             cameraRepository.captureEvents.collect { _ -> refreshAfterCapture() }
         }
         // 参数双向同步：相机端拨盘/菜单改动参数 → 0xC203/0x4006 事件推送 →
-        // 300ms 合并去抖 → 重读 0x9209 回显（手机显示始终以相机实际状态为准）
+        // 300ms 合并去抖 → 重读 0x9209 回显（手机显示始终以相机实际状态为准）。
+        // 换镜头/换拍摄模式导致的档位变化同样经这条路径刷新。
         viewModelScope.launch {
             cameraRepository.propEvents
                 .debounce(300)
-                .collect { readSettings() }
+                .collect { refreshCameraState() }
+        }
+        // 断线（保活失败 / 事务超时自愈 forceClose / 用户断开）→ 立即回到「未知」。
+        // 否则界面会继续显示上一轮的可写档位，用户点下去才发现命令全部失败。
+        viewModelScope.launch {
+            cameraRepository.connectionState.collect { channelState ->
+                val connected = channelState == ChannelConnectionState.CONNECTED
+                _state.update { it.copy(isConnected = connected) }
+                if (!connected) {
+                    applySnapshot(
+                        CameraSnapshot(
+                            CameraIdentity.UNKNOWN,
+                            CameraSettings(),
+                            CameraCapabilities.UNKNOWN
+                        )
+                    )
+                }
+            }
         }
     }
 
@@ -252,10 +230,11 @@ class CameraControlViewModel @Inject constructor(
         if (bleShutter.state.value is BleShutterState.Connected) {
             viewModelScope.launch {
                 bleShutter.shutterPress()     // [01,09]：触发拍摄
-                // 等相机确认快门已触发（ff02 状态 feedback shutter=true），最多 3 秒
+                // 等相机确认快门已触发（ff02 状态 feedback shutter=true），最多 3 秒。
+                // 状态是三态的，必须显式等 true：null（未知）不算触发。
                 // 参考 alpharemote CAWaitFor(SHUTTER)：过早发回位/半按抬起会打断拍摄导致写卡卡死
                 val triggered = withTimeoutOrNull(3000) {
-                    bleShutter.cameraStatus.first { it.shutter }
+                    bleShutter.cameraStatus.first { it.shutter == true }
                 } != null
                 if (triggered) {
                     delay(500)                    // 快门触发后留出曝光时间
@@ -263,7 +242,7 @@ class CameraControlViewModel @Inject constructor(
                     delay(500)                    // 回位稳定后再抬半按，避免干扰写卡
                     bleShutter.halfRelease()      // [01,06]：半按抬起，结束对焦
                 } else {
-                    AppLog.w("control", "快门未触发（3s 超时），仍执行回位")
+                    AppLog.w("control", "快门未触发（3s 超时或状态未知），仍执行回位")
                     bleShutter.shutterRelease()
                     bleShutter.halfRelease()
                 }
@@ -335,15 +314,15 @@ class CameraControlViewModel @Inject constructor(
     }
 
     /**
-     * 进入控制面板工作态：真正建立相机连接，再建相册基线并读取参数。
+     * 进入控制面板工作态：真正建立相机连接，再建相册基线并探测能力。
      *
      * 参数走 PTP DeviceProp、快门走 BLE/PTP、LiveView 走 60152 裸流，
      * 均不依赖索尼 Web API（ZV-E10 无此服务，相关代码已于 2026-08-29 清除）。
      *
      * 修复（P1-1）：原实现**从不调用** `cameraRepository.connect()`，只是把
      * isConnected 直接置 true —— 一个纯粹的假状态。相机实际没连上时，
-     * readSettings() 因 `getOrNull() ?: return` 静默返回，用户看到空白面板且
-     * 没有任何错误提示，无法判断到底是没连上还是相机不支持。
+     * 参数读取静默返回，用户看到空白面板且没有任何错误提示，无法判断到底是
+     * 没连上还是相机不支持。
      */
     fun connect() {
         if (_state.value.connecting) return
@@ -362,7 +341,16 @@ class CameraControlViewModel @Inject constructor(
                 )
             }
             if (!ok) return@launch
-            // 基线相册内容（供拍摄后增量拉取）+ 读取相机当前参数
+            // 先同步通道**自我声明**的能力（不发 0x9209 往返）：遥控拍摄不依赖描述符，
+            // 而下面的相册基线扫描可达 10~30s，等它跑完再同步会让快门一直压在禁用态
+            applySnapshot(
+                CameraSnapshot(
+                    cameraRepository.identity.value,
+                    CameraSettings(),
+                    cameraRepository.capabilities.value
+                )
+            )
+            // 基线相册内容（供拍摄后增量拉取）+ 探测参数能力并回显
             runCatching { cameraRepository.listMedia() }.getOrNull()?.let { items ->
                 lastKnownThumbKeys.clear()
                 lastKnownThumbKeys.addAll(items.map { it.thumbKey })
@@ -370,7 +358,7 @@ class CameraControlViewModel @Inject constructor(
                 // 会把整张相册当成新照片灌进下载队列
                 baselineReady = true
             }
-            readSettings()
+            refreshCameraState()
         }
     }
 
@@ -393,115 +381,121 @@ class CameraControlViewModel @Inject constructor(
         super.onCleared()
     }
 
-    /** 设置 ISO（PTP DeviceProp 0xD21E，接收相机原始值：低 24 位 = ISO，0x00FFFFFF = Auto） */
-    fun setIso(raw: Long) {
-        _state.update { it.copy(isoRaw = raw) }
-        viewModelScope.launch {
-            val ok = runCatching { cameraRepository.setIso(raw) }.getOrDefault(false)
-            _state.update {
-                it.copy(message = if (ok) "ISO 已设为 ${CameraSettings.formatIso(raw)}"
-                    else "ISO 设置失败（相机未响应或该机型不支持）")
-            }
-            readSettings()
-        }
-    }
+    // ── 参数下发（全部经能力校验）──────────────────────────────────────
 
-    /** 设置光圈（PTP DeviceProp 0x5007，接收原始值 = f 值 ×100） */
-    fun setFNumber(raw: Long) {
-        _state.update { it.copy(fNumberRaw = raw) }
-        viewModelScope.launch {
-            val ok = runCatching { cameraRepository.setFNumber(raw) }.getOrDefault(false)
-            _state.update {
-                it.copy(message = if (ok) "光圈已设为 f/${CameraSettings.formatFNumber(raw)}"
-                    else "光圈设置失败（相机未响应或该机型不支持）")
-            }
-            readSettings()
-        }
-    }
+    /** 设置 ISO（原始值：低 24 位 = ISO，0x00FFFFFF = Auto） */
+    fun setIso(raw: Long) = writeParam(CameraCapability.ISO, raw, "ISO") { cameraRepository.setIso(it) }
 
-    /** 设置快门（PTP DeviceProp 0xD20D，接收原始值：高 16 分子 / 低 16 分母） */
-    fun setShutterSpeed(raw: Long) {
-        _state.update { it.copy(shutterRaw = raw) }
-        viewModelScope.launch {
-            val ok = runCatching { cameraRepository.setShutterSpeed(raw) }.getOrDefault(false)
-            _state.update {
-                it.copy(message = if (ok) "快门已设为 ${CameraSettings.formatShutter(raw)}"
-                    else "快门设置失败（相机未响应或该机型不支持）")
-            }
-            readSettings()
-        }
-    }
+    /** 设置光圈（原始值 = f 值 ×100） */
+    fun setFNumber(raw: Long) =
+        writeParam(CameraCapability.F_NUMBER, raw, "光圈") { cameraRepository.setFNumber(it) }
 
-    /** 设置白平衡（PTP DeviceProp 0x5005） */
-    fun setWhiteBalance(code: Long) {
-        viewModelScope.launch {
-            val ok = runCatching { cameraRepository.setWhiteBalance(code) }.getOrDefault(false)
-            _state.update {
-                it.copy(message = if (ok) null else "白平衡设置失败（相机未响应或该机型不支持）")
-            }
-            readSettings()
-        }
-    }
+    /** 设置快门（原始值：高 16 分子 / 低 16 分母） */
+    fun setShutterSpeed(raw: Long) =
+        writeParam(CameraCapability.SHUTTER_SPEED, raw, "快门") { cameraRepository.setShutterSpeed(it) }
 
-    /** 设置曝光补偿（PTP DeviceProp 0x5010，INT16 EV×1000） */
-    fun setExposureBias(raw: Long) {
-        viewModelScope.launch {
-            val ok = runCatching { cameraRepository.setExposureBias(raw) }.getOrDefault(false)
-            _state.update {
-                it.copy(message = if (ok) null else "曝光补偿设置失败（相机未响应或该机型不支持）")
-            }
-            readSettings()
-        }
-    }
+    /** 设置白平衡 */
+    fun setWhiteBalance(code: Long) =
+        writeParam(CameraCapability.WHITE_BALANCE, code, "白平衡") { cameraRepository.setWhiteBalance(it) }
 
-    /** 设置照相模式（PTP DeviceProp 0x500E，官方 APP 同款 0x9205 通道） */
-    fun setShootMode(raw: Long) {
+    /** 设置曝光补偿（有符号 EV×1000） */
+    fun setExposureBias(raw: Long) =
+        writeParam(CameraCapability.EXPOSURE_BIAS, raw, "曝光补偿") { cameraRepository.setExposureBias(it) }
+
+    /** 设置照相模式 */
+    fun setShootMode(raw: Long) =
+        writeParam(CameraCapability.EXPOSURE_PROGRAM_MODE, raw, "照相模式") {
+            cameraRepository.setExposureProgramMode(it)
+        }
+
+    /**
+     * 参数下发唯一入口。
+     *
+     * 能力未确认可写（未知 / 只读 / 不支持 / 快照陈旧 / 相机没给可选档位）时**不发命令**，
+     * 只提示原因。不做「先乐观更新 UI 再等相机」——相机拒绝时界面会留下一个假值。
+     */
+    private fun writeParam(
+        capability: CameraCapability,
+        raw: Long,
+        label: String,
+        send: suspend (Long) -> Boolean
+    ) {
+        val param = _state.value.params[capability]
+        if (param?.editable != true) {
+            val state = param?.detail?.state ?: CapabilityState.UNKNOWN
+            AppLog.w("control", "界面阻止下发 $label：能力状态=$state（${param?.detail?.note}）")
+            _state.update { it.copy(message = "$label 当前不可调整") }
+            return
+        }
         viewModelScope.launch {
-            val ok = runCatching { cameraRepository.setExposureProgramMode(raw) }.getOrDefault(false)
+            val ok = runCatching { send(raw) }.getOrDefault(false)
             _state.update {
                 it.copy(
-                    message = if (ok) null
-                    else "照相模式切换失败（相机未响应或当前状态不允许）"
+                    message = if (ok) "$label 已设为 ${CameraCapabilities.labelOf(capability, raw)}"
+                    else "$label 设置失败（相机未响应或已断开）"
                 )
             }
-            readSettings()
+            refreshCameraState()
         }
     }
 
-    /** 读取相机当前参数并回显到 UI */
-    private suspend fun readSettings() {
-        val settings = runCatching { cameraRepository.readCameraSettings() }.getOrNull() ?: return
-        _state.update { s ->
-            s.copy(
-                isoRaw = settings.isoRaw,
-                isoOptions = if (settings.isoSupported.isNotEmpty())
-                    CameraSettings.isoOptions(settings.isoSupported)
-                else CameraPresets.ISO_PRESETS,
-                fNumberRaw = settings.fNumberRaw,
-                fNumberOptions = if (settings.fNumberSupported.isNotEmpty())
-                    CameraSettings.fNumberOptions(settings.fNumberSupported)
-                else CameraPresets.FNUMBER_PRESETS,
-                shutterRaw = settings.shutterRaw,
-                shutterOptions = if (settings.shutterSupported.isNotEmpty())
-                    CameraSettings.shutterOptions(settings.shutterSupported)
-                else CameraPresets.SHUTTER_PRESETS,
-                shootModeLabel = settings.exposureProgramMode
-                    ?.let { CameraSettings.formatProgramMode(it) } ?: s.shootModeLabel,
-                shootModeCode = settings.exposureProgramMode ?: s.shootModeCode,
-                // 照相模式选项：相机上报枚举表 ∩ 官方 APP 遥控白名单（固定顺序），
-                // 滤掉协议表里的场景模式/拨盘位/程序偏移态；只读属性不渲染选择器
-                shootModeOptions = if (settings.exposureProgramModeSettable) {
-                    CameraSettings.selectableProgramModes(settings.exposureProgramModeSupported)
-                        .map { CameraSettings.formatProgramMode(it) to it }
-                } else {
-                    emptyList()
-                },
-                whiteBalance = settings.whiteBalance
-                    ?.let { CameraSettings.formatWhiteBalance(it) } ?: s.whiteBalance,
-                exposureBias = settings.exposureBias
-                    ?.let { CameraSettings.formatExposureBias(it) } ?: s.exposureBias
+    // ── 能力探测与回显 ─────────────────────────────────────────────────
+
+    /**
+     * 探测能力并回显参数（一次 0x9209 往返同时得到能力快照与当前值）。
+     *
+     * 探测失败时回落到仓库当前快照（未连接即全 UNKNOWN），界面随之禁用全部控件——
+     * 绝不保留上一轮的「可写」态。
+     */
+    private suspend fun refreshCameraState() {
+        val snapshot = runCatching { cameraRepository.refreshCapabilities() }
+            .onFailure { AppLog.w("control", "读取相机能力失败：${it.message}") }
+            .getOrNull()
+            ?: CameraSnapshot(
+                cameraRepository.identity.value,
+                CameraSettings(),
+                cameraRepository.capabilities.value
+            )
+        applySnapshot(snapshot)
+    }
+
+    private fun applySnapshot(snapshot: CameraSnapshot) {
+        val capabilities = snapshot.capabilities
+        _state.update {
+            it.copy(
+                identity = snapshot.identity,
+                capabilitiesStale = capabilities.stale,
+                captureAvailable = capabilities.canWrite(CameraCapability.CAPTURE),
+                params = PARAMETERS.associateWith { capability ->
+                    paramOf(capabilities, capability, snapshot.settings)
+                }
             )
         }
+    }
+
+    private fun paramOf(
+        capabilities: CameraCapabilities,
+        capability: CameraCapability,
+        settings: CameraSettings
+    ): ParamUiState {
+        val raw = when (capability) {
+            CameraCapability.ISO -> settings.isoRaw
+            CameraCapability.F_NUMBER -> settings.fNumberRaw
+            CameraCapability.SHUTTER_SPEED -> settings.shutterRaw
+            CameraCapability.EXPOSURE_PROGRAM_MODE -> settings.exposureProgramMode
+            CameraCapability.WHITE_BALANCE -> settings.whiteBalance
+            CameraCapability.EXPOSURE_BIAS -> settings.exposureBias
+            CameraCapability.CAPTURE -> null
+        }
+        val options = capabilities.optionsFor(capability)
+        return ParamUiState(
+            currentLabel = raw?.let { CameraCapabilities.labelOf(capability, it) },
+            options = options,
+            detail = capabilities.detail(capability),
+            // 可写但相机没给档位（既无枚举表也无取值范围）时同样禁用：
+            // 没有相机确认过的取值可发，硬凑一份档位表就是「未经验证的可写参数」
+            editable = capabilities.canWrite(capability) && options.isNotEmpty()
+        )
     }
 
     /** 拍摄完成后：重扫相册，把新照片增量加入下载队列；未发现新照片时给出明确的限制说明。 */
@@ -527,5 +521,17 @@ class CameraControlViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    private companion object {
+        /** 遥控面板展示的参数（固定顺序）；CAPTURE 不是参数，单独由 captureAvailable 表达 */
+        val PARAMETERS = listOf(
+            CameraCapability.EXPOSURE_PROGRAM_MODE,
+            CameraCapability.ISO,
+            CameraCapability.F_NUMBER,
+            CameraCapability.SHUTTER_SPEED,
+            CameraCapability.WHITE_BALANCE,
+            CameraCapability.EXPOSURE_BIAS
+        )
     }
 }

@@ -148,6 +148,13 @@ class PtpChannel @Inject constructor() : CameraChannel {
     override var deviceModel: String = ""
         private set
 
+    /** 固件版本（GetDeviceInfo 的 DeviceVersion）——能力快照按「型号 + 固件」归档 */
+    override var deviceFirmware: String = ""
+        private set
+
+    /** PTP InitiateCapture 在「电脑遥控」模式实测可用（见 docs/sony-protocol-notes.md） */
+    override val supportsCapture: Boolean = true
+
     override suspend fun connect(host: String) = withContext(Dispatchers.IO) {
         connectInternal(host, functionMode)
     }
@@ -196,7 +203,10 @@ class PtpChannel @Inject constructor() : CameraChannel {
             }
             newClient.sonyInitSequence()
             newClient.sonyTryContentsTransferMode(mode)  // 0x9212：整卡 [2,0,0]→[2,1,0]；选片集 {1,0,0}
-            deviceModel = newClient.getDeviceInfo().model
+            val info = newClient.getDeviceInfo()
+            deviceModel = info.model
+            deviceFirmware = info.deviceVersion
+            AppLog.i(TAG, "设备身份：model=${info.model} firmware=${info.deviceVersion} mode=$mode")
         } catch (t: Throwable) {
             // 握手半途失败必须回收半成品客户端的 socket，否则每次失败都泄漏一对连接
             runCatching { newClient.forceClose() }
@@ -216,6 +226,9 @@ class PtpChannel @Inject constructor() : CameraChannel {
         val closingClient = client
         // Detach first so no new operation can capture the client while shutdown is in progress.
         client = null
+        // 身份随会话失效：留着旧型号/固件会让上层把断开后的能力快照当成当前相机的事实
+        deviceModel = ""
+        deviceFirmware = ""
         _connectionState.value = ChannelConnectionState.DISCONNECTED
         if (closingClient != null) {
             if (ptpMutex.tryLock()) {
@@ -611,10 +624,12 @@ class PtpChannel @Inject constructor() : CameraChannel {
 
     /**
      * 读取全部设备属性原始字节（0x9209）。
-     * @return 原始字节；未连接/异常返回 null
+     * @return 原始字节；未连接/异常返回 null（上层必须把 null 当成「未探测」而非「不支持」）
      */
     suspend fun getAllDeviceProperties(): ByteArray? = withContext(Dispatchers.IO) {
         val c = client ?: return@withContext null
-        runCatching { ptpCall { c.getAllDeviceProperties() } }.getOrNull()
+        runCatching { ptpCall { c.getAllDeviceProperties() } }
+            .onFailure { AppLog.w(TAG, "读取 0x9209 设备属性失败：${it.message}") }
+            .getOrNull()
     }
 }

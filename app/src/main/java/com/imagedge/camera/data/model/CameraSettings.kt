@@ -5,55 +5,44 @@ import java.util.Locale
 /**
  * <pre>
  *     author : Imagedge Team
- *     time   : 2026/08/28
+ *     time   : 2026-08-28
  *     desc   : 相机当前拍摄参数（PTP DeviceProp 读取结果，用于遥控面板回显）
- *     version: 1.0
+ *     version: 2.0 —— 只保留「当前值」；supported/settable 等能力信息迁往 CameraCapabilities
  * </pre>
  */
 
-/** 相机当前参数（null 表示相机未返回/不支持该属性） */
+/**
+ * 相机当前参数（null = 相机未返回该属性）。
+ *
+ * 本类只描述**值**，不描述**能力**。某项参数是否可写、有哪些合法档位，一律由
+ * [CameraCapabilities] 依据相机 0x9209 描述符判定——把两者混在一个类里，
+ * 正是「相机没上报就回退到硬编码档位表」这类 bug 的温床。
+ *
+ * 所有字段均为相机原始值（raw）；显示格式化见伴生对象的 `formatXxx`。
+ */
 data class CameraSettings(
-    val iso: String? = null,
-    val fNumber: String? = null,
-    val shutter: String? = null,
-
-    // ── 能力驱动：以下 supported/settable 来自 0x9209 描述符，用于渲染下拉可选项 ──
-    // 背景（真机 bug）：ISO/光圈档位原先是硬编码常量表，与镜头/机型实际能力脱节——
-    // ZV-E10 套头是 f/3.5-5.6，界面却提供 f/1.8；换镜头后档位全变。
-    // 照相模式早已走「相机上报 supported 枚举表驱动 UI」的路子（官方 APP 同款），
-    // 这里把同一套机制推广到全部数值型参数。
-
-    /** ISO 可选项原始值表（0x9209 上报，空 = 相机未上报，UI 回退到硬编码预设） */
-    val isoSupported: List<Long> = emptyList(),
-    val isoSettable: Boolean = false,
-    /** ISO 当前原始值（用于选中态高亮与回显，null = 相机未返回） */
+    /** ISO（索尼 0xD21E：低 24 位 = ISO 值，0x00FFFFFF = Auto） */
     val isoRaw: Long? = null,
-
-    /** 光圈可选项原始值表 */
-    val fNumberSupported: List<Long> = emptyList(),
-    val fNumberSettable: Boolean = false,
-    /** 光圈当前原始值（raw = f 值 ×100） */
+    /** 光圈（0x5007：f 值 ×100） */
     val fNumberRaw: Long? = null,
-
-    /** 快门可选项原始值表 */
-    val shutterSupported: List<Long> = emptyList(),
-    val shutterSettable: Boolean = false,
-    /** 快门当前原始值（高 16 分子 / 低 16 分母） */
+    /** 快门（索尼 0xD20D：高 16 分子 / 低 16 分母） */
     val shutterRaw: Long? = null,
-
-    // ── 扩展参数（PlayMemories 逆向 + 官方枚举值表，2026-08）──
-    /** 照相模式（ExposureProgramMode 0x500E 原始值） */
+    /** 照相模式（0x500E ExposureProgramMode） */
     val exposureProgramMode: Long? = null,
-    /** 照相模式可选项（0x9209 上报的 supported 枚举表，空 = 相机未上报） */
-    val exposureProgramModeSupported: List<Long> = emptyList(),
-    /** 照相模式是否可经 0x9205 远程设置 */
-    val exposureProgramModeSettable: Boolean = false,
-    /** 白平衡（0x5005 原始值） */
+    /** 白平衡（0x5005） */
     val whiteBalance: Long? = null,
-    /** 曝光补偿（0x5010 原始值，INT16 EV×1000） */
+    /** 曝光补偿（0x5010，INT16 EV×1000，**已符号扩展**：-3.0EV → -3000） */
     val exposureBias: Long? = null
 ) {
     companion object {
+        /**
+         * 曝光补偿「未定义」哨兵。
+         *
+         * 相机以 INT16 0xFFFF 上报未定义，符号扩展后即 -1；EV 步进为 1/3（±333 的整数倍），
+         * 正常档位取不到 -1，因此可以安全地把它当作哨兵。
+         */
+        const val EXPOSURE_BIAS_UNDEFINED = -1L
+
         /** 照相模式官方称呼（ExposureProgramMode 索尼值表，PlayMemories EnumExposureProgramMode） */
         fun formatProgramMode(raw: Long): String = when (raw) {
             1L -> "M 手动曝光"
@@ -111,12 +100,14 @@ data class CameraSettings(
             else -> "0x" + raw.toString(16)
         }
 
-        /** 曝光补偿格式化（INT16 EV×1000，0xFFFF=未定义）→ "+0.3"/"0.0"/"-1.0" */
-        fun formatExposureBias(raw: Long): String {
-            if (raw == 0xFFFFL) return "--"
-            val signed = if (raw > 0x7FFF) raw - 0x10000 else raw
-            if (signed == 0L) return "0.0"
-            val ev = signed / 1000.0
+        /**
+         * 曝光补偿格式化（**已符号扩展**的 INT16 EV×1000）→ "+0.3"/"0.0"/"-1.0"
+         * @see EXPOSURE_BIAS_UNDEFINED
+         */
+        fun formatExposureBias(signedRaw: Long): String {
+            if (signedRaw == EXPOSURE_BIAS_UNDEFINED) return "--"
+            if (signedRaw == 0L) return "0.0"
+            val ev = signedRaw / 1000.0
             return (if (ev > 0) "+" else "") + String.format(Locale.US, "%.1f", ev)
         }
 
@@ -149,26 +140,15 @@ data class CameraSettings(
             return "$numerator/$denominator"
         }
 
-        // ── 能力驱动：把相机上报的原始值表转成下拉选项（标签 → 原始值）──
-
-        /**
-         * 快门时长（秒），用于排序；无法解析时返回 null（排到最后）。
-         * "1/125" → 0.008；1 秒编码为 (10 shl 16)|10 → 10/10 = 1.0。
-         */
-        private fun shutterSeconds(raw: Long): Double? {
-            if (raw == 0L) return null                 // BULB：没有固定时长
-            val numerator = (raw shr 16) and 0xFFFF
-            val denominator = raw and 0xFFFF
-            if (denominator == 0L) return null
-            return numerator.toDouble() / denominator.toDouble()
-        }
+        // ── 把相机上报的原始值表转成下拉选项（标签 → 原始值）──
+        // 这些函数只负责排序与格式化；「能不能给选项」由 CameraCapabilities.optionsFor 判定。
 
         /**
          * ISO 选项：Auto（低 24 位 = 0xFFFFFF）排最前，其余按数值升序，与相机菜单一致。
          *
-         * 注意 Auto 的 raw 是 0x00FFFFFF 而不是 0——旧的硬编码路径里 `isoToRaw("Auto")=0`
-         * 被 `raw <= 0` 守卫挡掉，等于**根本没法把 ISO 设回 Auto**；走相机上报值后这个
-         * 档位才真正可用。
+         * 注意 Auto 的 raw 是 0x00FFFFFF 而不是 0——旧的「字符串 → raw」路径把 Auto 编码成 0，
+         * 又被 `raw <= 0` 守卫挡掉，等于**根本没法把 ISO 设回 Auto**；改为直接使用相机上报的
+         * 原始值后这个档位才真正可用。
          */
         fun isoOptions(supported: List<Long>): List<Pair<String, Long>> =
             supported
@@ -193,5 +173,24 @@ data class CameraSettings(
                     compareBy<Long> { shutterSeconds(it) ?: Double.MAX_VALUE }
                 )
                 .map { formatShutter(it) to it }
+
+        /** 白平衡选项：按相机上报的枚举值升序（与相机菜单顺序一致），过滤无效的 0 */
+        fun whiteBalanceOptions(supported: List<Long>): List<Pair<String, Long>> =
+            supported
+                .filter { it != 0L }
+                .sorted()
+                .map { formatWhiteBalance(it) to it }
+
+        /**
+         * 快门时长（秒），用于排序；无法解析时返回 null（排到最后）。
+         * "1/125" → 0.008；1 秒编码为 (10 shl 16)|10 → 10/10 = 1.0。
+         */
+        private fun shutterSeconds(raw: Long): Double? {
+            if (raw == 0L) return null                 // BULB：没有固定时长
+            val numerator = (raw shr 16) and 0xFFFF
+            val denominator = raw and 0xFFFF
+            if (denominator == 0L) return null
+            return numerator.toDouble() / denominator.toDouble()
+        }
     }
 }

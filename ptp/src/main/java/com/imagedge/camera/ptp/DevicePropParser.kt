@@ -13,6 +13,13 @@ package com.imagedge.camera.ptp
  * </pre>
  */
 
+/** FormFlag=0x01（Range）上报的取值范围；min/max/step 均为原始值 */
+data class ValueRange(
+    val min: Long,
+    val max: Long,
+    val step: Long
+)
+
 /** 单个设备属性解析结果 */
 data class DeviceProperty(
     val code: Int,
@@ -22,10 +29,31 @@ data class DeviceProperty(
     val enabled: Boolean,
     val currentValue: Long,
     /** 枚举值表（0x9209 描述符 FormFlag=0x02 时相机上报的合法取值列表） */
-    val supported: List<Long> = emptyList()
+    val supported: List<Long> = emptyList(),
+    /** 取值范围（FormFlag=0x01）；null = 相机未以 Range 形式上报 */
+    val range: ValueRange? = null
 ) {
     /** 相机是否允许经 0x9205 设置该属性 */
     val settable: Boolean get() = getSet == 0x01
+
+    /** 值字节宽（由 dataType 推出）；未知类型为 0 */
+    val valueSize: Int get() = DevicePropParser.typeSizeOf(dataType) ?: 0
+
+    /** 是否为有符号数据类型（INT8/16/32/64） */
+    val isSigned: Boolean get() = dataType in DevicePropParser.SIGNED_DATA_TYPES
+
+    /**
+     * 按 dataType 宽度做符号扩展（INT16 的 0xFFFF → -1）；无符号或宽度未知时原样返回。
+     *
+     * 解析层保留协议原始值，符号语义由调用方按需解释——曝光补偿（0x5010 INT16 EV×1000）
+     * 的负档位必须扩展后才能正确排序与格式化。
+     */
+    fun signed(raw: Long): Long {
+        val size = valueSize
+        if (!isSigned || size < 1 || size > 7) return raw
+        val shift = 64 - size * 8
+        return (raw shl shift) shr shift
+    }
 }
 
 /**
@@ -42,6 +70,12 @@ object DevicePropParser {
         0x0005 to 4, 0x0006 to 4,   // INT32 / UINT32
         0x0007 to 8, 0x0008 to 8    // INT64 / UINT64
     )
+
+    /** 有符号数据类型（INT8/16/32/64），符号扩展时用 */
+    val SIGNED_DATA_TYPES = setOf(0x0001, 0x0003, 0x0005, 0x0007)
+
+    /** 数据类型字节宽；未知类型返回 null */
+    fun typeSizeOf(dataType: Int): Int? = typeSize[dataType]
 
     /** 提取指定属性码的当前值 */
     fun parse(data: ByteArray, targetCodes: List<Int>): Map<Int, DeviceProperty> {
@@ -71,26 +105,44 @@ object DevicePropParser {
             if (cvOffset + valSize > data.size) return null
             val value = readLittleEndian(data, cvOffset, valSize)
 
-            // FormFlag + 枚举表（Camera Control PTP 3 Reference：
-            // FormFlag(1)，0x02=Enumeration → NumberOfValues(2) + values[N]）
-            val supported = mutableListOf<Long>()
+            // FormFlag + 取值形式（Camera Control PTP 3 Reference）：
+            //   0x01 = Range       → minValue(N) + maxValue(N) + stepSize(N)
+            //   0x02 = Enumeration → NumberOfValues(2) + values[N]
+            var supported = emptyList<Long>()
+            var range: ValueRange? = null
             val formOffset = cvOffset + valSize
-            if (formOffset < data.size && (data[formOffset].toInt() and 0xFF) == 0x02) {
-                var eo = formOffset + 1
-                if (eo + 2 <= data.size) {
-                    val numValues = readLittleEndian(data, eo, 2).toInt()
-                    eo += 2
-                    if (numValues in 1..200) {
-                        repeat(numValues) {
-                            if (eo + valSize <= data.size) {
-                                supported.add(readLittleEndian(data, eo, valSize))
-                                eo += valSize
+            if (formOffset < data.size) {
+                when (data[formOffset].toInt() and 0xFF) {
+                    0x01 -> {
+                        val ro = formOffset + 1
+                        if (ro + valSize * 3 <= data.size) {
+                            range = ValueRange(
+                                min = readLittleEndian(data, ro, valSize),
+                                max = readLittleEndian(data, ro + valSize, valSize),
+                                step = readLittleEndian(data, ro + valSize * 2, valSize)
+                            )
+                        }
+                    }
+                    0x02 -> {
+                        val values = mutableListOf<Long>()
+                        var eo = formOffset + 1
+                        if (eo + 2 <= data.size) {
+                            val numValues = readLittleEndian(data, eo, 2).toInt()
+                            eo += 2
+                            if (numValues in 1..200) {
+                                repeat(numValues) {
+                                    if (eo + valSize <= data.size) {
+                                        values.add(readLittleEndian(data, eo, valSize))
+                                        eo += valSize
+                                    }
+                                }
                             }
                         }
+                        supported = values
                     }
                 }
             }
-            return DeviceProperty(code, dataType, getSet, enabled, value, supported)
+            return DeviceProperty(code, dataType, getSet, enabled, value, supported, range)
         }
         return null
     }

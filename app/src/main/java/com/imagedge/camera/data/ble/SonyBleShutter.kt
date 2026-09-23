@@ -46,12 +46,21 @@ sealed class BleShutterState {
     data class Connected(val name: String) : BleShutterState()
 }
 
-/** 相机实时状态（经 BLE ff02 状态特征通知推送，参考 alpharemote） */
+/**
+ * 相机实时状态（经 BLE ff02 状态特征通知推送，参考 alpharemote）。
+ *
+ * 三个字段都是**三态**：true / false 表示相机确实推送过该状态，null 表示尚未收到通知
+ * 或连接已断开。断开时置 false 会在界面上显示「未录像」——那是凭空捏造的事实：
+ * 相机可能仍在录制，只是我们已经看不见了。未知就必须显示为未知。
+ */
 data class BleCameraStatus(
-    val focus: Boolean = false,       // 半按对焦中
-    val shutter: Boolean = false,     // 快门按下
-    val recording: Boolean = false    // 录像中
-)
+    val focus: Boolean? = null,       // 半按对焦中
+    val shutter: Boolean? = null,     // 快门按下
+    val recording: Boolean? = null    // 录像中
+) {
+    /** 是否收到过任何状态通知（全 null = 状态未知，界面不应据此断言相机空闲） */
+    val isKnown: Boolean get() = focus != null || shutter != null || recording != null
+}
 
 /**
  * 索尼 BLE 遥控快门客户端
@@ -335,6 +344,7 @@ class SonyBleShutter @Inject constructor(
         writeHandler.removeCallbacks(writeTimeoutRunnable)
         synchronized(writeQueue) { writeQueue.clear() }
         writing = false
+        // 断开即「状态未知」：三个字段全部回到 null，界面显示未知而不是伪造的「未录像」
         _cameraStatus.value = BleCameraStatus()
         _state.value = BleShutterState.Disconnected
         AppLog.i(TAG, "BLE 已断开")
@@ -366,6 +376,7 @@ class SonyBleShutter @Inject constructor(
                         writeHandler.removeCallbacks(writeTimeoutRunnable)
                         synchronized(writeQueue) { writeQueue.clear() }
                         writing = false
+                        // 掉线同样置为「状态未知」，不能当成「相机已停止对焦/录像」
                         _cameraStatus.value = BleCameraStatus()
                         _state.value = BleShutterState.Disconnected
                     }
@@ -420,7 +431,7 @@ class SonyBleShutter @Inject constructor(
          * 三参版 `onCharacteristicChanged(gatt, characteristic, value)` 是 **Android 13
          * (API 33)** 才加入的重载。项目 minSdk = 29，若只覆写三参版，Android 10/11/12
          * 上状态通知**永远不会回调**——表现为相机状态胶囊不亮，且 CameraControlViewModel
-         * 里 `withTimeoutOrNull(3000) { cameraStatus.first { it.shutter } }` 每次都跑满
+         * 里 `withTimeoutOrNull(3000) { cameraStatus.first { it.shutter == true } }` 每次都跑满
          * 3 秒超时（用户感知：「按快门要等 3 秒才拍」）。
          *
          * 统一转发到三参版，保证全版本行为一致。

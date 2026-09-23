@@ -29,6 +29,12 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
 
 - **通道抽象**：`CameraChannel` 接口（listMedia/getThumbnail/download/takePicture…），
   带 `connectionState` 与 `contentEvents` 两个可选能力（默认实现），UPnP 通道零改动。
+  通道还**自我声明**身份与能力（`deviceModel`/`deviceFirmware`/`supportsCapture`），
+  不靠「抛异常再由调用方捕获」表达差异。
+- **能力模型**：`CameraIdentity(model, firmware, transport, mode)` 是能力快照的归档键，
+  `CameraCapabilities` 把每项能力判为 unknown/unsupported/readOnly/writable 并保留判定依据。
+  连接、断开、功能模式切换都会重建快照；参数下发只有拿到 `PropertyWriteDecision.Send`
+  才触达通道。规则与未验证项见 `camera-capability-matrix.md`。
 - **相册刷新**：事件流（`StoreAdded/Removed/ObjectAdded`）触发即时静默刷新，
   4 秒轮询兜底；`MediaSessionCache` 让相册与二级页（大图/编辑）共享列表。
 - **配网**：`QrScanViewModel` → `CameraWifiManager.connectToCameraHotspot`（WifiNetworkSpecifier）。
@@ -58,6 +64,7 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
 |---|---|---|
 | `PtpIpClient` | `:ptp` | 双 socket 握手、索尼初始化序列、事务执行 |
 | `PtpChannel` | `:app/data/remote` | 事务互斥、超时自愈、保活、事件监听 |
+| `CameraCapabilities` | `:app/data/model` | 能力四态判定、选项生成、写入决策（`decideWrite`） |
 | `SonyBleShutter` | `:app/data/ble` | 蓝牙遥控快门（配对/GATT/命令队列） |
 | `CameraWifiManager` | `:app/data/remote/wifi` | 热点配网、网关发现、进程网络绑定 |
 | `EmbeddedJpegDecoder` | `:raw` | ARW TIFF 解析提取内嵌预览 |

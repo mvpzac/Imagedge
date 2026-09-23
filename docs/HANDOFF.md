@@ -114,6 +114,11 @@ com.imagedge.camera/
 13. **三拼/画框的转码输入必须是解析出的 MP4**（`slot.videoFile`），不是实况图 URI：
     实况图是 JPEG 头 + 后挂 MP4，Media3 会按「图片输入」处理——裁剪分数按视频尺寸算
     却作用在静态画面上，成品要么是静帧要么直接失败。
+14. **相机参数的可调性与档位一律来自 0x9209 描述符**，不要加「相机没上报就用一份默认档位表」
+    的兜底。硬编码档位表会在 f/3.5-5.6 套头上提供 f/1.8，并把未经相机确认的值当成可写参数下发。
+    能力四态里 **unknown ≠ unsupported**：0x9209 读取超时必须落到 unknown 且允许重试，
+    否则一次网络抖动就把可用控件永久变成「不支持」。下发前走 `CameraCapabilities.decideWrite()`，
+    拿到 `Send` 才触达通道。规则与未验证项见 [camera-capability-matrix.md](camera-capability-matrix.md)。
 
 ## 编辑功能现状（2026-09-11 完善后）
 

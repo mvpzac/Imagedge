@@ -9,10 +9,15 @@ import android.provider.MediaStore
 import androidx.core.net.toUri
 import com.imagedge.camera.core.common.AppLog
 import com.imagedge.camera.core.io.BoundedOutputStream
+import com.imagedge.camera.data.model.CameraCapabilities
+import com.imagedge.camera.data.model.CameraCapability
+import com.imagedge.camera.data.model.CameraIdentity
 import com.imagedge.camera.data.model.CameraSettings
+import com.imagedge.camera.data.model.CameraTransport
 import com.imagedge.camera.data.model.MediaItem
+import com.imagedge.camera.data.model.PropertyWriteDecision
 import com.imagedge.camera.data.remote.wifi.CameraWifiManager
-import com.imagedge.camera.ptp.DevicePropParser
+import com.imagedge.camera.ptp.DeviceProperty
 import com.imagedge.camera.ptp.SonyDevicePropCode
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -43,10 +48,17 @@ import javax.inject.Singleton
  * </pre>
  */
 
-/** 连接结果（通道类型 + 相机型号） */
+/** 连接结果（通道类型 + 相机身份：型号/固件/传输方式/功能模式） */
 data class ConnectionResult(
     val channelType: ChannelType,
-    val deviceModel: String
+    val identity: CameraIdentity
+)
+
+/** 一次能力探测的结果：身份 + 当前参数 + 能力快照 */
+data class CameraSnapshot(
+    val identity: CameraIdentity,
+    val settings: CameraSettings,
+    val capabilities: CameraCapabilities
 )
 
 /** 日志 tag */
@@ -94,6 +106,22 @@ class CameraRepository @Inject constructor(
 
     /** 当前连接的相机型号（未连接返回空串） */
     val deviceModel: String get() = activeChannel?.deviceModel ?: ""
+
+    private val _identity = MutableStateFlow(CameraIdentity.UNKNOWN)
+
+    /** 当前相机身份（型号 + 固件 + 传输方式 + 功能模式），即能力快照的归档键 */
+    val identity: StateFlow<CameraIdentity> = _identity.asStateFlow()
+
+    private val _capabilities = MutableStateFlow(CameraCapabilities.UNKNOWN)
+
+    /**
+     * 当前能力快照。
+     *
+     * 未连接时为 [CameraCapabilities.UNKNOWN]；0x9209 读取失败时属性类能力为
+     * UNKNOWN 且 stale=true（**不是** UNSUPPORTED——超时不等于不支持）。
+     * 所有写操作都必须先经 [CameraCapabilities.canWrite] 校验，见 [writeProperty]。
+     */
+    val capabilities: StateFlow<CameraCapabilities> = _capabilities.asStateFlow()
 
     /** 相机内容变化事件（选片推送 / 内容集重建，用于事件驱动立即刷新） */
     val contentEvents: Flow<Unit> get() = ptpChannel.contentEvents
@@ -147,22 +175,17 @@ class CameraRepository @Inject constructor(
         // 主通道：PTP/IP
         try {
             ptpChannel.connect(targetHost)
-            activeChannel = ptpChannel
-            _connectionState.value = ptpChannel.connectionState.value
-            AppLog.i(TAG, "PTP/IP 连接成功，型号=${ptpChannel.deviceModel}")
-            return@withContext ConnectionResult(ptpChannel.channelType, ptpChannel.deviceModel)
+            return@withContext adoptChannel(ptpChannel)
         } catch (ptpError: Exception) {
             AppLog.w(TAG, "PTP/IP 连接失败（${ptpError.message}），尝试降级 UPnP")
             // 降级通道：UPnP
             try {
                 upnpChannel.connect(targetHost)
-                activeChannel = upnpChannel
-                _connectionState.value = upnpChannel.connectionState.value
-                AppLog.i(TAG, "UPnP 连接成功，型号=${upnpChannel.deviceModel}")
-                return@withContext ConnectionResult(upnpChannel.channelType, upnpChannel.deviceModel)
+                return@withContext adoptChannel(upnpChannel)
             } catch (upnpError: Exception) {
                 activeChannel = null
                 _connectionState.value = ChannelConnectionState.DISCONNECTED
+                resetCapabilitySnapshot()
                 AppLog.e(TAG, "UPnP 连接失败（${upnpError.message}）")
                 // P1-13：两条通道都失败时必须解绑进程网络。
                 // 否则进程一直绑在已失效的相机 WiFi 上，用户切回家宽/蜂窝后，
@@ -177,11 +200,58 @@ class CameraRepository @Inject constructor(
         }
     }
 
+    /**
+     * 采用某通道为当前活跃通道，并按通道**自我声明**的能力重置身份与能力快照。
+     *
+     * 这里刻意不做 0x9209 往返：连接路径要尽快返回，参数能力由 [refreshCapabilities]
+     * 在进入遥控页时探测。重置后 PTP 通道是「未探测（UNKNOWN + stale）」，UPnP 通道是
+     * 「结构性不支持」——两者都不必读描述符即可确定。
+     */
+    private fun adoptChannel(channel: CameraChannel): ConnectionResult {
+        activeChannel = channel
+        _connectionState.value = channel.connectionState.value
+        resetCapabilitySnapshot()
+        AppLog.i(
+            TAG,
+            "${channel.channelType} 连接成功，型号=${channel.deviceModel} 固件=${channel.deviceFirmware}"
+        )
+        return ConnectionResult(channel.channelType, _identity.value)
+    }
+
+    /**
+     * 依据当前活跃通道重建身份与能力快照（不发起 0x9209 往返）。
+     *
+     * 调用时机：连接成功、断开、功能模式切换。三者都意味着上一轮快照的归档键已失效——
+     * 换模式/换通道后继续沿用旧能力，正是「把某台相机某次的经验泛化」那类 bug 的来源。
+     */
+    private fun resetCapabilitySnapshot() {
+        val channel = activeChannel
+        if (channel == null) {
+            _identity.value = CameraIdentity.UNKNOWN
+            _capabilities.value = CameraCapabilities.UNKNOWN
+            return
+        }
+        val identity = CameraIdentity(
+            model = channel.deviceModel,
+            firmware = channel.deviceFirmware,
+            transport = channel.channelType.toTransport(),
+            mode = if (channel.channelType == ChannelType.PTP_IP) currentFunctionMode
+            else CameraIdentity.MODE_UNKNOWN
+        )
+        _identity.value = identity
+        _capabilities.value = CameraCapabilities.fromDescriptors(
+            identity = identity,
+            props = null,
+            supportsCapture = channel.supportsCapture
+        )
+    }
+
     /** 断开连接 */
     suspend fun disconnect() = withContext(Dispatchers.IO) {
         activeChannel?.disconnect()
         activeChannel = null
         _connectionState.value = ChannelConnectionState.DISCONNECTED
+        resetCapabilitySnapshot()
         wifiManager.unbindProcessNetwork()
     }
 
@@ -233,7 +303,11 @@ class CameraRepository @Inject constructor(
         val ok = withContext(Dispatchers.IO) {
             ptpChannel.switchFunctionMode(mode)
         }
-        if (ok) currentFunctionMode = mode
+        if (ok) {
+            currentFunctionMode = mode
+            // 功能模式是能力归档键的一部分：模式一变，上一轮快照立即作废，必须重新探测
+            resetCapabilitySnapshot()
+        }
         return ok
     }
 
@@ -294,100 +368,134 @@ class CameraRepository @Inject constructor(
     /**
      * 遥控拍摄（PTP InitiateCapture，「电脑遥控」模式实测可用）。
      * 拍摄的照片是否自动进入待传输内容集由相机固件决定，通常需相机端选片后到相册下载。
+     *
+     * 通道未声明遥控拍摄能力时直接拒绝，不发命令——UPnP 通道下 [PtpChannel.takePicture]
+     * 注定失败，让调用方靠捕获异常来判断可用性既慢又容易漏。
      */
     suspend fun takePicture(): Long = withContext(Dispatchers.IO) {
+        if (!_capabilities.value.canWrite(CameraCapability.CAPTURE)) {
+            val detail = _capabilities.value.detail(CameraCapability.CAPTURE)
+            throw IllegalStateException("当前通道不支持遥控拍摄（${detail.state}：${detail.note}）")
+        }
         ptpChannel.takePicture()
     }
 
     // ── 设备属性（PTP DeviceProp）参数控制 ─────────────────────────────
 
-    /** 设置设备属性（PTP SDIO_CONTROL_DEVICE 0x9207）。@return 相机是否返回 OK */
-    suspend fun setDeviceProperty(propCode: Int, value: Long, valueSize: Int): Boolean =
+    /**
+     * 写设备属性（所有参数下发的**唯一出口**）。
+     *
+     * 决策与下发分离（见 [CameraCapabilities.decideWrite]）：只有拿到 Send 决策才触达通道，
+     * UNKNOWN（未探测/读取超时）、UNSUPPORTED、READ_ONLY 一律 Reject 并只记日志。
+     *
+     * @return 相机是否返回 OK；能力不足或通道不可用时返回 false 且**不发命令**
+     */
+    private suspend fun writeProperty(capability: CameraCapability, raw: Long): Boolean =
         withContext(Dispatchers.IO) {
-            ptpChannel.setDeviceProperty(propCode, value, valueSize)
+            when (val decision = _capabilities.value.decideWrite(capability, raw)) {
+                is PropertyWriteDecision.Reject -> {
+                    AppLog.w(
+                        TAG,
+                        "拒绝下发 ${decision.capability.name}：状态=${decision.state}（${decision.reason}）"
+                    )
+                    false
+                }
+
+                is PropertyWriteDecision.Send -> ptpChannel.setDeviceProperty(
+                    decision.propCode,
+                    decision.value,
+                    decision.valueSize
+                )
+            }
         }
 
     /**
      * 设置 ISO（索尼私有 0xD21E，UINT32 原始值：低 24 位 = ISO 值，0x00FFFFFF = Auto）。
      *
-     * 改为接收原始值而非显示字符串：可选项来自相机 0x9209 上报的枚举表，
+     * 接收原始值而非显示字符串：可选项来自相机 0x9209 上报的枚举表，
      * 不需要再「字符串 → raw」反推（反推既不支持 Auto，也覆盖不到机型特有档位）。
      */
-    suspend fun setIso(raw: Long): Boolean = withContext(Dispatchers.IO) {
-        ptpChannel.setDeviceProperty(SonyDevicePropCode.ISO, raw, 4)
-    }
+    suspend fun setIso(raw: Long): Boolean = writeProperty(CameraCapability.ISO, raw)
 
     /** 设置光圈（标准 0x5007，UINT16 = f 值 ×100） */
-    suspend fun setFNumber(raw: Long): Boolean = withContext(Dispatchers.IO) {
-        ptpChannel.setDeviceProperty(SonyDevicePropCode.F_NUMBER, raw, 2)
-    }
+    suspend fun setFNumber(raw: Long): Boolean = writeProperty(CameraCapability.F_NUMBER, raw)
 
     /** 设置快门速度（索尼私有 0xD20D，UINT32 高 16 分子 / 低 16 分母） */
-    suspend fun setShutterSpeed(raw: Long): Boolean = withContext(Dispatchers.IO) {
-        ptpChannel.setDeviceProperty(SonyDevicePropCode.SHUTTER_SPEED, raw, 4)
-    }
+    suspend fun setShutterSpeed(raw: Long): Boolean = writeProperty(CameraCapability.SHUTTER_SPEED, raw)
+
+    /** 设置白平衡（0x5005，枚举值见 CameraSettings.formatWhiteBalance 值表） */
+    suspend fun setWhiteBalance(code: Long): Boolean = writeProperty(CameraCapability.WHITE_BALANCE, code)
+
+    /** 设置曝光补偿（0x5010，INT16 EV×1000：+0.3EV → 300，-0.3EV → -300） */
+    suspend fun setExposureBias(raw: Long): Boolean = writeProperty(CameraCapability.EXPOSURE_BIAS, raw)
+
+    /** 设置照相模式（0x500E ExposureProgramMode，官方 APP 同款通道 0x9205） */
+    suspend fun setExposureProgramMode(raw: Long): Boolean =
+        writeProperty(CameraCapability.EXPOSURE_PROGRAM_MODE, raw)
 
     /**
-     * 读取相机当前参数（ISO/光圈/快门 + 照相模式/白平衡/曝光补偿）。
-     * 走 0x9209 一次读全部属性，再按属性码搜索；任一属性缺失不抛异常。
+     * 探测并刷新「身份 + 当前参数 + 能力快照」（一次 0x9209 往返同时得到后两者）。
+     *
+     * 读取失败（超时/断线/未连接）时能力落到 UNKNOWN 且 stale=true：**绝不记成不支持**，
+     * 也不保留上一轮的「可写」态（那会让界面继续放行注定失败的命令）。下一次成功读取
+     * 即恢复真实状态，因此失败不是永久性的。
      */
-    suspend fun readCameraSettings(): CameraSettings = withContext(Dispatchers.IO) {
-        val data = ptpChannel.getAllDeviceProperties()
-        if (data == null) return@withContext CameraSettings()
-        val props = DevicePropParser.parse(
-            data,
-            listOf(
-                SonyDevicePropCode.ISO,
-                SonyDevicePropCode.F_NUMBER,
-                SonyDevicePropCode.SHUTTER_SPEED,
-                SonyDevicePropCode.EXPOSURE_PROGRAM_MODE,
-                SonyDevicePropCode.WHITE_BALANCE,
-                SonyDevicePropCode.EXPOSURE_BIAS
+    suspend fun refreshCapabilities(): CameraSnapshot = withContext(Dispatchers.IO) {
+        val channel = activeChannel
+        if (channel == null) {
+            resetCapabilitySnapshot()
+            return@withContext CameraSnapshot(CameraIdentity.UNKNOWN, CameraSettings(), CameraCapabilities.UNKNOWN)
+        }
+        // 身份可能因保活自愈重连而变化（型号/固件重新读取），先同步再探测
+        resetCapabilitySnapshot()
+        val identity = _identity.value
+
+        val props = if (identity.transport == CameraTransport.PTP_IP) {
+            ptpChannel.getAllDeviceProperties()?.let { CameraCapabilities.parseDescriptors(it) }
+        } else {
+            null
+        }
+        val capabilities = CameraCapabilities.fromDescriptors(
+            identity = identity,
+            props = props,
+            supportsCapture = channel.supportsCapture
+        )
+        _capabilities.value = capabilities
+        logCapabilitySnapshot(capabilities)
+        CameraSnapshot(identity, settingsFrom(props), capabilities)
+    }
+
+    /** 能力快照落日志：这是兼容矩阵的原始证据，也是排查「为什么这项被禁用」的唯一线索 */
+    private fun logCapabilitySnapshot(capabilities: CameraCapabilities) {
+        val identity = capabilities.identity
+        AppLog.i(
+            TAG,
+            "能力快照 ${identity.snapshotKey}（descriptorRead=${capabilities.descriptorRead} stale=${capabilities.stale}）"
+        )
+        CameraCapability.entries.forEach { capability ->
+            val detail = capabilities.detail(capability)
+            AppLog.i(
+                TAG,
+                "  ${capability.name} = ${detail.state}（证据=${detail.evidence}，${detail.note}）"
             )
-        )
-        // supported 用于驱动下拉可选项，settable 决定渲染成选择器还是只读文本
-        fun supportedOf(code: Int) = props[code]?.supported ?: emptyList()
-        fun settableOf(code: Int) = props[code]?.settable == true
-
-        CameraSettings(
-            iso = props[SonyDevicePropCode.ISO]?.currentValue?.let { CameraSettings.formatIso(it) },
-            isoRaw = props[SonyDevicePropCode.ISO]?.currentValue,
-            isoSupported = supportedOf(SonyDevicePropCode.ISO),
-            isoSettable = settableOf(SonyDevicePropCode.ISO),
-
-            fNumber = props[SonyDevicePropCode.F_NUMBER]?.currentValue?.let { CameraSettings.formatFNumber(it) },
-            fNumberRaw = props[SonyDevicePropCode.F_NUMBER]?.currentValue,
-            fNumberSupported = supportedOf(SonyDevicePropCode.F_NUMBER),
-            fNumberSettable = settableOf(SonyDevicePropCode.F_NUMBER),
-
-            shutter = props[SonyDevicePropCode.SHUTTER_SPEED]?.currentValue?.let { CameraSettings.formatShutter(it) },
-            shutterRaw = props[SonyDevicePropCode.SHUTTER_SPEED]?.currentValue,
-            shutterSupported = supportedOf(SonyDevicePropCode.SHUTTER_SPEED),
-            shutterSettable = settableOf(SonyDevicePropCode.SHUTTER_SPEED),
-
-            exposureProgramMode = props[SonyDevicePropCode.EXPOSURE_PROGRAM_MODE]?.currentValue,
-            exposureProgramModeSupported = supportedOf(SonyDevicePropCode.EXPOSURE_PROGRAM_MODE),
-            exposureProgramModeSettable = settableOf(SonyDevicePropCode.EXPOSURE_PROGRAM_MODE),
-
-            whiteBalance = props[SonyDevicePropCode.WHITE_BALANCE]?.currentValue,
-            exposureBias = props[SonyDevicePropCode.EXPOSURE_BIAS]?.currentValue
-        )
+        }
     }
 
-    /** 设置白平衡（0x5005，uint16 枚举值，见 CameraSettings.formatWhiteBalance 值表） */
-    suspend fun setWhiteBalance(code: Long): Boolean =
-        ptpChannel.setDeviceProperty(SonyDevicePropCode.WHITE_BALANCE, code, 2)
-
-    /** 设置曝光补偿（0x5010，INT16 EV×1000：+0.3EV → 300） */
-    suspend fun setExposureBias(raw: Long): Boolean =
-        ptpChannel.setDeviceProperty(SonyDevicePropCode.EXPOSURE_BIAS, raw and 0xFFFF, 2)
-
-    /**
-     * 设置照相模式（0x500E ExposureProgramMode，官方 APP 同款通道 0x9205）。
-     * 值宽度按 0x9209 上报的 dataType（ZV-E10 上报 UINT32，如 P=0x00010002）。
-     */
-    suspend fun setExposureProgramMode(raw: Long, valueSize: Int = 4): Boolean =
-        ptpChannel.setDeviceProperty(SonyDevicePropCode.EXPOSURE_PROGRAM_MODE, raw, valueSize)
+    /** 由 0x9209 解析结果构建当前参数；[props] 为 null（读取失败）时全部为未知 */
+    private fun settingsFrom(props: Map<Int, DeviceProperty>?): CameraSettings {
+        if (props == null) return CameraSettings()
+        fun valueOf(code: Int) = props[code]?.currentValue
+        // 曝光补偿是有符号 INT16：必须按 dataType 扩展，否则 -0.3EV 会被读成 +65.2EV
+        val bias = props[SonyDevicePropCode.EXPOSURE_BIAS]
+        return CameraSettings(
+            isoRaw = valueOf(SonyDevicePropCode.ISO),
+            fNumberRaw = valueOf(SonyDevicePropCode.F_NUMBER),
+            shutterRaw = valueOf(SonyDevicePropCode.SHUTTER_SPEED),
+            exposureProgramMode = valueOf(SonyDevicePropCode.EXPOSURE_PROGRAM_MODE),
+            whiteBalance = valueOf(SonyDevicePropCode.WHITE_BALANCE),
+            exposureBias = bias?.let { it.signed(it.currentValue) }
+        )
+    }
 
     /**
      * 流式下载到系统相册（DCIM/Imagedge）

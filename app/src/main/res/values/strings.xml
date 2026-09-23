@@ -238,13 +238,28 @@
     <string name="remote_entry_open">进入</string>
     <string name="control_btn_shoot">按住对焦 · 松开拍照</string>
     <string name="control_shoot_mode">照相模式</string>
-    <string name="control_shoot_mode_on_camera">请在相机上切换</string>
     <string name="control_wb">白平衡</string>
     <string name="control_eb">曝光补偿</string>
     <string name="control_iso">ISO</string>
     <string name="control_fnumber">光圈</string>
     <string name="control_shutter">快门</string>
     <string name="control_params_title">拍摄参数</string>
+    <!-- 能力状态说明：参数行不可调整时必须解释原因，且「未知」与「不支持」不能混为一谈 -->
+    <string name="control_capability_unknown">未知：相机未上报或读取失败（不是「不支持」），已禁用</string>
+    <string name="control_capability_unsupported">该机型或当前连接方式不支持远程调整</string>
+    <string name="control_capability_read_only">只读，请在相机上调整</string>
+    <string name="control_capability_stale">能力信息待刷新，请重新连接后再试</string>
+    <string name="control_capability_no_options">相机上报可写，但未给出可选档位</string>
+    <string name="control_shutter_unavailable">当前连接方式不支持遥控拍摄（可改用蓝牙遥控）</string>
+    <!-- 相机身份：能力按「型号 + 固件 + 连接方式 + 功能模式」归档，必须让用户看见 -->
+    <string name="control_identity_unknown">未连接相机</string>
+    <string name="control_identity_firmware">固件 %1$s</string>
+    <string name="control_identity_mode_remote">选片集</string>
+    <string name="control_identity_mode_fullcard">整卡</string>
+    <string name="control_status_unknown">未知</string>
+    <string name="control_status_focus">对焦</string>
+    <string name="control_status_shutter">快门</string>
+    <string name="control_status_recording">录像</string>
 
     <!-- 设置 -->
 </resources>

@@ -45,7 +45,7 @@ class ConnectionViewModel @Inject constructor(
                     ConnectionState(
                         phase = ConnectionPhase.CONNECTED,
                         channelType = result.channelType,
-                        cameraModel = result.deviceModel
+                        cameraModel = result.identity.model
                     )
                 }
                 haptics.thud()

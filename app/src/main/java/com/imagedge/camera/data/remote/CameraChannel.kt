@@ -1,5 +1,6 @@
 package com.imagedge.camera.data.remote
 
+import com.imagedge.camera.data.model.CameraTransport
 import com.imagedge.camera.data.model.MediaItem
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,12 +13,18 @@ import java.io.OutputStream
  *     author : Imagedge Team
  *     time   : 2026/08/27
  *     desc   : 相机传输通道抽象（PTP/IP 与 UPnP 双通道统一接口）
- *     version: 1.1 —— 新增连接状态流与内容变化事件（带默认实现，弱通道可忽略）
+ *     version: 1.2 —— 通道自我声明身份与遥控拍摄能力（能力模型 T0）
  * </pre>
  */
 
 /** 通道类型 */
 enum class ChannelType { PTP_IP, UPNP }
+
+/** 通道类型 → 能力模型里的传输方式 */
+fun ChannelType.toTransport(): CameraTransport = when (this) {
+    ChannelType.PTP_IP -> CameraTransport.PTP_IP
+    ChannelType.UPNP -> CameraTransport.UPNP
+}
 
 /** 通道连接状态 */
 enum class ChannelConnectionState { DISCONNECTED, CONNECTED }
@@ -35,6 +42,24 @@ interface CameraChannel {
 
     /** 相机型号（连接后可用） */
     val deviceModel: String
+
+    /**
+     * 相机固件版本（PTP GetDeviceInfo 的 DeviceVersion）。
+     *
+     * 能力必须按「型号 + 固件」归档：同型号不同固件的菜单与属性表可能不同。
+     * 通道拿不到时为空串（此时快照的固件维度记为未知）。
+     */
+    val deviceFirmware: String
+        get() = ""
+
+    /**
+     * 通道是否支持遥控拍摄。
+     *
+     * 能力差异不靠「抛异常再由调用方捕获」表达，而是由通道显式声明，
+     * 让能力模型能在下发命令之前就判定可用性。
+     */
+    val supportsCapture: Boolean
+        get() = false
 
     /** 连接状态流（PTP 通道由保活/事务自愈维护；默认实现恒为 DISCONNECTED） */
     val connectionState: StateFlow<ChannelConnectionState>

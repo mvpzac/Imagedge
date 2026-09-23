@@ -180,12 +180,12 @@ class SettingsViewModel @Inject constructor(
                     ConnectionState(
                         phase = ConnectionPhase.CONNECTED,
                         channelType = result.channelType,
-                        cameraModel = result.deviceModel
+                        cameraModel = result.identity.model
                     )
                 }
                 _manual.value = ManualConnectState(
                     connected = true,
-                    message = "已连接 ${result.deviceModel}（${result.channelType}）"
+                    message = "已连接 ${result.identity.model}（${result.channelType}）"
                 )
             } catch (e: Exception) {
                 stateHolder.update {

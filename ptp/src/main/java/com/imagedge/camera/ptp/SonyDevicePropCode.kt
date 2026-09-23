@@ -4,7 +4,7 @@ package com.imagedge.camera.ptp
  * <pre>
  *     author : Imagedge Team
  *     time   : 2026/08/28
- *     desc   : 索尼相机设备属性码（DevicePropCode）+ 值编码/解码辅助
+ *     desc   : 索尼相机设备属性码（DevicePropCode）
  *             参考 sony-alpha-python（protocol.py SONY_PROPERTIES）与
  *             Sony-ZV-E10-RX（DevicePropCode.kt）互相印证
  *     version: 1.0
@@ -34,33 +34,4 @@ object SonyDevicePropCode {
     const val ISO = 0xD21E                       // UINT32，低 24 位 = ISO 值，高 8 位 = 模式
     const val SHUTTER_SPEED = 0xD20D             // UINT32，高 16 分子 / 低 16 分母（FX30/FX3）
     const val SHUTTER_SPEED_HIGH = 0xD017        // UINT32，FX6/高端机（仅读）
-
-    // ── 值编码 ────────────────────────────────────────────────────
-
-    /** 光圈字符串 → 原始值（×100）。f/1.8 → 180 */
-    fun fNumberToRaw(f: String): Int = (f.toFloat() * 100f).toInt()
-
-    /**
-     * 快门字符串 → 打包 UINT32（高 16 位分子 / 低 16 位分母）。
-     * - "1/125" → (1 shl 16) | 125
-     * - "1\""（1 秒）→ 分母 10 的「实数显示」约定：(10 shl 16) | 10
-     */
-    fun shutterToRaw(speed: String): Long {
-        val trimmed = speed.trim()
-        if (trimmed.endsWith("\"")) {
-            val sec = trimmed.removeSuffix("\"").toFloat()
-            val num = (sec * 10f).toInt()
-            return (num.toLong() shl 16) or 0x000AL
-        }
-        val parts = trimmed.split("/")
-        val numerator = parts.getOrNull(0)?.trim()?.toLongOrNull() ?: 1L
-        val denominator = parts.getOrNull(1)?.trim()?.toLongOrNull() ?: 1L
-        return (numerator shl 16) or (denominator and 0xFFFF)
-    }
-
-    /** ISO 字符串 → 原始值（Auto 返回 0，表示不设置） */
-    fun isoToRaw(iso: String): Long {
-        if (iso.equals("Auto", ignoreCase = true)) return 0L
-        return iso.trim().toLongOrNull() ?: 0L
-    }
 }
