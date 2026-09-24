@@ -31,6 +31,9 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
   带 `connectionState` 与 `contentEvents` 两个可选能力（默认实现），UPnP 通道零改动。
   通道还**自我声明**身份与能力（`deviceModel`/`deviceFirmware`/`supportsCapture`），
   不靠「抛异常再由调用方捕获」表达差异。
+- **取景帧单点采集**：`CameraControlViewModel` 用一个 Job 把 60152 帧解码进 `frame: StateFlow`，
+  嵌入预览与监看工作台都读它。**不要**改成把 cold flow 交给界面各自 collect——
+  `LiveViewRepository` 是 @Singleton 只持有一个 `LiveViewClient`，两处各 collect 就是两条流打同一客户端。
 - **能力模型**：`CameraIdentity(model, firmware, transport, mode)` 是能力快照的归档键，
   `CameraCapabilities` 把每项能力判为 unknown/unsupported/readOnly/writable 并保留判定依据。
   连接、断开、功能模式切换都会重建快照；参数下发只有拿到 `PropertyWriteDecision.Send`
@@ -65,6 +68,8 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
 | `PtpIpClient` | `:ptp` | 双 socket 握手、索尼初始化序列、事务执行 |
 | `PtpChannel` | `:app/data/remote` | 事务互斥、超时自愈、保活、事件监听 |
 | `CameraCapabilities` | `:app/data/model` | 能力四态判定、选项生成、写入决策（`decideWrite`） |
+| `ViewportTransform` | `:app/feature/control/monitoring` | 监看画面统一坐标模型：正向供绘制、逆向供触摸反查 |
+| `MonitoringWorkstation` | `:app/feature/control/monitoring` | 全屏监看工作台（Dialog 独立 window，横屏 + 沉浸） |
 | `SonyBleShutter` | `:app/data/ble` | 蓝牙遥控快门（配对/GATT/命令队列） |
 | `CameraWifiManager` | `:app/data/remote/wifi` | 热点配网、网关发现、进程网络绑定 |
 | `EmbeddedJpegDecoder` | `:raw` | ARW TIFF 解析提取内嵌预览 |

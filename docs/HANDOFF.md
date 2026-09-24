@@ -119,6 +119,19 @@ com.imagedge.camera/
     能力四态里 **unknown ≠ unsupported**：0x9209 读取超时必须落到 unknown 且允许重试，
     否则一次网络抖动就把可用控件永久变成「不支持」。下发前走 `CameraCapabilities.decideWrite()`，
     拿到 `Send` 才触达通道。规则与未验证项见 [camera-capability-matrix.md](camera-capability-matrix.md)。
+15. **取景帧只能有一处 collect**：`LiveViewRepository` 是 `@Singleton` 且只持有一个
+    `LiveViewClient`，把取景流当 cold flow 交给界面各自 collect（嵌入预览 + 监看工作台）
+    等于两条 60152 流打同一个客户端，表现为画面互踩或其中一条静默断流。
+    现在由 `CameraControlViewModel` 的单一 Job 喂 `frame: StateFlow`；暂停/退后台靠取消该 Job
+    **真正停采**——只在 UI 层冻住画面不算暂停，相机仍在推流，射频与耗电都没省。
+16. **监看的绘制与命中必须共用 `ViewportTransform`**：`drawFrame` 里 `withTransform` 的调用顺序
+    （平移到中心 → 镜像 → 旋转 → 回帧中心 → 缩放）就是模型的变换分解，**镜像那行必须排在旋转之前**
+    （Compose 里先调用的处于最外层，镜像要作用在旋转后的显示朝向上）。
+    写反不会报错，只会「画面对、点偏」。嵌入预览与工作台共用同一个 `drawFrame`，别在别处再写一套。
+17. **横屏/沉浸是本仓库第一处 Compose→Window 代码**：清单已声明 `orientation|screenSize` 的
+    configChanges，所以旋转不重建 Activity、也不需要改清单。但工作台是 `Dialog`（独立 window），
+    隐藏系统栏必须取 `DialogWindowProvider` 的 window——调 Activity 的 window 管不到它。
+    `requestedOrientation` 的还原写在 `onDispose`，否则退出后应用会卡在横屏。
 
 ## 编辑功能现状（2026-09-11 完善后）
 

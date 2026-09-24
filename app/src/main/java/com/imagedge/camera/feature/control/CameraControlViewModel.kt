@@ -8,11 +8,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withTimeoutOrNull
 import androidx.lifecycle.viewModelScope
 import com.imagedge.camera.data.ble.BleShutterState
@@ -23,13 +20,19 @@ import com.imagedge.camera.data.model.CameraIdentity
 import com.imagedge.camera.data.model.CameraSettings
 import com.imagedge.camera.data.model.CapabilityDetail
 import com.imagedge.camera.data.model.CapabilityState
+import com.imagedge.camera.data.model.AspectMarker
+import com.imagedge.camera.data.model.GridMode
+import com.imagedge.camera.data.model.MonitoringSettings
+import com.imagedge.camera.data.model.MonitoringSettingsStore
 import com.imagedge.camera.data.remote.CameraRepository
 import com.imagedge.camera.data.remote.CameraSnapshot
 import com.imagedge.camera.data.remote.ChannelConnectionState
 import com.imagedge.camera.data.remote.LiveViewRepository
 import com.imagedge.camera.data.transfer.DownloadManager
+import com.imagedge.camera.feature.control.monitoring.ViewfinderSnapshotWriter
 import com.imagedge.camera.ui.feedback.Haptics
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -74,7 +77,11 @@ data class ControlState(
     /** 各拍摄参数的呈现状态（键为能力项，未探测时为空表） */
     val params: Map<CameraCapability, ParamUiState> = emptyMap(),
     /** PTP 遥控拍摄是否可用（BLE 快门是另一条独立通路，不由此项决定） */
-    val captureAvailable: Boolean = false
+    val captureAvailable: Boolean = false,
+    /** 取景是否暂停（暂停 = 采集 Job 已取消，画面定格在最后一帧） */
+    val viewfinderPaused: Boolean = false,
+    /** 取景截图正在写盘：期间屏蔽重复触发，避免连着建出多个条目 */
+    val snapshotting: Boolean = false
 )
 
 /**
@@ -118,11 +125,39 @@ class CameraControlViewModel @Inject constructor(
     private val cameraRepository: CameraRepository,
     private val bleShutter: SonyBleShutter,
     private val downloadManager: DownloadManager,
-    private val haptics: Haptics
+    private val haptics: Haptics,
+    private val monitoringStore: MonitoringSettingsStore,
+    private val snapshotWriter: ViewfinderSnapshotWriter
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ControlState())
     val state: StateFlow<ControlState> = _state.asStateFlow()
+
+    /** 监看偏好（旋转/镜像/网格/比例标记）。直接暴露存储的流：嵌入预览与工作台共用同一份 */
+    val monitoringSettings: StateFlow<MonitoringSettings> = monitoringStore.settings
+
+    private fun updateMonitoring(transform: (MonitoringSettings) -> MonitoringSettings) =
+        monitoringStore.update(transform)
+
+    /** 显示级旋转：切到下一个 90° 档位（只改监看显示，不动相机文件朝向） */
+    fun rotateView() = updateMonitoring { it.copy(rotation = it.rotation.rotate90Clockwise()) }
+
+    fun setMirrored(mirrored: Boolean) = updateMonitoring { it.copy(mirrored = mirrored) }
+
+    /** 网格档位循环（NONE → 三分 → 四分 → NONE）。与比例标记是两个独立开关 */
+    fun cycleGrid() = updateMonitoring {
+        it.copy(gridMode = when (it.gridMode) {
+            GridMode.NONE -> GridMode.THIRD
+            GridMode.THIRD -> GridMode.QUARTER
+            GridMode.QUARTER -> GridMode.NONE
+        })
+    }
+
+    /** 比例标记档位循环（NONE → 16:9 → 17:9 → 4:3 → 3:2 → 1:1 → 2.35:1 → NONE） */
+    fun cycleAspectMarker() = updateMonitoring {
+        val order = AspectMarker.entries
+        it.copy(aspectMarker = order[(order.indexOf(it.aspectMarker) + 1) % order.size])
+    }
 
     /** BLE 快门连接状态（Disconnected/Scanning/Connecting/Connected） */
     val bleState = bleShutter.state
@@ -265,23 +300,100 @@ class CameraControlViewModel @Inject constructor(
     }
 
     /**
-     * 实时取景 Bitmap 流（cold flow：UI collect 时连接，离开页面自动断开）。
-     * 电脑遥控/智能手机连接两种模式相机都开放 LiveView（60152）；解码失败帧静默跳过，
-     * 流异常不崩溃（停止更新）。帧经 ImageDecoder 下采样到目标尺寸 + Hardware 位图，
-     * 避免 18fps 大帧全尺寸解码导致卡顿/耗电。conflate：解码/渲染跟不上帧率时只保留
-     * 最新帧（参考 sony_liveview_rust 的 latest-frame slot 设计——WiFi 卡顿后永远显示
-     * 当前画面而非陈帧积压）。
+     * 取景截图：把当前预览帧存到本机相册。
+     *
+     * 只读已收到的这一帧，**不向相机发任何命令**，也不进下载队列——
+     * 它记录的是监看信号，不是相机文件（详见 [ViewfinderSnapshotWriter] 的边界说明）。
      */
-    val liveViewFrames: Flow<Bitmap> = flow {
-        liveViewRepository.liveViewFrames()
-            .throttleLatest(LIVEVIEW_MIN_FRAME_INTERVAL_MS)
-            .collect { jpeg ->
-                decodeScaled(jpeg, LIVEVIEW_TARGET_WIDTH, LIVEVIEW_TARGET_HEIGHT)?.let { emit(it) }
+    fun captureSnapshot() {
+        val frame = currentFrame
+        if (frame == null) {
+            _state.update { it.copy(message = "还没有可截图的取景画面") }
+            return
+        }
+        if (_state.value.snapshotting) return
+        val width = frame.width
+        val height = frame.height
+        _state.update { it.copy(snapshotting = true, message = null) }
+        viewModelScope.launch {
+            val result = runCatching { snapshotWriter.write(frame) }
+            _state.update {
+                it.copy(
+                    snapshotting = false,
+                    message = if (result.isSuccess) "取景截图已保存（${width}×$height）"
+                    else "取景截图保存失败：${result.exceptionOrNull()?.message}"
+                )
             }
-    }.catch { e ->
-        AppLog.w("liveview", "LiveView 流异常（停止取景）：${e.message}")
-    }.flowOn(Dispatchers.Default)
-        .conflate()
+            if (result.isSuccess) haptics.thud() else haptics.double()
+        }
+    }
+
+    // ── 取景帧（单点采集）─────────────────────────────────────────────
+
+    /**
+     * 当前取景帧。
+     *
+     * 由本 ViewModel 用**唯一一个**采集 Job 喂给 [frame]，而不是把 cold flow 丢给界面：
+     * `LiveViewRepository` 是 @Singleton 且只持有一个 `LiveViewClient`，若遥控页的嵌入预览
+     * 与监看工作台各自 collect 一次，就会同时开两条 60152 流打到同一个客户端上——
+     * 表现为画面互相干扰或其中一条静默断流。
+     *
+     * StateFlow 天然合流：解码或渲染跟不上帧率时永远只显示最新帧，不积压陈帧。
+     */
+    private val _frame = MutableStateFlow<Bitmap?>(null)
+    val frame: StateFlow<Bitmap?> = _frame.asStateFlow()
+
+    /** 「取景截图」的数据源。不预先复制位图：解码出的帧此后只读 */
+    val currentFrame: Bitmap? get() = _frame.value
+
+    private var viewfinderVisible = false
+    private var viewfinderPaused = false
+    private var viewfinderJob: Job? = null
+
+    /** 页面可见性（遥控页按 ON_START/ON_STOP 驱动）。退后台必须真的停采 */
+    fun setViewfinderVisible(visible: Boolean) {
+        if (viewfinderVisible == visible) return
+        viewfinderVisible = visible
+        syncViewfinderCollection()
+    }
+
+    /**
+     * 暂停取景（监看工作台工具栏）。
+     *
+     * 停的是**采集**——取消 Job，60152 socket 随之关闭；不是只在 UI 层冻住画面。
+     * 只停渲染的话相机仍在持续推流，射频与耗电都没省下来。最后一帧留在 [frame] 里
+     * 供定格显示，符合「暂停取景」的直觉。
+     */
+    fun setViewfinderPaused(paused: Boolean) {
+        if (viewfinderPaused == paused) return
+        viewfinderPaused = paused
+        _state.update { it.copy(viewfinderPaused = paused) }
+        syncViewfinderCollection()
+    }
+
+    /** 电脑遥控/智能手机连接两种模式相机都开放 LiveView（60152）；解码失败帧静默跳过 */
+    private fun syncViewfinderCollection() {
+        val shouldCollect = viewfinderVisible && !viewfinderPaused
+        if (shouldCollect && viewfinderJob == null) {
+            viewfinderJob = viewModelScope.launch(Dispatchers.Default) {
+                try {
+                    liveViewRepository.liveViewFrames()
+                        .throttleLatest(LIVEVIEW_MIN_FRAME_INTERVAL_MS)
+                        .collect { jpeg ->
+                            // 解码内联在 collect 里：形成天然背压，不会堆出无界队列
+                            decodeScaled(jpeg, LIVEVIEW_TARGET_WIDTH, LIVEVIEW_TARGET_HEIGHT)
+                                ?.let { _frame.value = it }
+                        }
+                } catch (e: Exception) {
+                    // 流异常只停止取景，不崩，也不清空当前帧——定格比黑屏有用
+                    AppLog.w("liveview", "LiveView 流异常（停止取景）：${e.message}")
+                }
+            }
+        } else if (!shouldCollect) {
+            viewfinderJob?.cancel()
+            viewfinderJob = null
+        }
+    }
 
     /**
      * 下采样解码 LiveView JPEG 帧（失败返回 null 静默跳过）。
@@ -369,10 +481,20 @@ class CameraControlViewModel @Inject constructor(
         }
     }
 
-    /** 离开遥控页时终止 BLE 扫描/配对/GATT，不断开仍供相册使用的 Wi-Fi/PTP 会话。 */
+    /**
+     * 离开遥控页时终止 BLE 扫描/配对/GATT 与取景采集，
+     * 不断开仍供相册使用的 Wi-Fi/PTP 会话。
+     */
     fun leaveScreen() {
         bleShutter.disconnect()
-        _state.update { it.copy(isConnected = false, taking = false) }
+        // 停采并交还这一帧的内存（960×640 软件位图约 2.4MB，没页面在看就不该留着）
+        viewfinderVisible = false
+        viewfinderPaused = false
+        syncViewfinderCollection()
+        _frame.value = null
+        _state.update {
+            it.copy(isConnected = false, taking = false, viewfinderPaused = false)
+        }
     }
 
     override fun onCleared() {

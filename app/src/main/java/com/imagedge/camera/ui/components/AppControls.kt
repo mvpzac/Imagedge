@@ -334,6 +334,10 @@ fun AppLink(
  *
  * 与 `PageHeader` 的返回钮同款观感：48dp 触控 + 半透明圆底 + hairline 描边。
  * **必须传 [contentDescription]**——图标按钮没有可见文字，缺了它 TalkBack 只会读"按钮"。
+ *
+ * [tint] 供**深色画面之上的浮层**（取景监看、大图查看）覆写图标色：默认取 `primary`，
+ * 而浅色主题的 `primary` 是近黑，压在纯黑监看背景上会完全看不见。
+ * 覆写不影响任何沿用默认值的既有调用点。
  */
 @Composable
 fun AppIconButton(
@@ -342,8 +346,10 @@ fun AppIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    iconSize: Dp = 20.dp
+    iconSize: Dp = 20.dp,
+    tint: Color? = null
 ) {
+    val iconColor = tint ?: MaterialTheme.colorScheme.primary
     Box(
         modifier = modifier
             .size(48.dp)
@@ -360,8 +366,8 @@ fun AppIconButton(
             lucide = icon,
             contentDescription = contentDescription,
             size = iconSize,
-            tint = if (enabled) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+            tint = if (enabled) iconColor
+            else iconColor.copy(alpha = 0.38f)
         )
     }
 }

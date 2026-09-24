@@ -1,7 +1,6 @@
 package com.imagedge.camera.feature.control
 
-import android.graphics.Bitmap
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -36,17 +35,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.R
 import com.imagedge.camera.core.permission.PermissionGate
 import com.imagedge.camera.ui.glass.GlassCard
+import com.imagedge.camera.ui.theme.OnViewer
 import com.imagedge.camera.ui.theme.Spacing
+import com.imagedge.camera.ui.theme.ViewerBackdrop
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.PageHeader
 import com.imagedge.camera.ui.components.StatusBanner
@@ -57,7 +64,10 @@ import com.imagedge.camera.data.model.CameraCapability
 import com.imagedge.camera.data.model.CameraIdentity
 import com.imagedge.camera.data.model.CameraTransport
 import com.imagedge.camera.data.model.CapabilityState
-import androidx.compose.ui.platform.LocalContext
+import com.imagedge.camera.feature.control.monitoring.MonitoringWorkstation
+import com.imagedge.camera.feature.control.monitoring.ViewportTransform
+import com.imagedge.camera.feature.control.monitoring.drawFrame
+import com.imagedge.camera.feature.control.monitoring.drawMarkers
 import com.imagedge.camera.ui.components.AppButton
 import com.imagedge.camera.ui.components.AppButtonType
 
@@ -98,6 +108,7 @@ fun RemoteShootingScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val bleState by viewModel.bleState.collectAsStateWithLifecycle()
     val cameraStatus by viewModel.cameraStatus.collectAsStateWithLifecycle()
+    var workstationOpen by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     // 蓝牙权限：API 31+ 用 CONNECT/SCAN；29/30 用定位（manifest 已按版本声明，
@@ -130,7 +141,7 @@ fun RemoteShootingScreen(
     }
 
     // 进入页面即进入工作态（建相册基线 + 探测能力 + 读参数），不阻塞 UI；
-    // LiveView 由 UI collect liveViewFrames 时按需连接（60152 裸流）
+    // 取景帧由 ViewModel 的单一采集 Job 提供（见 CameraControlViewModel.frame）
     LaunchedEffect(Unit) {
         viewModel.connect()
     }
@@ -138,6 +149,32 @@ fun RemoteShootingScreen(
     // 避免长时间占用蓝牙连接槽和在后台意外控制相机。
     DisposableEffect(Unit) {
         onDispose { viewModel.leaveScreen() }
+    }
+    // 采集开关由页面可见性驱动：ViewModel 感知不到生命周期，而退到后台必须
+    // 真的停掉 60152 采集（不是只停渲染），否则射频与耗电都还在跑。
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> viewModel.setViewfinderVisible(true)
+                Lifecycle.Event.ON_STOP -> viewModel.setViewfinderVisible(false)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.setViewfinderVisible(false)
+        }
+    }
+
+    // 监看工作台是对话框（独立 window），放在这里即可整屏覆盖，
+    // 不需要把下面那棵 Scaffold 重排成 Box 兄弟节点
+    if (workstationOpen) {
+        MonitoringWorkstation(
+            viewModel = viewModel,
+            onExit = { workstationOpen = false }
+        )
     }
 
     Scaffold(
@@ -184,31 +221,18 @@ fun RemoteShootingScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     // ── 实时取景（电脑遥控/智能手机连接模式下相机开放 LiveView 流）──
-                    val liveFrame: Bitmap? by viewModel.liveViewFrames
-                        .collectAsStateWithLifecycle(initialValue = null)
-                    val frame = liveFrame
-                    if (frame != null) {
-                        Image(
-                            bitmap = frame.asImageBitmap(),
-                            contentDescription = stringResource(R.string.control_liveview),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(3f / 2f),
-                            contentScale = ContentScale.Fit
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(180.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                stringResource(R.string.control_liveview_waiting),
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                    }
+                    LiveViewPreview(
+                        viewModel = viewModel,
+                        // 工作台打开时这块画面被完全遮住，连绘制都不必再挂着我们白烧一帧
+                        active = !workstationOpen
+                    )
+                    AppButton(
+                        text = stringResource(R.string.monitoring_enter),
+                        subtitle = stringResource(R.string.monitoring_entry_desc),
+                        onClick = { workstationOpen = true },
+                        leadingIcon = Lucide.Maximize,
+                        type = AppButtonType.SECONDARY
+                    )
 
                     // ── 蓝牙遥控快门连接区（位于取景与快门之间：连接动作紧邻拍摄操作）──
                     when (val ble = bleState) {
@@ -381,12 +405,73 @@ private fun dispatch(viewModel: CameraControlViewModel, capability: CameraCapabi
 }
 
 /**
+ * 遥控页的嵌入取景预览。
+ *
+ * 单独成一个 composable 有两个理由：
+ * ① 取景帧以约 20fps 变化。若在读帧的位置就地组合，失效范围是**整张卡片**——
+ *    身份行、BLE 行、快门、参数区都跟着每帧重组。收进本函数后只有它自己重来。
+ * ② 监看工作台打开时这块画面被完全遮住，[active] 为 false 后连 Canvas 都不再挂进组合。
+ *
+ * 显示复用监看工作台的 `drawFrame`/`drawMarkers`：两处各写一套的话，
+ * 旋转与镜像一定会在两个界面之间对不上。
+ */
+@Composable
+private fun LiveViewPreview(viewModel: CameraControlViewModel, active: Boolean) {
+    val settings by viewModel.monitoringSettings.collectAsStateWithLifecycle()
+    val frame by viewModel.frame.collectAsStateWithLifecycle()
+    val image = remember(frame) { frame?.asImageBitmap() }
+    // semantics 块不是 composable 上下文，字符串先在外层解析好
+    val description = stringResource(R.string.control_liveview)
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(3f / 2f)
+            .clip(MaterialTheme.shapes.small)
+            .background(ViewerBackdrop),
+        contentAlignment = Alignment.Center
+    ) {
+        if (active) {
+            // Canvas 是纯绘制，读屏软件拿不到内容，必须显式给语义
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .semantics { contentDescription = description }
+            ) {
+                val bitmap = frame
+                val source = image
+                if (bitmap == null || source == null) return@Canvas
+                val dimensions = Size(bitmap.width.toFloat(), bitmap.height.toFloat())
+                val viewport = Size(this.size.width, this.size.height)
+                val view = ViewportTransform(
+                    rotation = settings.rotation,
+                    mirrored = settings.mirrored
+                )
+                val content = view.contentRect(dimensions, viewport)
+                if (content.width <= 0f) return@Canvas
+                drawFrame(source, view, dimensions, viewport)
+                drawMarkers(content, settings.gridMode, settings.aspectMarker)
+            }
+        }
+        if (active && frame == null) {
+            Text(
+                text = stringResource(R.string.control_liveview_waiting),
+                style = MaterialTheme.typography.bodySmall,
+                color = OnViewer
+            )
+        }
+    }
+}
+
+/**
  * 相机身份摘要（型号 · 固件 · 传输方式 · 功能模式）。
  *
+ * internal：监看工作台同样要显示它——用户在那里发现参数不可调时，
+ * 第一个要确认的就是「我连的到底是哪台机器、什么模式」。
  * 未连接时明确显示「未连接」，而不是留白让用户以为参数区坏了。
  */
 @Composable
-private fun IdentitySummary(identity: CameraIdentity) {
+internal fun IdentitySummary(identity: CameraIdentity) {
     val text = if (!identity.isKnown) {
         stringResource(R.string.control_identity_unknown)
     } else {

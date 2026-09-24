@@ -4,9 +4,26 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
-> 相机能力模型（T0）：参数可调性与可选档位全部改由相机上报的描述符决定。
+> 相机能力模型（T0）与本地监看工作台（T1）：参数可调性由相机描述符决定，监看侧新增全屏工作台。
 
 ### Added / 新增
+
+**监看工作台（T1）**
+
+- 新增 `feature/control/monitoring/`：横屏 + 沉浸的全屏监看工作台，含镜像、90° 步进旋转、
+  三分/四分构图网格、16:9 / 17:9 / 4:3 / 3:2 / 1:1 / 2.35:1 比例标记、双指放大与拖动、
+  暂停取景、取景截图与工具栏
+- 新增 `ViewportTransform` 统一坐标模型：绘制与命中测试共用同一分解与平移夹取，
+  并提供 `viewportToFrame` 逆变换，为 T4 触摸对焦预留坐标基础
+- 新增 `MonitoringSettings` 及其存储：镜像/旋转/网格/标记跨横竖屏与重启保留；
+  缩放与平移属会话态，每次进入工作台回到 1× 居中
+- 新增 `ViewfinderSnapshotWriter`：取景帧独立存入 `Pictures/ImagedgeViewfinder`，
+  带 `VIEWFINDER_` 前缀、`DESCRIPTION` 说明与实际宽高元数据，标明它是预览信号而非相机原片
+- 新增 4 个 Lucide 图标（水平镜像 / 暂停 / 播放 / 最大化）；网格与比例标记用自描述文字标签，
+  不用含义模糊的图标
+- 单测 43 项：坐标模型 29（含四角表、往返一致性、锚点与铺满约束）、标记几何 9、偏好解码 5
+
+**能力模型（T0）**
 
 - 新增 `CameraIdentity(model, firmware, transport, mode)` 与 `CameraCapabilities`：每项能力
   判为 unknown / unsupported / readOnly / writable，并保留判定依据（属性码、证据类型、诊断说明）。
@@ -15,6 +32,12 @@ All notable changes to this project are documented here. Format follows [Keep a 
 - 新增 `docs/camera-capability-matrix.md`：判定规则、属性码登记表、通道能力与未验证项。
 
 ### Changed / 变更
+
+- 取景帧改为 ViewModel 内的**单一采集 Job**：此前是交给界面 collect 的 cold flow，
+  嵌入预览与监看工作台各自 collect 会同时开两条 60152 流打同一个 `@Singleton LiveViewClient`。
+- 嵌入预览与工作台复用同一套 `drawFrame`/`drawMarkers`，两处的旋转/镜像不会各自漂移。
+- 放大是显示级数码放大，明确**不是**相机变焦；网格与比例标记只是叠加层，
+  不改预览像素，也不进入取景截图。
 
 - **移除全部硬编码可写档位表**（ISO / 光圈 / 快门 fallback 预设、7 档白平衡、19 档曝光补偿）。
   这些档位从未与相机核对过：f/3.5-5.6 套头上会出现 f/1.8，白平衡与曝光补偿也是照抄值表。
@@ -26,6 +49,11 @@ All notable changes to this project are documented here. Format follows [Keep a 
 - 断线（保活失败 / 事务超时自愈 / 用户断开）立即把界面拉回「未知」，不再继续显示上一轮的可写档位。
 
 ### Fixed / 修复
+
+- 暂停取景与退到后台真正**停止采集**（取消 Job、关闭 socket），而不是只冻住渲染：
+  只停渲染时相机仍在推流，射频与耗电都没有省下来。
+- `AppIconButton` 新增可选 `tint`：图标色原先写死取主题 `primary`（浅色主题下近黑），
+  压在纯黑监看背景上完全不可见。既有调用点行为不变。
 
 - **请求超时不再被当成「不支持」**：0x9209 读取失败时能力为 UNKNOWN 且标记陈旧，
   下一次成功读取即恢复；陈旧快照一律禁止下发命令。

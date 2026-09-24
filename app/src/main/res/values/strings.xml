@@ -261,5 +261,30 @@
     <string name="control_status_shutter">快门</string>
     <string name="control_status_recording">录像</string>
 
+    <!-- 监看工作台（T1）：全部为显示层辅助，不改变相机文件 -->
+    <string name="monitoring_enter">监看工作台</string>
+    <string name="monitoring_entry_desc">横屏全屏 · 镜像/旋转 · 网格与比例标记 · 双指放大 · 暂停 · 取景截图</string>
+    <string name="monitoring_exit">退出监看工作台</string>
+    <string name="monitoring_mirror">镜像画面</string>
+    <string name="monitoring_rotate">旋转画面</string>
+    <string name="monitoring_pause">暂停取景</string>
+    <string name="monitoring_resume">继续取景</string>
+    <string name="monitoring_snapshot">取景截图</string>
+    <string name="monitoring_grid_off">网格·无</string>
+    <string name="monitoring_grid_third">网格·三分</string>
+    <string name="monitoring_grid_quarter">网格·四分</string>
+    <string name="monitoring_marker_off">比例标记·无</string>
+    <string name="monitoring_marker_fmt">比例标记·%1$s</string>
+    <string name="monitoring_zoom_reset">%1$.1f×·重置</string>
+    <string name="monitoring_no_frame">等待取景画面…</string>
+    <string name="monitoring_paused">取景已暂停 · 已停止采集，画面定格</string>
+    <string name="monitoring_tools_hint">以下工具仅影响监看显示，不改变相机文件</string>
+    <string name="ratio_16_9">16:9</string>
+    <string name="ratio_17_9">17:9</string>
+    <string name="ratio_4_3">4:3</string>
+    <string name="ratio_3_2">3:2</string>
+    <string name="ratio_1_1">1:1</string>
+    <string name="ratio_235">2.35:1</string>
+
     <!-- 设置 -->
 </resources>
