@@ -208,6 +208,14 @@ $SDK/platform-tools/adb shell "run-as com.imagedge.camera sqlite3 /data/data/com
 
 ## 环境备注
 
+- **加完依赖必须重新生成校验白名单，否则「本地绿、CI 红」**：仓库启用了 Gradle 依赖校验
+  （`gradle/verification-metadata.xml`，`verify-metadata=true`、只校验 sha256、不校验签名）。
+  本地 `~/.gradle/caches` 里已有的产物会掩盖缺失条目，CI 是干净环境所以直接在**配置阶段**报
+  `Dependency verification failed for configuration 'classpath'`。
+  修法：`./gradlew --write-verification-metadata sha256 test :app:uiSpecCheck lint cyclonedxBom :app:assembleRelease :app:assembleDebug`
+  —— 任务要覆盖 CI 跑的全部步骤，且**必须用干净 Gradle home 复现一次**
+  （`GRADLE_USER_HOME=/tmp/xxx ./gradlew --no-configuration-cache test`），否则缓存照样把它盖住。
+  提交前看 diff：应当**只有新增**，任何既有条目的 sha256 被改动都要停下来查。
 - 开发机为 macOS；若你在 Linux/Windows，注意 `local.properties` 与 SDK 路径差异。
 - `design/ic_launcher/` 是应用图标的**设计源**（SVG + 渲染脚本）。改图标需同步三处：
   `drawable/ic_launcher_foreground.xml`、`ic_launcher_monochrome.xml`、设计源。
