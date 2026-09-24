@@ -216,6 +216,13 @@ $SDK/platform-tools/adb shell "run-as com.imagedge.camera sqlite3 /data/data/com
   —— 任务要覆盖 CI 跑的全部步骤，且**必须用干净 Gradle home 复现一次**
   （`GRADLE_USER_HOME=/tmp/xxx ./gradlew --no-configuration-cache test`），否则缓存照样把它盖住。
   提交前看 diff：应当**只有新增**，任何既有条目的 sha256 被改动都要停下来查。
+- **但本地重生成覆盖不到「按操作系统分类」的产物**：CI 是 ubuntu，会解析
+  `com.android.tools.build:aapt2:<版本>-linux.jar`，而 macOS 上永远只解析到 `-osx.jar`，
+  所以这条在本地复现不出来，只能等 CI 报出来再单独补。补法是**独立取证**而不是猜：
+  从 `dl.google.com/dl/android/maven2/...` 直接下 jar，核对 Google 自己公布的 `.sha1`，
+  再 `unzip -p … aapt2 | xxd | head -1` 确认是 ELF 头，最后把 sha256 手写进 XML 并用
+  `xmllint --noout` 验证。当前仓库里唯一带平台分类的产物就是 `aapt2`；
+  哪天升级 AGP 后又红，先按上面的 grep 查有没有新的 `-linux` / `-windows` 变体。
 - 开发机为 macOS；若你在 Linux/Windows，注意 `local.properties` 与 SDK 路径差异。
 - `design/ic_launcher/` 是应用图标的**设计源**（SVG + 渲染脚本）。改图标需同步三处：
   `drawable/ic_launcher_foreground.xml`、`ic_launcher_monochrome.xml`、设计源。
