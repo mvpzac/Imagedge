@@ -1,4 +1,4 @@
-package com.imagedge.camera.feature.edit
+package com.imagedge.camera.feature.create
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
@@ -17,12 +17,12 @@ import com.imagedge.camera.ui.components.Lucide
  */
 
 @Composable
-fun EditHubScreen(
+fun CreateHubScreen(
     onOpenLivePhoto: () -> Unit = {},
     onOpenEdit: () -> Unit = {},
     onOpenTriptych: () -> Unit = {},
     onOpenExifFrame: () -> Unit = {},
-    onBack: () -> Unit = {}
+    onBack: (() -> Unit)? = null
 ) {
     // 页面骨架统一走 AppPage（边距 16dp、可滚动、避让导航栏），与其它工具页一致
     AppPage(title = stringResource(R.string.edit_title), onBack = onBack) {

@@ -10,7 +10,7 @@ import androidx.compose.runtime.collectAsState
 import coil.imageLoader
 import com.imagedge.camera.data.model.MediaSessionCache
 import com.imagedge.camera.data.remote.CameraRepository
-import com.imagedge.camera.feature.root.RootScreen
+import com.imagedge.camera.navigation.AppRoot
 import com.imagedge.camera.ui.feedback.SnackbarController
 import com.imagedge.camera.ui.theme.DesignScaleLocked
 import com.imagedge.camera.ui.theme.ImagedgeTheme
@@ -22,7 +22,7 @@ import dagger.hilt.android.AndroidEntryPoint
  * <pre>
  *     author : Imagedge Team
  *     time   : 2026/08/27
- *     desc   : 主 Activity（Compose 根，3-Tab 导航宿主）
+ *     desc   : 主 Activity（Compose 根，四入口导航宿主）
  *     version: 1.2
  * </pre>
  */
@@ -67,7 +67,7 @@ class MainActivity : ComponentActivity() {
             ) {
                 // UI 锁定：全屏等比缩放到设计基准宽（394dp），跨机型保持版式不变
                 DesignScaleLocked {
-                    RootScreen(snackbarController = snackbarController)
+                    AppRoot(snackbarController = snackbarController)
                 }
             }
         }

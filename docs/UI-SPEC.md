@@ -130,18 +130,29 @@
 ### 4.6 层级：不用阴影
 
 层级只靠三档表面色（`background` / `surface` / `surfaceVariant`）+ hairline 描边表达。
-唯一例外是悬浮导航（`RootScreen`，用极淡的自定义阴影表达「浮在内容之上」）。
+唯一例外是悬浮导航（`navigation/FloatingNavBar`，用极淡的自定义阴影表达「浮在内容之上」）。
 
 ---
 
 ## 5. 布局规范
 
-1. **页面骨架**统一走 `AppPage`：`statusBars` → `PageHeader`（56dp）→ 内容（左右 16dp）→ 主操作。
-2. **所有非沉浸页必须可滚动**；内容底部留出导航栏 inset，避免被手势条压住。
-3. **主操作位置**：工具型放在滚动内容末端；状态型固定在下 1/3 区域。
+1. **页面骨架**统一走 `AppScreenFrame`：它是**安全区域的唯一所有者**——top 只给标题栏，
+   bottom + horizontal 只给内容；标题用 `AppPageHeader`（只设最小高度，不自己吃系统边距）。
+   旧的 `AppPage` / `PageHeader` 保留给尚未迁移的页面，**同一页只能有一套**：
+   外层再补一次 `statusBars` 就是所有二级页顶部多出一条空隙（批次 A 收口的就是这个）。
+2. **所有非沉浸页必须可滚动**。安全区内边距由 `AppScreenFrame` **自己加完**，不再往页面传
+   `PaddingValues`：传参写法实测翻车过——页面把 `padding(innerPadding)` 写在 `verticalScroll()`
+   **之后**，内边距就成了滚动内容的一部分，往下滚时正文直接压在大字标题上；
+   顺序写错编译器不管、单测不管，所以不给页面写错的机会。
+   Tab 页（没有标题栏）自己吃 `statusBarsPadding()`，底部为悬浮导航让位统一读
+   `LocalNavClearance.current`（胶囊实高下发；写死数值在大字模式下会被遮挡）。
+3. **主操作位置**：工具型放在滚动内容末端；状态型固定在下 1/3 区域；
+   **也允许固定在底部操作区**（如选择态的 `SelectionActionBar`）——前提是同一屏不同时叠两层底部条。
 4. **网格**：相册 3 列（窄屏 2 列）间距 4；列表单列，左侧 40dp 图标槽对齐。
-5. **宽屏**：内容最大宽度 600dp 居中，避免平板/横屏被拉伸变形。
+5. **宽屏**：表单与长说明最大 600dp 居中；遥控/编辑这类画面型页面用画面＋工具双栏，不锁 600dp。
 6. **沉浸页**：黑底、控件半透明、提供明确的退出路径（返回钮 48dp 触控目标）。
+7. **结构尺寸**取自 `theme/UiSize.kt`（触控 48 / 标题栏 56 / 行 64 / 导航 64 / 照片格 104 /
+   表单上限 600 / 快门 72）。它们是**下限与上限，不是固定高度**：大字模式随内容增高。
 
 ---
 
@@ -158,12 +169,22 @@
 | 互斥选项 > 4 个或比例类 | `AppChipRow(scrollable = true)` | 横向自绘 |
 | 数值参数 | `AppSlider`（标签 + 滑条 + 数值） | 裸 `Slider` |
 | 文本输入 | `AppTextField` | 裸 `OutlinedTextField` |
-| 容器/分组 | `GlassCard` | 裸 `Card` |
+| 强调容器（一屏最多一处） | `GlassCard` | 裸 `Card` |
+| 普通入口行 / 设置行 | `ActionRow` / `SettingsRow`（不透明表面） | 给每个入口套玻璃 |
+| 分组标题 | `GroupTitle` | 手拼 Row + Text |
+| 引导卡 / 情境提示 / 步骤面板 | `ui/guidance/`：`GuideCard` / `ContextHint` / `HelpSheet` | 页内自拼说明块 |
 | 区块标题 + 内容 | `AppSection` | 手拼 Column |
+| 非沉浸页骨架 | `AppScreenFrame` + `AppPageHeader`（内边距由骨架加完，页面拿不到 `PaddingValues`） | 页面自拼 `Scaffold`、自己补 `statusBarsPadding` |
+| 切 Tab / 进子页 | `navigation/` 的 `selectTab` / `openSubDestination` | 页面里写死路由字符串调 `navigate()` |
+| Tab 页底部让位 | `LocalNavClearance.current`（胶囊实高下发） | 写死 96dp 之类的常量 |
 | 空/加载/结果/横幅 | `States.kt`（`EmptyState` / `ProcessingView` / `ResultMessage` / `StatusBanner`） | 临时 Text |
 
 **例外**：沉浸型页面（取景、看图、裁剪覆盖层）允许使用平台绘制原语（`Canvas`、
 `pointerInput`），但按钮与状态仍走设计系统组件。
+
+**普通不透明入口容器是本规范允许的一等公民**（`ActionRow` / `SettingsRow` / `GuideCard`）。
+玻璃只用于少量强调容器：一屏四五个玻璃块互相抢注意力，等于没有重点。
+新增此类容器请复用上面两个组件，**不要**通过扩大 `uiSpecCheck` 的豁免清单来绕开组件规则。
 
 ### 6.2 玻璃使用边界
 
@@ -202,14 +223,18 @@
 ## 9. 提交前清单
 
 - [ ] 颜色/字号/圆角/间距全部来自 token，`feature/` 无字面量
-- [ ] 页面左右边距 = 16dp，骨架用 `AppPage`，非沉浸页可滚动
-- [ ] 一屏只有一个 PRIMARY 主操作；主操作在内容末端或下 1/3
+- [ ] 页面左右边距 = 16dp，骨架用 `AppScreenFrame`（未迁移页沿用 `AppPage`），非沉浸页可滚动
+- [ ] 安全区域只被消费一次：根布局不额外加 `statusBars`，标题栏不自己再吃一遍
+- [ ] 一屏只有一个 PRIMARY 主操作；主操作在内容末端、下 1/3，或独占一个底部操作区（三者取一）
 - [ ] 组件来自第 6 节决策表，没有裸 M3 控件（除例外清单）
 - [ ] 异步操作有加载/成功/失败三态，失败信息含原因与下一步
 - [ ] 触控目标 ≥ 48dp；图标按钮有 contentDescription
-- [ ] 深色与浅色主题都过一遍（语义色对比度、玻璃降级路径）
+- [ ] 深色与浅色主题都过一遍（语义色对比度、玻璃降级路径）；**深色下正文要真量一次**
+      （批次 A 的黑字缺陷肉眼在浅色下完全正常，截图取像素才发现）
 - [ ] 玻璃参数未新增散值（统一在 `GlassSpec`）
-- [ ] 真机过一遍：字体缩放 1.3×、省电模式（玻璃降级）、横屏/窄屏
+- [ ] 路由字符串只出现在 `navigation/` 内，页面只收回调；同一页面只有一条进入路径
+- [ ] 真机过一遍：字体缩放 200%、省电模式（玻璃降级）、横屏/窄屏
+      （1.3× 挡不住大字遮挡，批次 B 的两个缺陷都在 200% 才现形）
 
 ---
 
@@ -223,7 +248,7 @@
 | 基础组件 | `AppPage`（页面骨架）、`AppSection`（区块）、`AppChip` / `AppChipRow`（选项）、`AppSlider`（参数）、`AppTextField`（输入）、`AppSwitch` / `AppSwitchRow`（开关）、`AppIconButton`（图标按钮）、`AppLink`（行内动作）、`AppDivider` |
 | `PageHeader` 返回钮 | 36dp 触控 → **48dp 触控**（视觉仍 36dp） |
 | 页面迁移 | **`feature/` 下裸 M3 控件全部清零**（46 → 0）：编辑调节、边框水印、LIVE 三拼、编辑中枢、下载页、设置页、首页、遥控页、视频转 Live、导出设置面板、相册页、看图页、扫码页 |
-| 页面骨架 | 5 个工具页统一走 `AppPage`（边距 16dp + 滚动 + 导航栏避让）；Tab 页与沉浸页的骨架迁移单独排期（需先定悬浮导航的底部让位值） |
+| 页面骨架 | 5 个工具页统一走 `AppPage`（边距 16dp + 滚动 + 导航栏避让）；批次 A 新增 `AppScreenFrame`（设置页已迁），批次 B 把悬浮导航的底部让位量解决掉（`LocalNavClearance` 实测下发）；其余 Tab 页与沉浸页的骨架迁移仍单独排期 |
 | 颜色字面量 | `feature/` 下为零（沉浸层遮罩/手柄统一用 `ViewerBackdrop` / `OnViewer`） |
 | 图标资产 | 新增 `ArrowUp` / `ArrowDown`（三拼重排序需要），补齐 `Lucide` 集合 |
 
@@ -244,7 +269,9 @@
 ### 10.3 仍需人工守的部分
 
 1. `AppPage` 的 `contentPadding` 默认值即规范值，页面不应覆盖（沉浸页除外）；
-2. Tab 页（首页/相册/设置/下载）的页面骨架尚未统一——需要先确定悬浮导航栏的底部让位量
-   （建议在 `AppPage` 增加 `bottomBarClearance` 参数，由 `RootScreen` 提供）；
-3. 新增页面请在 PR 描述里附「浅色 + 深色 + 字体放大 1.3×」三张截图；
+2. 三个 Tab 页（相机 / 照片 / 创作）仍是裸 `Column + statusBarsPadding`，尚未迁到
+   `AppScreenFrame`；底部让位量已由 `LocalNavClearance` 实测下发，迁移时直接读它即可；
+3. 新增页面请在 PR 描述里附「浅色 + 深色 + 字体 200%」三张截图——批次 B 的两个缺陷
+   （深色主题黑字、写死的导航让位量在大字下遮挡最后一行）都只在深色或 200% 下才出现，
+   1.3× 挡不住；
 4. 语义色对比度目前只有人工核对，后续可接入 `Accessibility Scanner` 或截图对比工具。

@@ -10,6 +10,39 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Added / 新增
 
+**页面与结构重构 · 批次 B（导航与一级入口）**
+
+- 新增 `navigation/` 包，把原来 500 行的 `feature/root/RootScreen.kt` 拆成五份各管一件事：
+  `AppDestination`（有哪些目的地）、`NavigationActions`（怎么切）、`AppNavHost`（路由表）、
+  `AppRoot`（跨页浮层与玻璃背景源）、`NavClearance`（底栏让位量）。删掉 `RootScreen.kt`
+- 底部导航从三入口扩为**四入口**：相机 / 照片 / 创作 / 设置。创作（动态照片、编辑、三拼、边框水印）
+  升为一级入口，每个 Tab 都是「图标 + 文字标签」——只有图标时用户得先猜图形是什么意思
+- 切 Tab 走 `popUpTo(start){saveState} + restoreState`：来回切换保留各页自己的状态
+  （设置页滚到哪、相册筛选是什么），实测切走再切回滚动位置不变
+- `selectTab` 对当前 Tab 的重复点击直接返回，不再往返回栈里压同名路由
+- 导航胶囊高度只设下限、底部让位量改为**实测下发**（`LocalNavClearance`）：
+  写死的 96dp 在系统字体 200% 时小于胶囊本身，最后一行会永远滑不进可视区
+- 导航项语义补 `Role.Tab` + `selected`，读屏能报「标签页、当前在第几个」
+- 消除双入口：`edit_hub` 路由删除，相册页的「相册编辑」改为切到创作 Tab。
+  同一个页面留两条进入路径，返回键语义就会分叉
+
+**页面与结构重构 · 批次 A（设计系统）**
+
+- 新增 `ui/theme/UiSize.kt`：结构尺寸唯一来源（触控 48 / 标题栏 56 / 行 64 / 导航 64 /
+  照片格 104 / 表单上限 600 / 快门 72），全部是**下限与上限**，大字模式随内容增高
+- 新增 `ui/layout/AppScreenFrame` + `AppPageHeader`：安全区域的唯一所有者——top 只给标题栏、
+  bottom + horizontal 只给内容；标题栏只设最小高度，不再固定 56dp 裁字
+- 新增 `ui/guidance/`：`GuideCard`（不透明普通表面，指导文字不赌背景模糊）、`ContextHint`
+  （情境成立期间常驻的范围说明）、`HelpSheet`（用户主动打开的步骤面板，最多 3–5 步）
+- 新增 `data/guidance/GuidanceStore`：按 `guideId + version + 机型` 记忆，
+  **「已看过」与「任务成功过」分开存**——点「知道了」不等于已完成
+- 新增 `ui/components/ActionRow` / `SettingsRow` / `GroupTitle`：普通不透明表面的入口行与设置行，
+  行最小 64dp、内容可换行、**禁用必须带原因**、设置行直接显示当前值。
+  `EntryCard` 原样保留（改它的默认表面会牵动全项目）
+- 设置页作为代表页迁移到新骨架；主题档位显示顺序与枚举声明顺序解耦（用 entries 会静默换序）
+- `docs/UI-SPEC.md` 修订三处：允许普通不透明入口容器为一等公民；主操作允许独占一个底部操作区；
+  安全区域由统一容器分配且 `innerPadding` 只能被消费一次。**未扩大 `uiSpecCheck` 豁免**
+
 **拍摄与回传工作流（T3）**
 
 - 新增 `data/capture/CaptureWorkflow.kt`：显式拍摄任务状态机
@@ -97,6 +130,19 @@ All notable changes to this project are documented here. Format follows [Keep a 
 - **`GlassCard` 内容整块不可见**：内层 `Surface` 用 `Modifier.matchParentSize()`，而它是外层
   Box 的唯一子节点——`matchParentSize` 不参与父级测量，Box 量出 0 高，内容被裁光。
   主页状态卡与遥控页整块参数区都受影响，页面表现为空白且不报错。API 37 模拟器实测发现。
+- **深色主题下「黑字压在深色光晕上」**：根上不铺 `Surface`（玻璃要折射真实背景），
+  于是没人提供 `LocalContentColor`，凡是不显式写 `color` 的 `Text` 都退回平台默认黑色。
+  照片 Tab 的标题与四张入口卡、设置页大标题实测亮度差仅 4/255（等于看不见）。
+  现在 `ImagedgeTheme` 统一 provide `onBackground`，比要求每个组件自觉写 color 可靠。
+  批次 A 遗留、批次 B 跑深色模式时才发现——浅色模式下黑色正好是对的，所以一直没暴露。
+- **导航胶囊被撑成一整屏**：`Row` 的条目用了 `fillMaxHeight()`，而 Box 传下来的是松约束
+  （maxHeight = 整屏），于是 Row 直接量成满屏高、图标和文字被居中到屏幕中间。
+  垂直居中改由 `Row(verticalAlignment = CenterVertically)` 负责。
+- **设置页大字标题与滚动内容重叠**：`padding(innerPadding)` 写在 `verticalScroll()` **之后**，
+  内边距就成了滚动内容的一部分，往下滚时正文压进标题栏。`AppScreenFrame` 改为自己加完内边距、
+  不再往页面传 `PaddingValues`——顺序写错编译器与单测都不管，那就别给页面写错的机会。
+- **导航磁吸方向算错**：「上一次选中的是谁」被每个条目各记一份，记到的其实是
+  「我自己上次被选中的时刻」，A→C→A 会朝错误方向弹。状态上提到导航栏，一处一份。
 - **预设/快照写入后列表不刷新**：`observeAll()` 只跟踪 `parameter_preset` 一张表，
   在 `map` 里逐行查子表的写法永远不会被 `parameter_preset_item` 的写入唤醒
   （数据在库里，界面显示空）。改用 `@Transaction` + `@Relation`，同时去掉 N+1 查询。

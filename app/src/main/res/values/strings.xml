@@ -4,8 +4,10 @@
     <string name="app_name">Imagedge</string>
 
     <!-- 底部导航（Tab） -->
-    <string name="tab_home">主页</string>
-    <string name="tab_album">相册</string>
+    <!-- 一级入口（批次 B：四 Tab，图标 + 文字标签） -->
+    <string name="tab_camera">相机</string>
+    <string name="tab_photos">照片</string>
+    <string name="tab_create">创作</string>
     <string name="tab_settings">设置</string>
 
     <!-- 主页 -->
@@ -287,6 +289,10 @@
     <string name="ratio_235">2.35:1</string>
 
     <!-- 设置 -->
+
+    <!-- 设置页结构重构（批次 A） -->
+    <string name="settings_save_location_title">保存位置</string>
+    <string name="settings_section_camera">相机</string>
 
     <!-- 拍摄工作流（T3） -->
     <string name="control_capture_options_title">拍摄方式</string>

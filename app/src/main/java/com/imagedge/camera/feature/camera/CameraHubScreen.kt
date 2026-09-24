@@ -1,7 +1,8 @@
-package com.imagedge.camera.feature.home
+package com.imagedge.camera.feature.camera
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Row
@@ -44,6 +45,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.R
 import com.imagedge.camera.data.model.ConnectionPhase
+import com.imagedge.camera.navigation.LocalNavClearance
 import com.imagedge.camera.ui.components.AppButtonAlign
 import com.imagedge.camera.ui.components.AppButton
 import com.imagedge.camera.ui.components.AppButtonType
@@ -78,7 +80,7 @@ import com.imagedge.camera.feature.connection.QrScanDialog
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(
+fun CameraHubScreen(
     onOpenRemote: () -> Unit = {},
     snackbarController: SnackbarController,
     viewModel: ConnectionViewModel = hiltViewModel()
@@ -94,10 +96,13 @@ fun HomeScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            // 适配层：本页没有自带标题栏，自己吃状态栏（根布局已不再代劳）
+            .statusBarsPadding()
             .verticalScroll(rememberScrollState())
-            // 底部 96dp 为悬浮玻璃导航栏让位：内容延伸到底（滚动时穿过导航栏被其折射），
-            // 但最后一项能停在导航栏上方，不被永久遮挡
-            .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 96.dp),
+            // 底部为悬浮玻璃导航栏让位：内容延伸到底（滚动时穿过导航栏被其折射），
+            // 但最后一项能停在导航栏上方，不被永久遮挡。高度实测下发，大字模式才不会露馅
+            .padding(start = 24.dp, top = 24.dp, end = 24.dp)
+            .padding(bottom = LocalNavClearance.current),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // Hero 品牌字：得意黑 + primary 色（与底部磁吸指示条同源）

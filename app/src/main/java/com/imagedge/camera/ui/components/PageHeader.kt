@@ -52,35 +52,7 @@ fun PageHeader(
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (onBack != null) {
-            // 液态玻璃返回钮（圆形悬浮）：**48dp 触控目标**（UI 规范 §8.1），内部视觉 36dp。
-            // 视觉缩小但触摸区撑满，避免"看得见点不中"。
-            Box(
-                modifier = Modifier
-                    .padding(start = Spacing.S)
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .glassReactive(onClick = onBack),
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        // 只有半透明圆底、没有描边（与 AppIconButton 共用同一套观感）
-                        .background(
-                            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
-                            shape = CircleShape
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    LucideIcon(
-                        Lucide.ArrowLeft,
-                        contentDescription = stringResource(R.string.viewer_back),
-                        size = 20.dp,
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
+            HeaderBackButton(onClick = onBack)
         }
         Text(
             text = title,
@@ -88,5 +60,49 @@ fun PageHeader(
             modifier = Modifier.weight(1f)
         )
         actions()
+    }
+}
+
+/**
+ * 标题栏返回钮。
+ *
+ * 抽出来是为了让新旧两套标题栏共用同一颗按钮：`AppPageHeader`（批次 A 的新骨架）
+ * 不再自己吃系统边距，但观感必须与这里完全一致——两处各写一份的话，
+ * 圆底透明度迟早会对不上。
+ *
+ * **48dp 触控目标**（UI 规范 §8.1），内部视觉 36dp：视觉缩小但触摸区撑满，
+ * 避免「看得见点不中」。
+ */
+@Composable
+fun HeaderBackButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .padding(start = Spacing.S)
+            .size(48.dp)
+            .clip(CircleShape)
+            .glassReactive(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                // 只有半透明圆底、没有描边（与 AppIconButton 共用同一套观感）
+                .background(
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+                    shape = CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            LucideIcon(
+                Lucide.ArrowLeft,
+                contentDescription = stringResource(R.string.viewer_back),
+                size = 20.dp,
+                tint = MaterialTheme.colorScheme.primary
+            )
+        }
     }
 }

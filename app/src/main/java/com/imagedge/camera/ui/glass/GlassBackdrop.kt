@@ -17,7 +17,7 @@ import com.kyant.backdrop.backdrops.LayerBackdrop
 val LocalGlassBackdrop = compositionLocalOf<LayerBackdrop?> { null }
 
 /**
- * 全局玻璃能力等级（由 `RootScreen` 计算一次后下发）。
+ * 全局玻璃能力等级（由 `navigation/AppRoot` 计算一次后下发）。
  *
  * 为什么要下发而不是各组件自己算：`rememberGlassLevel()` 会查 PowerManager 并
  * **注册一个省电模式广播接收器**。一屏有 5~10 个玻璃元素，每个都注册一次 =

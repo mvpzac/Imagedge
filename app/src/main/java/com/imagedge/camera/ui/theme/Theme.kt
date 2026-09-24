@@ -1,9 +1,11 @@
 package com.imagedge.camera.ui.theme
 
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 
 /**
  * <pre>
@@ -61,10 +63,19 @@ fun ImagedgeTheme(
     darkTheme: Boolean = false,
     content: @Composable () -> Unit
 ) {
+    val colorScheme = if (darkTheme) ImagedgeDarkScheme else ImagedgeLightScheme
     MaterialTheme(
-        colorScheme = if (darkTheme) ImagedgeDarkScheme else ImagedgeLightScheme,
+        colorScheme = colorScheme,
         typography = ImagedgeTypography,
-        shapes = ImagedgeShapes,
-        content = content
-    )
+        shapes = ImagedgeShapes
+    ) {
+        // 根上不铺 Surface：玻璃要折射真实背景，多一层不透明底就没有东西可折了。
+        // 代价是没人提供 LocalContentColor——不写 color 的 Text 会退回平台默认（黑），
+        // 深色主题下就是「黑字压在深色光晕上」：肉眼看不见，单测和 lint 也看不见。
+        // 在这里补一次，比让每个组件各自记得写 color 可靠。
+        CompositionLocalProvider(
+            LocalContentColor provides colorScheme.onBackground,
+            content = content
+        )
+    }
 }

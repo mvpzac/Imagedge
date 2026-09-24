@@ -51,6 +51,21 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
 - **传输策略（T3）**：`data/transfer/TransferPolicy.kt` 存尺寸/续传/拍后自动保存偏好，
   在下载页展示；**传输范围不是偏好**——它由相册浏览模式推导，存成偏好会出现
   「prefs 写着整卡、实际连着选片集」的假信息。自动保存走 `AutoSaveLedger` 去重。
+- **页面骨架与安全区域（重构批次 A）**：`ui/layout/AppScreenFrame` 是安全区域的**唯一所有者**
+  （top 只给标题栏，bottom + horizontal 只给内容），`AppPageHeader` 只设最小高度、不自己吃系统边距。
+  旧 `AppPage`/`PageHeader` 保留给尚未迁移的页面，但**同一页只能有一套**；
+  根布局不再代任何页面补 `statusBars`，没有自带标题栏的 Tab 页各自 `statusBarsPadding()` 作适配层。
+  结构尺寸取自 `ui/theme/UiSize.kt`（下限/上限，不是固定高度）。
+- **导航与一级入口（重构批次 B）**：`navigation/` 包拆开原先挤在 `RootScreen.kt` 里的四件事——
+  `AppDestination`（Tab 与子路由定义）、`NavigationActions`（`selectTab` / `openSubDestination` /
+  `currentTab`）、`AppNavHost`（纯路由表）、`AppRoot`（跨页浮层、玻璃背景源、底栏可见性）。
+  **路由字符串只出现在 `navigation/` 内**：`feature/` 页面只收回调，不知道自己挂在哪条路由上，
+  也就没法自己 `navigate()` 到别页。四个一级 Tab 各带 `saveState`，切走再切回保留本页状态；
+  同一个页面只允许一条进入路径（创作升为一级入口后，`edit_hub` 路由已删）。
+  悬浮导航的底部让位量由 `FloatingNavBar` 实测胶囊高度后经 `LocalNavClearance` 下发，不是常量。
+- **引导呈现与业务解耦**：`ui/guidance/`（`GuideCard`/`ContextHint`/`HelpSheet`）只呈现内容，
+  不查权限、不连相机、不决定是否出现；出现与否由 `data/guidance/GuidanceStore` 按
+  `guideId + version + 机型` 判定，且「已看过」与「任务成功过」是两条独立记录。
 - **相册刷新**：事件流（`StoreAdded/Removed/ObjectAdded`）触发即时静默刷新，
   4 秒轮询兜底；`MediaSessionCache` 让相册与二级页（大图/编辑）共享列表。
 - **配网**：`QrScanViewModel` → `CameraWifiManager.connectToCameraHotspot`（WifiNetworkSpecifier）。

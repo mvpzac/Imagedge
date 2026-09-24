@@ -165,6 +165,20 @@ com.imagedge.camera/
 25. **传输范围不是用户偏好**（T3）：它由相册浏览模式（选片集/整卡 = PTP 功能模式 0/1）推导。
     存进 prefs 就会出现「prefs 写着整卡、实际连着选片集」的假信息，比不显示更糟。
     同理 `GetPartialObject` 已实现但全局不启用：ZV-E10 整卡下每块回 `0x2009`。
+26. **根上没有 Surface，`LocalContentColor` 必须自己 provide**（批次 B）：玻璃要折射真实背景，
+    所以 `AppRoot` 不铺 `Surface`——代价是不写 `color` 的 `Text` 全部退回平台默认黑色，
+    深色主题下就是黑字压在深色光晕上。浅色模式看不出问题，所以它一路活到批次 B 才被逮到。
+    现在 `ImagedgeTheme` 统一 provide `onBackground`；**别指望每个组件自觉写 color**。
+27. **Box 的松约束里不要用 `fillMaxHeight()`**（批次 B）：`Box` 给子节点传的是
+    `maxHeight = 整屏`，`Row` 的条目一旦写 `fillMaxHeight()`，Row 就被量成满屏高，
+    导航胶囊变成一整屏、内容居中到屏幕中间。和坑 #19（`matchParentSize` 当唯一子节点）
+    是同一类：**这类布局错误编译、单测、lint 全过，只有跑起来才看得见**。
+28. **`padding(innerPadding)` 必须在 `verticalScroll()` 之前**（批次 B）：写在后面，内边距就成了
+    滚动内容的一部分，往下滚时正文压进标题栏。`AppScreenFrame` 现在自己加完内边距、
+    不再往页面传 `PaddingValues`——顺序型错误不要留给每个页面去守。
+29. **悬浮导航的让位量是量出来的，不是常量**（批次 B）：胶囊高度只设下限，
+    系统字体 200% 时它会长高；写死 96dp 的那一刻起，最后一行就永远滑不进可视区。
+    现在 `FloatingNavBar` 实测胶囊高度 → `AppRoot` → `LocalNavClearance`，页面只读不算。
 
 ## 怎么把界面跑起来（无真机也能验 UI 与存储）
 

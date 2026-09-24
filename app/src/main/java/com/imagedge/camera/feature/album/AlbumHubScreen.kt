@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
@@ -16,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.R
+import com.imagedge.camera.navigation.LocalNavClearance
 import com.imagedge.camera.ui.components.EntryCard
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.feedback.SnackbarController
@@ -43,16 +45,19 @@ fun AlbumHubScreen(
     val fullCardBusyHint = stringResource(R.string.hub_full_card_busy_hint)
 
     // 横屏可用滚动：内容超高时能上下滑（竖屏内容通常一屏放下，无滚动感觉）。
-    // 底部 96dp 为悬浮玻璃导航栏让位（与 Home/Settings 的 Tab 页约定一致）。
+    // 底部为悬浮导航栏让位（与相机/设置 Tab 页的约定一致），高度由 AppRoot 实测下发。
     Column(
         modifier = Modifier
             .fillMaxSize()
+            // 适配层：本页没有自带标题栏，自己吃状态栏（根布局已不再代劳）
+            .statusBarsPadding()
             .verticalScroll(rememberScrollState())
-            .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 96.dp),
+            .padding(start = 24.dp, top = 24.dp, end = 24.dp)
+            .padding(bottom = LocalNavClearance.current),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text(
-            text = stringResource(R.string.tab_album),
+            text = stringResource(R.string.tab_photos),
             style = MaterialTheme.typography.headlineLarge,
             modifier = Modifier.padding(bottom = 8.dp)
         )

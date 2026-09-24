@@ -22,7 +22,7 @@ object Motion {
     val springSnappy = snappySpring<Float>()
     val springSoft = softSpring<Float>()
 
-    /** Dp 版本（RootScreen 等位移动画用） */
+    /** Dp 版本（导航栏磁吸位移与指示条弹簧用） */
     val springSnappyDp = snappySpring<Dp>()
     val springSoftDp = softSpring<Dp>()
 
