@@ -255,6 +255,21 @@ class CameraCapabilitiesTest {
     }
 
     @Test
+    fun `profile key identifies the physical camera regardless of how it was connected`() {
+        // 档案属于「这台 ZV-E10」：换连接方式或切功能模式都还是同一台机器，
+        // 档案不该裂成两份；能力快照仍然按 snapshotKey 分档存放
+        val upnp = ptpIdentity.copy(transport = CameraTransport.UPNP)
+        val fullCard = ptpIdentity.copy(mode = CameraIdentity.MODE_CONTENTS_TRANSFER)
+
+        assertEquals(ptpIdentity.profileKey, upnp.profileKey)
+        assertEquals(ptpIdentity.profileKey, fullCard.profileKey)
+        assertNotEquals(ptpIdentity.snapshotKey, fullCard.snapshotKey)
+        // 刷过固件就是另一次实测事实，必须换档案
+        assertNotEquals(ptpIdentity.profileKey, ptpIdentity.copy(firmware = "2.04").profileKey)
+        assertEquals("", CameraIdentity.UNKNOWN.profileKey.trim('|'))
+    }
+
+    @Test
     fun `mode switch produces a snapshot that must be re-probed`() {
         // 切到整卡后身份变了：旧模式的快照不能直接沿用，新快照在探测前必须是「未探测」态
         val afterSwitch = capabilities(identity = ptpIdentity.copy(mode = CameraIdentity.MODE_CONTENTS_TRANSFER))
@@ -347,13 +362,83 @@ class CameraCapabilitiesTest {
         )
 
         assertTrue(dispatch(channel, caps, CameraCapability.ISO, 200L))
-        assertTrue(dispatch(channel, caps, CameraCapability.EXPOSURE_BIAS, -300L))
+        // -2000 落在相机上报的步进上；-300 不在，会被值校验挡下（见下面专门的用例）
+        assertTrue(dispatch(channel, caps, CameraCapability.EXPOSURE_BIAS, -2000L))
         assertEquals(
             listOf(
                 Triple(SonyDevicePropCode.ISO, 200L, 4),
-                Triple(SonyDevicePropCode.EXPOSURE_BIAS, (-300L) and 0xFFFFL, 2)
+                Triple(SonyDevicePropCode.EXPOSURE_BIAS, (-2000L) and 0xFFFFL, 2)
             ),
             channel.sentCommands
+        )
+    }
+
+    // ── 值校验：能力可写 ≠ 这个值可用 ────────────────────────────────
+
+    @Test
+    fun `a value the camera no longer reports is rejected without sending`() {
+        val channel = FakeChannel(ChannelType.PTP_IP, "ZV-E10", "2.03", supportsCapture = true)
+        // 套头 SELP1650 是 f/3.5-5.6；f/1.8 只在另一支镜头那轮上报里出现过
+        val kitLens = capabilities(
+            identity = channel.identity(),
+            props = mapOf(
+                SonyDevicePropCode.F_NUMBER to prop(
+                    SonyDevicePropCode.F_NUMBER,
+                    dataType = typeUInt16,
+                    supported = listOf(350L, 400L, 450L, 500L, 560L)
+                )
+            ),
+            supportsCapture = true
+        )
+
+        assertTrue(kitLens.canWrite(CameraCapability.F_NUMBER))
+        assertFalse("套头不该接受 f/1.8", kitLens.accepts(CameraCapability.F_NUMBER, 180L))
+        assertTrue(kitLens.accepts(CameraCapability.F_NUMBER, 560L))
+        assertFalse(dispatch(channel, kitLens, CameraCapability.F_NUMBER, 180L))
+        assertTrue("被拒的项不能留下任何下发痕迹", channel.sentCommands.isEmpty())
+
+        // 拒绝必须说清是「这个值不行」而不是「这项不行」——预设的逐项报告依赖这个区分
+        val decision = kitLens.decideWrite(CameraCapability.F_NUMBER, 180L)
+        assertTrue(decision is PropertyWriteDecision.Reject)
+        decision as PropertyWriteDecision.Reject
+        assertEquals(RejectReason.VALUE_NOT_REPORTED, decision.kind)
+        assertEquals(CapabilityState.WRITABLE, decision.state)
+    }
+
+    @Test
+    fun `range values must stay inside the bounds and align to the step`() {
+        val caps = capabilities(
+            props = mapOf(
+                SonyDevicePropCode.EXPOSURE_BIAS to prop(
+                    SonyDevicePropCode.EXPOSURE_BIAS,
+                    dataType = typeInt16,
+                    range = ValueRange(0xF448L, 0x0BB8L, 1000L)
+                )
+            )
+        )
+
+        listOf(-3000L, -2000L, 0L, 2000L, 3000L).forEach {
+            assertTrue("$it 在步进上", caps.accepts(CameraCapability.EXPOSURE_BIAS, it))
+        }
+        listOf(-300L, 500L).forEach {
+            assertFalse("$it 不在步进上", caps.accepts(CameraCapability.EXPOSURE_BIAS, it))
+        }
+        assertFalse(caps.accepts(CameraCapability.EXPOSURE_BIAS, -3001L))
+        assertFalse(caps.accepts(CameraCapability.EXPOSURE_BIAS, 3001L))
+    }
+
+    @Test
+    fun `writable property with no reported value form accepts nothing`() {
+        // 相机说可写却既无枚举表也无范围：没有任何依据能声称某个具体值可用
+        val caps = capabilities(props = mapOf(SonyDevicePropCode.ISO to prop(SonyDevicePropCode.ISO)))
+
+        assertEquals(CapabilityState.WRITABLE, caps.stateOf(CameraCapability.ISO))
+        assertFalse(caps.accepts(CameraCapability.ISO, 200L))
+        val decision = caps.decideWrite(CameraCapability.ISO, 200L)
+        assertTrue(decision is PropertyWriteDecision.Reject)
+        assertEquals(
+            RejectReason.VALUE_NOT_REPORTED,
+            (decision as PropertyWriteDecision.Reject).kind
         )
     }
 

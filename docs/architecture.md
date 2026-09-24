@@ -38,6 +38,11 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
   `CameraCapabilities` 把每项能力判为 unknown/unsupported/readOnly/writable 并保留判定依据。
   连接、断开、功能模式切换都会重建快照；参数下发只有拿到 `PropertyWriteDecision.Send`
   才触达通道。规则与未验证项见 `camera-capability-matrix.md`。
+- **档案与预设（T6）**：`data/profile/` 用独立的 `profile.db` 存「这台机器上次实测能调什么」
+  与「命名预设」。两条硬约定：档案键 `profileKey`（型号 + 固件）与快照键 `snapshotKey`
+  （再加传输方式 + 模式）**分开**，否则一台相机会按连接方式裂成多份档案；
+  存档**永不授权下发**——解出来的快照恒为 `stale`，预设应用前必须重新读 0x9209，
+  且逐项以「读回一致」才算成功（`PresetPlanner`）。连接凭据不进档案、不进导出、不进日志。
 - **相册刷新**：事件流（`StoreAdded/Removed/ObjectAdded`）触发即时静默刷新，
   4 秒轮询兜底；`MediaSessionCache` 让相册与二级页（大图/编辑）共享列表。
 - **配网**：`QrScanViewModel` → `CameraWifiManager.connectToCameraHotspot`（WifiNetworkSpecifier）。
@@ -56,7 +61,7 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
 ```
 主页 TAB ─ 连接卡片 + 扫码连接(半屏弹窗) + 遥控拍摄入口
 相册 TAB ─ 中枢（零加载）：1 相册查看 / 2 相册传输(下载队列) / 3 相册编辑(LUT)
-设置 TAB ─ 外观(主题) / LUT 管理 / 下载目录 / 手动 IP / 关于
+设置 TAB ─ 外观(主题) / LUT 管理 / 下载目录 / 相机档案与预设 / 手动 IP / 关于
 ```
 
 所有二级页面隐藏底部 TAB，左上角返回图标。
@@ -67,7 +72,10 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
 |---|---|---|
 | `PtpIpClient` | `:ptp` | 双 socket 握手、索尼初始化序列、事务执行 |
 | `PtpChannel` | `:app/data/remote` | 事务互斥、超时自愈、保活、事件监听 |
-| `CameraCapabilities` | `:app/data/model` | 能力四态判定、选项生成、写入决策（`decideWrite`） |
+| `CameraCapabilities` | `:app/data/model` | 能力四态判定、选项生成、写入决策（`decideWrite`/`accepts`） |
+| `CameraProfileStore` | `:app/data/profile` | 档案 / 能力快照 / 最近连接 / 命名预设的读写门面（`profile.db`） |
+| `PresetPlanner` | `:app/data/profile` | 预设逐项「校验 → 下发 → 读回」判定（纯函数，七种结果状态） |
+| `PresetDocument` | `:app/data/profile` | 预设导出/导入格式：SHA-256 校验和 + 有界输入 + 越界整份拒绝 |
 | `ViewportTransform` | `:app/feature/control/monitoring` | 监看画面统一坐标模型：正向供绘制、逆向供触摸反查 |
 | `MonitoringWorkstation` | `:app/feature/control/monitoring` | 全屏监看工作台（Dialog 独立 window，横屏 + 沉浸） |
 | `SonyBleShutter` | `:app/data/ble` | 蓝牙遥控快门（配对/GATT/命令队列） |

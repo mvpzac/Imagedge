@@ -44,11 +44,17 @@ fun GlassCard(
                 }
             )
     ) {
+        // Surface 必须**自己撑出尺寸**：matchParentSize 的子节点不参与父级测量，
+        // 而它是 Box 的唯一子节点——于是 Box 量出 0 高、内容被裁光（真机实测：主页状态卡
+        // 与遥控页整块参数区全部不可见）。玻璃画在 Box 上，Box 的尺寸就是内容的尺寸。
+        // Surface 必须**自己撑出尺寸**：`matchParentSize` 的子节点不参与父级测量，
+        // 而它是 Box 的唯一子节点——Box 于是量出 0 高，内容被整块裁掉
+        //（真机实测：主页状态卡与遥控页整块参数区在页面上完全不可见）。
+        // 玻璃画在 Box 上，Box 的尺寸就是内容的尺寸，去掉这层约束后观感不变。
         Surface(
             color = Color.Transparent,
             contentColor = contentColor,
-            shape = shape,
-            modifier = Modifier.matchParentSize()
+            shape = shape
         ) {
             content()
         }

@@ -4,9 +4,29 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
-> 相机能力模型（T0）与本地监看工作台（T1）：参数可调性由相机描述符决定，监看侧新增全屏工作台。
+> 相机能力模型（T0）、本地监看工作台（T1）与相机档案/参数预设（T6）：参数可调性由相机描述符
+> 决定，监看侧新增全屏工作台，档案侧把「这台机器上次实测能调什么」持久化下来。
 
 ### Added / 新增
+
+**相机档案与参数预设（T6）**
+
+- 新增 `data/profile/`：独立的 `profile.db`（Room v1，不挂进 `download.db` 的迁移链）存
+  相机档案、能力快照、最近连接与命名预设。档案键 `profileKey`（型号 + 固件）与快照键
+  `snapshotKey`（再加传输方式 + 功能模式）刻意分开，一台相机不会按连接方式裂成多份档案
+- 新增 `CapabilitySnapshotCodec`：能力快照的持久化编解码。**解出来恒为 `stale`**，
+  且只恢复 `DEVICE_PROP_DESCRIPTOR` 证据的条目——通道自我声明的遥控拍摄随连接消失，
+  不能由历史档案授权
+- 新增 `CameraProfileStore`：连接即建档、探测成功即落快照、预设按档案归属；
+  删档案连带清掉它的能力快照与预设。`recent_connection` **不含 SSID 与任何凭据**
+- 新增 `PresetDocument`：预设导出/导入格式。payload + SHA-256 校验和，格式版本不符、
+  校验和被改、体积/条数越界、含未知参数项一律**整份拒绝**并给原因；类型里没有可放凭据的字段
+- 新增 `PresetPlanner`：预设逐项「校验 → 下发 → 读回」判定（纯函数，七种结果状态）。
+  **只有读回一致才算 `APPLIED`**——相机回了 OK 却没真的改，记成成功比记成失败更坏
+- 新增 `feature/profile/`：档案页（当前相机 / 参数预设 / 相机档案 / 最近连接四块），
+  含命名预设的存/用/改名/删、SAF 导入导出、应用后的逐项部分失败报告，
+  以及按 (传输方式, 功能模式) 归档的四态能力展示
+- 单测 31 项：编解码往返 6、导出文档与越界拒绝 13、逐项规划器 10、能力模型新增 2
 
 **监看工作台（T1）**
 
@@ -50,6 +70,15 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Fixed / 修复
 
+- **`GlassCard` 内容整块不可见**：内层 `Surface` 用 `Modifier.matchParentSize()`，而它是外层
+  Box 的唯一子节点——`matchParentSize` 不参与父级测量，Box 量出 0 高，内容被裁光。
+  主页状态卡与遥控页整块参数区都受影响，页面表现为空白且不报错。API 37 模拟器实测发现。
+- **预设/快照写入后列表不刷新**：`observeAll()` 只跟踪 `parameter_preset` 一张表，
+  在 `map` 里逐行查子表的写法永远不会被 `parameter_preset_item` 的写入唤醒
+  （数据在库里，界面显示空）。改用 `@Transaction` + `@Relation`，同时去掉 N+1 查询。
+- **禁用态的主按钮看起来是启用的**：`AppButton` 两条绘制路径都不看 `enabled`，
+  灰不掉的按钮等于「按了没反应」。现在统一按 0.38 内容不透明度降级，
+  与 `AppChip` / `AppLink` / `AppIconButton` 同一口径。
 - 暂停取景与退到后台真正**停止采集**（取消 Job、关闭 socket），而不是只冻住渲染：
   只停渲染时相机仍在推流，射频与耗电都没有省下来。
 - `AppIconButton` 新增可选 `tint`：图标色原先写死取主题 `primary`（浅色主题下近黑），

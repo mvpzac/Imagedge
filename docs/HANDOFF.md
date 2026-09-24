@@ -52,8 +52,8 @@ Sony 相机无线传输 / 遥控 Android 应用。Kotlin + Jetpack Compose (Mate
 
 ```
 com.imagedge.camera/
-├── data/          # 数据层（remote=PTP 通道、ble=蓝牙快门、local=Room）
-├── feature/       # 按功能分包：album connection control download edit home root settings share
+├── data/          # 数据层（remote=PTP 通道、ble=蓝牙快门、local=Room、profile=相机档案与预设）
+├── feature/       # 按功能分包：album connection control download edit home profile root settings share
 ├── ui/            # 设计系统：theme（含 Color/Shape/Radius）、components、glass（液态玻璃）
 └── core/          # app 内的基础设施
 ```
@@ -132,6 +132,39 @@ com.imagedge.camera/
     configChanges，所以旋转不重建 Activity、也不需要改清单。但工作台是 `Dialog`（独立 window），
     隐藏系统栏必须取 `DialogWindowProvider` 的 window——调 Activity 的 window 管不到它。
     `requestedOrientation` 的还原写在 `onDispose`，否则退出后应用会卡在横屏。
+18. **`GlassCard` 的内容不能挂 `Modifier.matchParentSize()`**：`matchParentSize` 的子节点
+    **不参与父级测量**，而它是那个 Box 的唯一子节点 → Box 量出 0 高 → 整卡内容被裁光。
+    表现是「页面空白但没有报错」，主页状态卡与遥控页整块参数区都曾被它吃掉过（API 37 模拟器实测）。
+    这类「组件静默零尺寸」的问题单元测试与 lint 都抓不到，只能把界面跑起来看。
+19. **Room 的 Flow 只跟踪它查询里出现的表**：`observeAll()` 只读 `parameter_preset`，
+    那么在 `map { }` 里再逐行查 `parameter_preset_item` 的写法，**子表写入永远不会唤醒它**。
+    实测症状是「数据确实在库里，界面却显示空摘要」，且重启后才对。
+    父子表要一起 observe 就用 `@Transaction` + `@Relation`（见 `ProfileEntities.kt` 的
+    `PresetWithItems` / `ProfileWithSnapshots`），顺带去掉 N+1 查询。
+20. **`AppButton(enabled = false)` 必须看得出禁用**：两条绘制路径原先都按 `enabled` 无关的颜色画，
+    灰不掉的按钮看起来就是「按了没反应」。现在统一用 `DISABLED_CONTENT_ALPHA = 0.38f`，
+    与 `AppChip` / `AppLink` / `AppIconButton` 同一口径。
+21. **档案与预设的存档永不构成许可**（T6）：`CapabilitySnapshotCodec.decode` 解出的快照恒
+    `stale = true`，且只恢复 `DEVICE_PROP_DESCRIPTOR` 证据的条目——通道自我声明的能力
+    （遥控拍摄）随连接消失，「此刻连着哪条通道」不是可持久化的事实，照单恢复等于让一份
+    历史档案凭空授权一次遥控拍摄。预设应用前必须重读 0x9209，且以**读回一致**才算成功。
+    连接凭据不进档案、不进导出、不进日志：`recent_connection` 表连 SSID 字段都没有。
+
+## 怎么把界面跑起来（无真机也能验 UI 与存储）
+
+```bash
+SDK=/opt/homebrew/share/android-commandlinetools
+export ANDROID_SDK_ROOT=$SDK ANDROID_HOME=$SDK
+$SDK/emulator/emulator -avd imagedge -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect &
+$SDK/platform-tools/adb wait-for-device   # 首启约 1~3 分钟
+$SDK/platform-tools/adb shell input tap X Y          # 坐标来自 adb shell uiautomator dump
+$SDK/platform-tools/adb exec-out screencap -p > /tmp/s.png
+# 直接查应用私有数据库（debug 包可用 run-as）：
+$SDK/platform-tools/adb shell "run-as com.imagedge.camera sqlite3 /data/data/com.imagedge.camera/databases/profile.db 'select * from parameter_preset;'"
+```
+
+模拟器能验：Room 建表与读写、SAF 导入导出、重启后数据存活、Compose 布局与深浅两主题。
+**验不了**任何相机往返——那需要真机 + 真相机，属于兼容矩阵的 `未验证` 范围。
 
 ## 编辑功能现状（2026-09-11 完善后）
 

@@ -38,6 +38,9 @@ import com.imagedge.camera.ui.glass.glassSurface
 /** 按钮内容内边距：垂直 14dp 与文字行高凑约 48dp 目标高度；水平 24dp 保非全宽时不贴边 */
 private val ButtonContentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp)
 
+/** 禁用态内容不透明度（与 AppChip / AppLink / AppIconButton 同一档，全系统一个口径） */
+private const val DISABLED_CONTENT_ALPHA = 0.38f
+
 /** 统一按钮：PRIMARY 强调 / SECONDARY 次级 / GHOST 文字 */
 enum class AppButtonType { PRIMARY, SECONDARY, GHOST }
 
@@ -65,6 +68,9 @@ fun AppButton(
     val backdrop = LocalGlassBackdrop.current
     val glassLevel = LocalGlassLevel.current
     val useGlass = backdrop != null && glassLevel.warrantsBackdropCapture()
+    // 禁用态必须看得出来：此前两条绘制路径都按 enabled 无关的颜色画，
+    // 「按了没反应」的主按钮比一个明显灰掉的按钮更糟
+    val contentAlpha = if (enabled) 1f else DISABLED_CONTENT_ALPHA
 
     /**
      * 默认内容：三种形态由参数决定，不再需要调用方自己拼 Column
@@ -160,7 +166,7 @@ fun AppButton(
                 .padding(ButtonContentPadding),
             contentAlignment = Alignment.Center
         ) {
-            CompositionLocalProvider(LocalContentColor provides textColor) {
+            CompositionLocalProvider(LocalContentColor provides textColor.copy(alpha = contentAlpha)) {
                 body()
             }
         }
@@ -182,7 +188,9 @@ fun AppButton(
                 .padding(ButtonContentPadding),
             contentAlignment = Alignment.Center
         ) {
-            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onPrimary) {
+            CompositionLocalProvider(
+                LocalContentColor provides MaterialTheme.colorScheme.onPrimary.copy(alpha = contentAlpha)
+            ) {
                 body()
             }
         }
@@ -194,7 +202,9 @@ fun AppButton(
                 .padding(ButtonContentPadding),
             contentAlignment = Alignment.Center
         ) {
-            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+            CompositionLocalProvider(
+                LocalContentColor provides MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha)
+            ) {
                 body()
             }
         }

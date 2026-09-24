@@ -103,12 +103,28 @@ sealed interface PropertyWriteDecision {
         val valueSize: Int
     ) : PropertyWriteDecision
 
-    /** 不得下发：[state] 说明相机给出的事实，[reason] 是可直接落日志的诊断说明 */
+    /**
+     * 不得下发。
+     *
+     * [state] 说明相机给出的事实，[reason] 是可直接落日志的诊断说明；
+     * [kind] 让调用方能在不解析文案的前提下区分两类拒绝——
+     * 预设的逐项报告必须能说清「这项本来就不能调」和「这项可调但这个值不行」。
+     */
     data class Reject(
         val capability: CameraCapability,
         val state: CapabilityState,
+        val kind: RejectReason,
         val reason: String
     ) : PropertyWriteDecision
+}
+
+/** 下发被拒绝的原因类别 */
+enum class RejectReason {
+    /** 能力本身不可写：未探测、读取超时、不支持、只读、或快照陈旧 */
+    CAPABILITY_NOT_WRITABLE,
+
+    /** 能力可写，但这个原始值不在相机当次上报的枚举表 / 取值范围里 */
+    VALUE_NOT_REPORTED
 }
 
 /**
@@ -146,16 +162,53 @@ data class CameraCapabilities(
     }
 
     /**
+     * 这个原始值是否被相机**当次**上报的取值形式所允许。
+     *
+     * T0 的闸门只回答「这项可不可写」，回答不了「这个值可不可用」——预设里存的
+     * f/1.8 在换回套头后能力状态依然是 WRITABLE，但枚举表里已经没有它了。
+     * 把值校验放在同一道闸里，UI 选择器和预设下发走的是同一个判断，不会有其中一条绕过。
+     *
+     * 规则：枚举表非空时以表为准（那张表就是相机的完整许可）；否则以 Range 为准，
+     * 要求落在 `[min, max]` 且与 `min` 按 `step` 对齐；两者都没上报时**一律拒绝**——
+     * 没有任何依据时不能声称某个值可用。
+     */
+    fun accepts(capability: CameraCapability, raw: Long): Boolean {
+        if (!canWrite(capability)) return false
+        val detail = detail(capability)
+        if (detail.supportedValues.isNotEmpty()) return raw in detail.supportedValues
+        val range = detail.range ?: return false
+        if (raw < range.min || raw > range.max) return false
+        return when {
+            range.step > 0L -> (raw - range.min) % range.step == 0L
+            else -> raw == range.min          // 步进缺失：只有端点值有依据
+        }
+    }
+
+    /**
      * 产出一次参数下发的决策。
      *
      * 属性码与值宽度都取自相机上报的描述符，不按属性码硬编码——硬编码宽度正是
-     * 「ZV-E10 上报 UINT32 却按 UINT16 写」这类失败的来源。能力不足时返回
+     * 「ZV-E10 上报 UINT32 却按 UINT16 写」这类失败的来源。能力不足或值未上报时返回
      * [PropertyWriteDecision.Reject]，调用方**不得**发出任何命令。
      */
     fun decideWrite(capability: CameraCapability, raw: Long): PropertyWriteDecision {
         val detail = detail(capability)
         if (!canWrite(capability)) {
-            return PropertyWriteDecision.Reject(capability, detail.state, detail.note)
+            return PropertyWriteDecision.Reject(
+                capability, detail.state, RejectReason.CAPABILITY_NOT_WRITABLE, detail.note
+            )
+        }
+        // 值校验只对描述符类能力有意义：通道自我声明的动作类能力（遥控拍摄）没有取值形式
+        if (detail.evidence == CapabilityEvidence.DEVICE_PROP_DESCRIPTOR &&
+            !accepts(capability, raw)
+        ) {
+            val hex = "0x${detail.propCode.toString(16).uppercase()}"
+            return PropertyWriteDecision.Reject(
+                capability,
+                detail.state,
+                RejectReason.VALUE_NOT_REPORTED,
+                "$hex 当次未上报值 $raw（枚举表中没有，也不在取值范围上）"
+            )
         }
         // 有符号值（如曝光补偿 -300）按相机上报的宽度回补成无符号原始位模式
         val mask = if (detail.valueSize >= 8) -1L else (1L shl (detail.valueSize * 8)) - 1L

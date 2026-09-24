@@ -88,6 +88,7 @@ import com.imagedge.camera.feature.album.PhotoViewerScreen
 import com.imagedge.camera.feature.download.DownloadScreen
 import com.imagedge.camera.feature.control.RemoteShootingScreen
 import com.imagedge.camera.feature.home.HomeScreen
+import com.imagedge.camera.feature.profile.CameraProfileScreen
 import com.imagedge.camera.feature.settings.PermissionScreen
 import com.imagedge.camera.feature.settings.SettingsScreen
 
@@ -132,6 +133,7 @@ object Route {
     const val LIVE_TRIPTYCH = "live_triptych"
     const val EXIF_FRAME = "exif_frame"
     const val PERMISSIONS = "permissions"
+    const val PROFILES = "profiles"
 
     /** 大图查看器（index = 相册列表起始位置） */
     const val PHOTO_VIEWER = "photo_viewer/{index}"
@@ -283,11 +285,18 @@ fun RootScreen(
                 }
                 composable(RootDestination.SETTINGS.route) {
                     SettingsScreen(
-                        onOpenPermissions = { navController.navigate(Route.PERMISSIONS) }
+                        onOpenPermissions = { navController.navigate(Route.PERMISSIONS) },
+                        onOpenProfiles = { navController.navigate(Route.PROFILES) }
                     )
                 }
                 composable(Route.PERMISSIONS) {
                     PermissionScreen(onBack = { navController.popBackStack() })
+                }
+                composable(Route.PROFILES) {
+                    CameraProfileScreen(
+                        onBack = { navController.popBackStack() },
+                        snackbarController = snackbarController
+                    )
                 }
                 composable(Route.REMOTE) {
                     RemoteShootingScreen(

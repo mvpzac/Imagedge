@@ -2,6 +2,9 @@ package com.imagedge.camera.injection
 
 import android.content.Context
 import androidx.room.Room
+import com.imagedge.camera.data.profile.CameraProfileDao
+import com.imagedge.camera.data.profile.ParameterPresetDao
+import com.imagedge.camera.data.profile.ProfileDatabase
 import com.imagedge.camera.data.transfer.DownloadDatabase
 import com.imagedge.camera.data.transfer.DownloadHistoryDao
 import com.imagedge.camera.data.transfer.DownloadTaskDao
@@ -62,4 +65,27 @@ object AppModule {
     @Provides
     @Singleton
     fun provideDownloadHistoryDao(db: DownloadDatabase): DownloadHistoryDao = db.downloadHistoryDao()
+
+    /**
+     * 相机档案数据库（T6）。
+     *
+     * 独立的 `profile.db` 而不是并进 `download.db`：后者已是 v2 且 `exportSchema = false`，
+     * 加表就得手写一段无人能在真机上验证的迁移 DDL，写错的表现是老用户启动即崩。
+     * 新库 version = 1 由 Room 首开建表，没有迁移路径。
+     */
+    @Provides
+    @Singleton
+    fun provideProfileDatabase(@ApplicationContext context: Context): ProfileDatabase =
+        Room.databaseBuilder(context, ProfileDatabase::class.java, "profile.db")
+            .build()
+
+    /** 相机档案 DAO（档案 / 能力快照 / 最近连接） */
+    @Provides
+    @Singleton
+    fun provideCameraProfileDao(db: ProfileDatabase): CameraProfileDao = db.cameraProfileDao()
+
+    /** 命名参数预设 DAO */
+    @Provides
+    @Singleton
+    fun provideParameterPresetDao(db: ProfileDatabase): ParameterPresetDao = db.parameterPresetDao()
 }

@@ -494,8 +494,12 @@ internal fun IdentitySummary(identity: CameraIdentity) {
     )
 }
 
-/** 传输方式展示名（协议名本身就是用户能核对的事实，不做意译） */
-private fun CameraTransport.label(): String = when (this) {
+/**
+ * 传输方式展示名（协议名本身就是用户能核对的事实，不做意译）。
+ *
+ * internal：档案页按 (传输方式, 功能模式) 展示历史能力快照，两处必须叫同一个名字。
+ */
+internal fun CameraTransport.label(): String = when (this) {
     CameraTransport.PTP_IP -> "PTP/IP"
     CameraTransport.UPNP -> "UPnP"
 }

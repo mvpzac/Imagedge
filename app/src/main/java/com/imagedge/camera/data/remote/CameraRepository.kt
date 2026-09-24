@@ -9,6 +9,7 @@ import android.provider.MediaStore
 import androidx.core.net.toUri
 import com.imagedge.camera.core.common.AppLog
 import com.imagedge.camera.core.io.BoundedOutputStream
+import com.imagedge.camera.data.profile.CameraProfileStore
 import com.imagedge.camera.data.model.CameraCapabilities
 import com.imagedge.camera.data.model.CameraCapability
 import com.imagedge.camera.data.model.CameraIdentity
@@ -73,7 +74,8 @@ class CameraRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val wifiManager: CameraWifiManager,
     private val ptpChannel: PtpChannel,
-    private val upnpChannel: UpnpChannel
+    private val upnpChannel: UpnpChannel,
+    private val profileStore: CameraProfileStore
 ) {
 
     @Volatile
@@ -215,6 +217,10 @@ class CameraRepository @Inject constructor(
             TAG,
             "${channel.channelType} 连接成功，型号=${channel.deviceModel} 固件=${channel.deviceFirmware}"
         )
+        // 档案与最近连接在这里记，而不是在界面层：连接有两个入口（主页卡片、设置页手动 IP），
+        // 以后还会更多，只有这一处知道通道是真的建起来了。
+        // 走 repoScope 异步写：Room 首开要建库建表，不能挂在连接路径上。
+        repoScope.launch { profileStore.recordConnection(_identity.value) }
         return ConnectionResult(channel.channelType, _identity.value)
     }
 
@@ -462,6 +468,9 @@ class CameraRepository @Inject constructor(
         )
         _capabilities.value = capabilities
         logCapabilitySnapshot(capabilities)
+        // 只在本轮真的读到了描述符时才落档：recordCapabilities 内部会拒绝 descriptorRead=false
+        // 的快照，免得把一次超时存成这台相机「能力未知」的既成事实
+        repoScope.launch { profileStore.recordCapabilities(capabilities) }
         CameraSnapshot(identity, settingsFrom(props), capabilities)
     }
 

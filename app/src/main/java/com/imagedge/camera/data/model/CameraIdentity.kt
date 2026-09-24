@@ -40,8 +40,24 @@ data class CameraIdentity(
     /** 型号是否已知（未知时能力一律按未探测处理） */
     val isKnown: Boolean get() = model.isNotBlank()
 
-    /** 归档键：同一键下的能力快照可复用（仍需标记为陈旧直到重新探测） */
+    /**
+     * 能力快照的归档键：同一键下的快照可互相比较。
+     *
+     * 含传输方式与功能模式——**同一台相机换个连接方式，档位就是不一样**
+     * （UPnP 连 DeviceProp 都没有）。
+     */
     val snapshotKey: String get() = "$model|$firmware|${transport?.name}|$mode"
+
+    /**
+     * 相机档案（T6）的归档键：只认物理设备，不认这次是怎么连上的。
+     *
+     * 与 [snapshotKey] 必须分开：档案属于「这台 ZV-E10」，用户换手机连接方式、
+     * 切整卡模式都还是同一台机器，档案不该裂成两份；而能力快照确实随模式/通道变化，
+     * 所以它保留在 [snapshotKey] 这一层。
+     *
+     * 固件版本参与键值：同型号刷过固件后菜单与属性表可能不同，混用会写出相机不认的档位。
+     */
+    val profileKey: String get() = "$model|$firmware"
 
     companion object {
         /** 未连接 / 身份未知 */

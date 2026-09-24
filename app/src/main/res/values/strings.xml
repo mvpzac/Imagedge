@@ -287,4 +287,67 @@
     <string name="ratio_235">2.35:1</string>
 
     <!-- 设置 -->
+
+    <!-- 相机档案与参数预设（T6） -->
+    <string name="profile_title">相机档案与预设</string>
+    <string name="profile_entry_desc">连过的相机、它们实测可调的参数，以及命名预设的导入导出</string>
+    <string name="profile_section_current">当前相机</string>
+    <string name="profile_live_probed">本轮已读取相机描述符 · %1$d 项参数可存为预设</string>
+    <string name="profile_live_absent">本轮未读到相机描述符（未连接、0x9209 超时或非 PTP 通道）。预设可查看与导出，但不能应用</string>
+    <string name="profile_probing">正在读取相机描述符…</string>
+    <string name="profile_refresh">重新读取</string>
+    <string name="profile_save_current">存为预设</string>
+    <string name="profile_save_note">只收录相机当次确认可写、且当前值就在上报档位里的参数</string>
+    <string name="profile_save_title">存为预设</string>
+    <string name="profile_rename_title">重命名预设</string>
+    <string name="profile_section_presets">参数预设</string>
+    <string name="profile_import">导入</string>
+    <string name="profile_export">导出</string>
+    <string name="profile_apply">应用</string>
+    <string name="profile_rename">重命名</string>
+    <string name="profile_delete">删除</string>
+    <string name="profile_confirm">确定</string>
+    <string name="profile_cancel">取消</string>
+    <string name="profile_presets_empty">还没有预设</string>
+    <string name="profile_presets_empty_desc">连上相机调好参数后存成预设，或从已导出的文件导入</string>
+    <string name="profile_is_current">当前相机</string>
+    <string name="profile_preset_name_label">名称</string>
+    <string name="profile_preset_name_hint">最长 40 字；同一台相机上同名会覆盖</string>
+    <string name="profile_applying">正在逐项校验并下发…</string>
+    <string name="profile_preset_other_camera">属于另一台相机，不能应用到当前机器</string>
+    <string name="profile_preset_no_camera">未连接相机，连上后才能判断能否应用</string>
+    <string name="profile_section_profiles">相机档案</string>
+    <string name="profile_profiles_empty">还没有连过的相机</string>
+    <string name="profile_profile_meta">固件 %1$s · 已连接 %2$d 次</string>
+    <string name="profile_profile_last_seen">最近一次 %1$s</string>
+    <string name="profile_archive_stale_note">以下是上次实测结果，只用于查看；应用预设前会重新读取相机描述符</string>
+    <string name="profile_no_snapshot">这台相机还没有成功探测过能力</string>
+    <string name="profile_snapshot_title">%1$s · %2$s · %3$s</string>
+    <string name="profile_state_writable">可写</string>
+    <string name="profile_state_read_only">只读</string>
+    <string name="profile_state_unsupported">不支持</string>
+    <string name="profile_state_unknown">未知</string>
+    <string name="profile_no_note">相机未给出说明</string>
+    <string name="profile_reported_values">上报 %1$d 个档位</string>
+    <string name="profile_reported_range">范围 %1$d … %2$d，步进 %3$d</string>
+    <string name="profile_mode_unknown">模式未知</string>
+    <string name="profile_cap_capture">遥控拍摄</string>
+    <string name="profile_section_recent">最近连接</string>
+    <string name="profile_recent_empty">还没有连接记录</string>
+    <string name="profile_recent_meta">%1$s · %2$s · %3$s</string>
+    <string name="profile_clear_recent">清空</string>
+    <string name="profile_delete_profile_title">删除档案</string>
+    <string name="profile_delete_profile_body">将删除 %1$s 的能力快照与它名下的 %2$d 份预设，此操作不可撤销</string>
+    <string name="profile_delete_preset_title">删除预设</string>
+    <string name="profile_delete_preset_body">删除「%1$s」？</string>
+    <string name="profile_report_all">预设已全部生效</string>
+    <string name="profile_report_partial">预设部分未生效</string>
+    <string name="profile_report_count">已生效 %1$d / %2$d 项</string>
+    <string name="profile_item_applied">已生效（读回一致）</string>
+    <string name="profile_item_mismatch">档案不符</string>
+    <string name="profile_item_not_probed">未读到描述符</string>
+    <string name="profile_item_not_writable">相机未开放该项</string>
+    <string name="profile_item_value_rejected">该值不在相机档位内</string>
+    <string name="profile_item_refused">相机未接受</string>
+    <string name="profile_item_readback_diff">相机未采用</string>
 </resources>
