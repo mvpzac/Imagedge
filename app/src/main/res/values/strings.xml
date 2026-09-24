@@ -288,6 +288,45 @@
 
     <!-- 设置 -->
 
+    <!-- 拍摄工作流（T3） -->
+    <string name="control_capture_options_title">拍摄方式</string>
+    <string name="control_countdown_label">自拍倒计时</string>
+    <string name="control_countdown_off">无</string>
+    <string name="control_countdown_seconds">%1$d 秒</string>
+    <string name="control_capture_now">拍摄</string>
+    <string name="control_capture_cancel">取消</string>
+    <string name="control_interval_title">间隔拍摄</string>
+    <string name="control_interval_desc">按「上次完成 + 间隔」起下一张；相机忙时跳过这一张，不补拍也不叠加</string>
+    <string name="control_interval_shots">共 %1$d 张</string>
+    <string name="control_autosave_title">拍后自动保存</string>
+    <string name="control_autosave_desc">开启后，新照片自动进入下载队列</string>
+    <string name="control_autosave_note">同一张照片的重复事件只会保存一次；关掉后需手动到相册下载</string>
+    <string name="control_status_counting">倒计时中…此阶段未向相机发出任何命令</string>
+    <string name="control_status_sent">快门命令已发出，等待相机确认</string>
+    <string name="control_status_confirmed">相机已确认拍摄</string>
+    <string name="control_status_waiting">已确认，等待照片写入内容集</string>
+    <string name="control_status_done">拍摄完成</string>
+    <string name="control_status_unconfirmed">相机未确认拍摄：命令发了但没有反馈，请检查相机状态后重试</string>
+    <string name="control_status_countdown_cancelled">已取消倒计时，未拍摄</string>
+    <string name="control_status_cancelled">本次拍摄已取消，快门按键已释放</string>
+    <string name="control_status_disconnected">连接已断开，本次拍摄中止</string>
+    <string name="control_status_failed">拍摄未成功</string>
+
+    <!-- 传输策略（T3） -->
+    <string name="transfer_policy_title">传输策略</string>
+    <string name="transfer_scope_label">传输范围</string>
+    <string name="transfer_scope_camera_selection">相机选片集</string>
+    <string name="transfer_scope_whole_card">整卡</string>
+    <string name="transfer_scope_by_camera">该范围由相机决定，不等于相机上的全部照片</string>
+    <string name="transfer_size_label">尺寸与格式</string>
+    <string name="transfer_size_original">原对象</string>
+    <string name="transfer_size_local_thumbnail">原对象 + 本机缩图</string>
+    <string name="transfer_size_note">缩图在下载完成后于本机生成，不减少相机→手机的传输量；相机侧生成小图的路径未经实测，故不提供</string>
+    <string name="transfer_resume_label">续传</string>
+    <string name="transfer_resume_whole_object">失败整文件重传</string>
+    <string name="transfer_resume_partial">分块续传</string>
+    <string name="transfer_resume_note">分块续传在 ZV-E10 整卡模式下被相机拒绝（每块回 0x2009），未实测机型上一律不启用</string>
+
     <!-- 相机档案与参数预设（T6） -->
     <string name="profile_title">相机档案与预设</string>
     <string name="profile_entry_desc">连过的相机、它们实测可调的参数，以及命名预设的导入导出</string>

@@ -48,10 +48,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.R
 import com.imagedge.camera.ui.theme.Radius
+import com.imagedge.camera.ui.theme.Spacing
 import com.imagedge.camera.data.model.DownloadState
 import com.imagedge.camera.data.model.DownloadTask
 import com.imagedge.camera.data.model.isActive
 import com.imagedge.camera.data.transfer.DownloadHistoryEntity
+import com.imagedge.camera.data.transfer.ResumeMode
+import com.imagedge.camera.data.transfer.TransferPolicy
+import com.imagedge.camera.data.transfer.TransferSizeMode
 import com.imagedge.camera.feature.edit.PhotoEditScreen
 import com.imagedge.camera.feature.share.ExportSettingsSheet
 import com.imagedge.camera.feature.share.ShareViewModel
@@ -102,6 +106,7 @@ fun DownloadScreen(
     val hasFinished = tasks.any { it.state == DownloadState.DONE || it.state == DownloadState.FAILED }
     // 有进行中（排队/下载中）任务时提供「全部取消」：断链时不必逐个取消或杀进程
     val hasActive = tasks.any { it.state.isActive }
+    val policy by viewModel.transferPolicy.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -161,6 +166,10 @@ fun DownloadScreen(
             Spacer(Modifier.height(12.dp))
 
             if (tab == 0) {
+                // 传输策略：这批文件走的是原对象还是缩图、失败后怎么续传，
+                // 直接决定「为什么这么大」和「为什么又重下一遍」，不能只活在代码里
+                TransferPolicySummary(policy)
+                Spacer(Modifier.height(12.dp))
                 // 下载队列
                 if (tasks.isEmpty()) {
                     EmptyState(
@@ -464,5 +473,70 @@ private fun formatSize(bytes: Long): String {
         String.format(Locale.US, "%.1f MB", mb)
     } else {
         String.format(Locale.US, "%.1f KB", bytes / 1024.0)
+    }
+}
+
+/**
+ * 传输策略摘要（T3）。
+ *
+ * 这里只做一件事：把「这批文件按什么规则传」摆到界面上。三条限制各自跟着自己的选项写出来，
+ * 尤其是**缩图不省流量**和**分块续传未实测**——这两条最容易被用户按直觉理解反。
+ */
+@Composable
+private fun TransferPolicySummary(policy: TransferPolicy) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(Spacing.XS)
+    ) {
+        Text(
+            text = stringResource(R.string.transfer_policy_title),
+            style = MaterialTheme.typography.titleSmall
+        )
+        PolicyLine(
+            label = stringResource(R.string.transfer_size_label),
+            value = stringResource(
+                if (policy.sizeMode == TransferSizeMode.LOCAL_THUMBNAIL) {
+                    R.string.transfer_size_local_thumbnail
+                } else {
+                    R.string.transfer_size_original
+                }
+            )
+        )
+        PolicyLine(
+            label = stringResource(R.string.transfer_resume_label),
+            value = stringResource(
+                if (policy.resumeMode == ResumeMode.PARTIAL_OBJECT) {
+                    R.string.transfer_resume_partial
+                } else {
+                    R.string.transfer_resume_whole_object
+                }
+            )
+        )
+        Text(
+            text = stringResource(R.string.transfer_size_note),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        // 只在真的启用了分块续传时才提示它的风险；当前默认关闭，这条说明就跟着选项走
+        if (policy.resumeMode == ResumeMode.PARTIAL_OBJECT && !policy.resumeMode.verifiedAvailable) {
+            Text(
+                text = stringResource(R.string.transfer_resume_note),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+    }
+}
+
+@Composable
+private fun PolicyLine(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        Text(text = value, style = MaterialTheme.typography.bodySmall)
     }
 }

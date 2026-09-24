@@ -43,6 +43,14 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
   （再加传输方式 + 模式）**分开**，否则一台相机会按连接方式裂成多份档案；
   存档**永不授权下发**——解出来的快照恒为 `stale`，预设应用前必须重新读 0x9209，
   且逐项以「读回一致」才算成功（`PresetPlanner`）。连接凭据不进档案、不进导出、不进日志。
+- **拍摄任务状态机（T3）**：`data/capture/CaptureWorkflow.kt` 是纯函数状态机，
+  ViewModel 只负责按它算出的结果发命令。两条不可让的规矩：
+  **命令发出 ≠ 已拍摄**（`confirmed` 只能由相机反馈置真），以及
+  **任何终态都必须交出待释放的按键**（释放清单在 `finally` 里发送，取消/超时/断线同一出口）。
+  间隔拍摄按「上次完成 + 间隔」调度、忙时跳过；系统里**不存在自动重试**。
+- **传输策略（T3）**：`data/transfer/TransferPolicy.kt` 存尺寸/续传/拍后自动保存偏好，
+  在下载页展示；**传输范围不是偏好**——它由相册浏览模式推导，存成偏好会出现
+  「prefs 写着整卡、实际连着选片集」的假信息。自动保存走 `AutoSaveLedger` 去重。
 - **相册刷新**：事件流（`StoreAdded/Removed/ObjectAdded`）触发即时静默刷新，
   4 秒轮询兜底；`MediaSessionCache` 让相册与二级页（大图/编辑）共享列表。
 - **配网**：`QrScanViewModel` → `CameraWifiManager.connectToCameraHotspot`（WifiNetworkSpecifier）。

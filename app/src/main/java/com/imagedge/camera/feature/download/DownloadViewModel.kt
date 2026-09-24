@@ -6,6 +6,8 @@ import com.imagedge.camera.data.model.DownloadTask
 import com.imagedge.camera.data.transfer.DownloadHistoryDao
 import com.imagedge.camera.data.transfer.DownloadHistoryEntity
 import com.imagedge.camera.data.transfer.DownloadManager
+import com.imagedge.camera.data.transfer.TransferPolicy
+import com.imagedge.camera.data.transfer.TransferPolicyStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -25,10 +27,14 @@ import javax.inject.Inject
 @HiltViewModel
 class DownloadViewModel @Inject constructor(
     private val downloadManager: DownloadManager,
-    private val historyDao: DownloadHistoryDao
+    private val historyDao: DownloadHistoryDao,
+    transferPolicyStore: TransferPolicyStore
 ) : ViewModel() {
 
     val tasks: StateFlow<List<DownloadTask>> = downloadManager.tasks
+
+    /** 生效中的传输策略（尺寸/续传）。范围不在这里——那是当前浏览模式的事实 */
+    val transferPolicy: StateFlow<TransferPolicy> = transferPolicyStore.policy
 
     /** 传输记录（按结束时间倒序） */
     val history: StateFlow<List<DownloadHistoryEntity>> = historyDao.observeAll()

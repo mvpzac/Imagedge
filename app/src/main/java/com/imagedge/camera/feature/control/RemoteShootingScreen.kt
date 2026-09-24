@@ -24,12 +24,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,6 +63,9 @@ import com.imagedge.camera.ui.components.StatusBanner
 import com.imagedge.camera.ui.components.AppLink
 import com.imagedge.camera.ui.feedback.SnackbarController
 import com.imagedge.camera.data.ble.BleShutterState
+import com.imagedge.camera.data.capture.CaptureFailure
+import com.imagedge.camera.data.capture.CaptureJob
+import com.imagedge.camera.data.capture.CapturePhase
 import com.imagedge.camera.data.model.CameraCapability
 import com.imagedge.camera.data.model.CameraIdentity
 import com.imagedge.camera.data.model.CameraTransport
@@ -70,6 +76,8 @@ import com.imagedge.camera.feature.control.monitoring.drawFrame
 import com.imagedge.camera.feature.control.monitoring.drawMarkers
 import com.imagedge.camera.ui.components.AppButton
 import com.imagedge.camera.ui.components.AppButtonType
+import com.imagedge.camera.ui.components.AppChipRow
+import com.imagedge.camera.ui.components.AppSwitchRow
 
 /**
  * <pre>
@@ -348,6 +356,9 @@ fun RemoteShootingScreen(
                         )
                     }
 
+                    // ── 拍摄方式：自拍倒计时与间隔拍摄（T3）──
+                    CaptureWorkflowSection(viewModel = viewModel, state = state)
+
                     // ── PTP DeviceProp 参数区（经 0x9205/0x9209 调节）──
                     // 分组标题：明确这块是"参数"，与上面的快门/录像区分开
                     Text(
@@ -502,6 +513,138 @@ internal fun IdentitySummary(identity: CameraIdentity) {
 internal fun CameraTransport.label(): String = when (this) {
     CameraTransport.PTP_IP -> "PTP/IP"
     CameraTransport.UPNP -> "UPnP"
+}
+
+/**
+ * 拍摄方式：自拍倒计时、间隔拍摄、拍后自动保存（T3）。
+ *
+ * 这一块的界面原则只有一条：**发出的命令不等于拍到的照片**。
+ * 所以状态行区分「已发出待确认 / 相机已确认 / 等写入内容集 / 完成 / 未确认」，
+ * 而不是像以前那样在超时后照样显示「已拍摄」。
+ */
+@Composable
+private fun CaptureWorkflowSection(viewModel: CameraControlViewModel, state: ControlState) {
+    val policy by viewModel.transferPolicy.collectAsStateWithLifecycle()
+    var countdownMs by rememberSaveable { mutableStateOf(0L) }
+    var intervalMs by rememberSaveable { mutableStateOf(5_000L) }
+    var shotLimit by rememberSaveable { mutableIntStateOf(10) }
+
+    // 文案在组合期算好：AppChipRow 的 label 不是 composable 上下文，
+    // 在里面直接调 stringResource 编译不过（换语言时也不会自动重算的坑一并避开）
+    val countdownOptions = listOf(0L, 3_000L, 5_000L, 10_000L).map { ms ->
+        ms to if (ms == 0L) stringResource(R.string.control_countdown_off)
+        else stringResource(R.string.control_countdown_seconds, ms / 1000)
+    }
+    val intervalOptions = listOf(2_000L, 5_000L, 10_000L, 30_000L).map { ms ->
+        ms to stringResource(R.string.control_countdown_seconds, ms / 1000)
+    }
+    val shotOptions = listOf(5, 10, 30).map { n ->
+        n to stringResource(R.string.control_interval_shots, n)
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(Spacing.M)
+    ) {
+        Text(
+            text = stringResource(R.string.control_capture_options_title),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Text(
+            text = stringResource(R.string.control_countdown_label),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        AppChipRow(
+            items = countdownOptions,
+            selected = countdownOptions.firstOrNull { it.first == countdownMs } ?: countdownOptions.first(),
+            label = { option -> option.second },
+            onSelect = { option -> countdownMs = option.first },
+            enabled = { !state.intervalRunning },
+            scrollable = true
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.S)
+        ) {
+            AppButton(
+                text = stringResource(R.string.control_capture_now),
+                onClick = { viewModel.captureNow(countdownMs) },
+                // 忙时不提供第二个快门入口：排队会让间隔慢下来时攒出一串待发命令
+                enabled = !state.busy && (state.captureAvailable || state.isConnected),
+                type = AppButtonType.SECONDARY,
+                fullWidth = false
+            )
+            if (state.capture?.phase?.isActive == true) {
+                AppLink(
+                    text = stringResource(R.string.control_capture_cancel),
+                    onClick = viewModel::cancelCapture
+                )
+            }
+        }
+
+        // 任务状态：倒计时读数与「已发出但未确认」必须看得见，用户才知道该不该继续等
+        state.capture?.let { job ->
+            Text(
+                text = stringResource(captureStatusOf(job)),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        AppSwitchRow(
+            title = stringResource(R.string.control_interval_title),
+            subtitle = stringResource(R.string.control_interval_desc),
+            checked = state.intervalRunning,
+            onCheckedChange = { on -> viewModel.setIntervalShooting(on, intervalMs, shotLimit) }
+        )
+        if (!state.intervalRunning) {
+            AppChipRow(
+                items = intervalOptions,
+                selected = intervalOptions.firstOrNull { it.first == intervalMs } ?: intervalOptions.first(),
+                label = { option -> option.second },
+                onSelect = { option -> intervalMs = option.first },
+                scrollable = true
+            )
+            AppChipRow(
+                items = shotOptions,
+                selected = shotOptions.firstOrNull { it.first == shotLimit } ?: shotOptions.first(),
+                label = { option -> option.second },
+                onSelect = { option -> shotLimit = option.first }
+            )
+        }
+
+        AppSwitchRow(
+            title = stringResource(R.string.control_autosave_title),
+            subtitle = stringResource(R.string.control_autosave_desc),
+            checked = policy.autoSaveAfterCapture,
+            onCheckedChange = viewModel::setAutoSaveAfterCapture
+        )
+        Text(
+            text = stringResource(R.string.control_autosave_note),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/** 任务阶段 → 文案。「未确认」与「已确认」是两句话，不能都写成「已拍摄」 */
+@StringRes
+private fun captureStatusOf(job: CaptureJob): Int = when {
+    job.phase == CapturePhase.COUNTING_DOWN -> R.string.control_status_counting
+    job.phase == CapturePhase.TRIGGERING -> R.string.control_status_sent
+    job.phase == CapturePhase.CONFIRMED -> R.string.control_status_confirmed
+    job.phase == CapturePhase.AWAITING_FILE -> R.string.control_status_waiting
+    job.phase == CapturePhase.COMPLETED -> R.string.control_status_done
+    job.failure == CaptureFailure.COUNTDOWN_CANCELLED -> R.string.control_status_countdown_cancelled
+    job.failure == CaptureFailure.NOT_CONFIRMED -> R.string.control_status_unconfirmed
+    job.failure == CaptureFailure.DISCONNECTED -> R.string.control_status_disconnected
+    job.phase == CapturePhase.CANCELLED -> R.string.control_status_cancelled
+    else -> R.string.control_status_failed
 }
 
 /**

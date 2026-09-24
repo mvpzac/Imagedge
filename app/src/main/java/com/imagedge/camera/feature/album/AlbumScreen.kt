@@ -45,6 +45,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.imagedge.camera.R
 import com.imagedge.camera.core.permission.rememberNotificationPermissionRequester
 import com.imagedge.camera.data.model.MediaItem
+import com.imagedge.camera.data.transfer.TransferScope
 import com.imagedge.camera.data.remote.ChannelConnectionState
 import com.imagedge.camera.ptp.PhotoType
 import com.imagedge.camera.ui.components.AlbumGridSkeleton
@@ -159,6 +160,25 @@ fun AlbumScreen(
                     viewModel.onFilterChanged()
                 },
                 modifier = Modifier.padding(top = Spacing.XS, bottom = Spacing.XS)
+            )
+
+            // 传输范围（T3）：这里列出的东西由浏览模式决定，而选片集的范围是**相机**定的。
+            // 不写清楚，用户就会把「列表里没有」读成「应用没读到」
+            val scope = TransferScope.forBrowseMode(browseMode == BrowseMode.FULL_CARD)
+            val scopeValue = stringResource(
+                if (scope == TransferScope.WHOLE_CARD) R.string.transfer_scope_whole_card
+                else R.string.transfer_scope_camera_selection
+            )
+            Text(
+                text = stringResource(R.string.transfer_scope_label) + "：" + scopeValue +
+                    if (scope.decidedByCamera) {
+                        " · " + stringResource(R.string.transfer_scope_by_camera)
+                    } else {
+                        ""
+                    },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = Spacing.S)
             )
 
             // 断线提示横幅（连接状态由保活/事务自愈维护）
