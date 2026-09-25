@@ -104,6 +104,15 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
 ：`ui/guidance/`（`GuideCard`/`ContextHint`/`HelpSheet`）只呈现内容，
   不查权限、不连相机、不决定是否出现；出现与否由 `data/guidance/GuidanceStore` 按
   `guideId + version + 机型` 判定，且「已看过」与「任务成功过」是两条独立记录。
+- **引导呈现与业务解耦**：`ui/guidance/`（`GuideCard`/`ContextHint`/`HelpSheet`）只呈现内容，
+  不查权限、不连相机、不决定是否出现；出现与否由 `data/guidance/GuidanceStore` 按
+  `guideId + version + 机型` 判定，且「已看过」与「任务成功过」是两条独立记录。
+- **编辑器骨架（重构批次 E 第二刀）**：`ui/layout/EditorFrame` 是四个编辑器共用的骨架
+  （返回/标题/重置 → 预览 → 工具区 → 保存副本），状态用 `EditorFrameState` 映射进来——
+  骨架不认识 `PhotoEditState`，所以它不会退化成参数是一堆 String 的通用壳。
+  三条不可让：导出期间返回**不假装取消**（没有安全取消点，按钮存在就是撒谎）、
+  重置过确认对话框、导出失败保留全部编辑参数（四个 ViewModel 本来就保留，骨架负责说出来）。
+  目前只有「编辑调节」迁完，其余三个编辑器仍用旧骨架。
 - **相册刷新**：事件流（`StoreAdded/Removed/ObjectAdded`）触发即时静默刷新，
   4 秒轮询兜底；`MediaSessionCache` 让相册与二级页（大图/编辑）共享列表。
 - **配网与连接向导（重构批次 D）**：`feature/connection/ConnectWizardScreen` 是一条完整子流程
