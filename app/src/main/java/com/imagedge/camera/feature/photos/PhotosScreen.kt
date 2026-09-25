@@ -101,7 +101,7 @@ fun PhotosScreen(
     val items by viewModel.items.collectAsStateWithLifecycle()
     val loading by viewModel.loading.collectAsStateWithLifecycle()
     val selected by viewModel.selected.collectAsStateWithLifecycle()
-    val error by viewModel.error.collectAsStateWithLifecycle()
+    val notice by viewModel.notice.collectAsStateWithLifecycle()
     val scope by viewModel.browseMode.collectAsStateWithLifecycle()
     val connectionState by viewModel.connectionState.collectAsStateWithLifecycle()
     val reconnecting by viewModel.reconnecting.collectAsStateWithLifecycle()
@@ -208,6 +208,10 @@ fun PhotosScreen(
                     if (scopeEnum.decidedByCamera) R.string.transfer_scope_by_camera
                     else R.string.photos_scope_note_card
                 ),
+                // 传输中就地把原因写在行下（设计 §2）。真点下去时 ViewModel 还会按
+                // 「相机当前功能模式」再判一次，所以这里最坏是多说一句，不会拦掉本该允许的切换
+                blockedReason = if (transferActive)
+                    stringResource(R.string.photos_scope_blocked) else null,
                 onClick = { showScopeSheet = true },
                 modifier = Modifier.padding(horizontal = Spacing.L)
             )
@@ -239,12 +243,17 @@ fun PhotosScreen(
                 )
             }
 
+            // 一次说明：文字、语气和**能做的补救**都按类型给（设计 §8.5 状态到界面的显式映射）。
+            // 一律给一个「重试→重新加载」会把「去连接」「再存一次」这两件不同的事抹平成第三件
+            val noticeUi = notice?.let { noticeView(it, scopeLabel, viewModel, onGoConnect) }
+
             // 后台刷新失败但已有内容：横幅说明，列表照旧（设计 §4.3 末段）
-            if (error != null && items.isNotEmpty()) {
+            if (noticeUi != null && items.isNotEmpty()) {
                 StatusBanner(
-                    message = error.orEmpty(),
-                    actionLabel = stringResource(R.string.album_retry),
-                    onAction = { viewModel.loadMedia() },
+                    message = noticeUi.text,
+                    actionLabel = noticeUi.actionLabel,
+                    onAction = noticeUi.onAction,
+                    isError = noticeUi.isError,
                     modifier = Modifier.padding(horizontal = Spacing.L, vertical = Spacing.XS)
                 )
             }
@@ -263,11 +272,11 @@ fun PhotosScreen(
                     modifier = Modifier.fillMaxSize()
                 )
                 loading && items.isEmpty() -> AlbumGridSkeleton()
-                error != null && items.isEmpty() -> EmptyState(
+                noticeUi != null && items.isEmpty() -> EmptyState(
                     title = stringResource(R.string.album_error_title),
-                    desc = error.orEmpty(),
-                    actionLabel = stringResource(R.string.album_retry),
-                    onAction = { viewModel.loadMedia() },
+                    desc = noticeUi.text,
+                    actionLabel = noticeUi.actionLabel ?: stringResource(R.string.album_retry),
+                    onAction = noticeUi.onAction ?: { viewModel.loadMedia() },
                     modifier = Modifier.fillMaxSize()
                 )
                 // 选片集且相机还没推任何东西：这是**正常等待**，不是空目录
@@ -373,6 +382,7 @@ private fun PhotoGridCell(
     val bitmap by remember(item.thumbKey) { viewModel.thumbnailFlow(item.thumbKey) }
         .collectAsStateWithLifecycle(initialValue = viewModel.cachedThumbnail(item.thumbKey))
     val thumbnailGeneration by viewModel.thumbnailGeneration.collectAsStateWithLifecycle()
+    val failures by viewModel.thumbnailFailures.collectAsStateWithLifecycle()
     LaunchedEffect(item.thumbKey, thumbnailGeneration) { viewModel.loadThumbnail(item) }
 
     PhotoGridTile(
@@ -381,12 +391,88 @@ private fun PhotoGridCell(
         selectionMode = selectionMode,
         selected = selected,
         savedLocally = savedLocally,
+        thumbnailFailed = item.thumbKey in failures,
+        onRetryThumbnail = { viewModel.retryThumbnail(item) },
         onClick = onClick,
         onLongClick = onLongClick,
         modifier = Modifier.aspectRatio(1f)
     )
 }
 
+
+/** 一条说明在界面上的样子：文字、语气（错误/提醒）、以及此刻唯一说得通的补救 */
+private class NoticeView(
+    val text: String,
+    val isError: Boolean,
+    val actionLabel: String?,
+    val onAction: (() -> Unit)?
+)
+
+/**
+ * `PhotosNotice` → 界面。ViewModel 只说「是什么事」，措辞全在 strings.xml，
+ * 补救动作也按事给：**「传输中不能切」的补救是等，不是再按一次重试**。
+ */
+@Composable
+private fun noticeView(
+    notice: PhotosNotice,
+    scopeLabel: String,
+    viewModel: PhotosViewModel,
+    onGoConnect: () -> Unit
+): NoticeView = when (notice) {
+    PhotosNotice.TransferBusy -> NoticeView(
+        text = stringResource(R.string.photos_scope_blocked),
+        isError = false,
+        actionLabel = null,
+        onAction = null
+    )
+    PhotosNotice.NotConnected -> NoticeView(
+        text = stringResource(R.string.photos_notice_not_connected),
+        isError = false,
+        actionLabel = stringResource(R.string.photos_need_connect_action),
+        onAction = onGoConnect
+    )
+    PhotosNotice.QueueRejected -> NoticeView(
+        // 选择还在，所以这里的重试是「再存一次」，不是「重新加载列表」
+        text = stringResource(R.string.photos_notice_queue_rejected),
+        isError = true,
+        actionLabel = stringResource(R.string.album_retry),
+        onAction = { viewModel.downloadSelected() }
+    )
+    PhotosNotice.RefreshFailed -> NoticeView(
+        text = stringResource(R.string.photos_notice_refresh_failed),
+        isError = false,
+        actionLabel = stringResource(R.string.album_retry),
+        onAction = { viewModel.loadMedia() }
+    )
+    is PhotosNotice.ModeSwitchFailed -> NoticeView(
+        text = stringResource(R.string.photos_notice_mode_switch_failed, scopeLabel),
+        isError = true,
+        actionLabel = stringResource(R.string.album_retry),
+        onAction = { viewModel.switchScope(notice.target) }
+    )
+    PhotosNotice.ModeSyncFailed -> NoticeView(
+        text = stringResource(R.string.photos_notice_mode_sync_failed),
+        isError = true,
+        actionLabel = stringResource(R.string.album_retry),
+        onAction = { viewModel.loadMedia() }
+    )
+    is PhotosNotice.LoadFailed -> NoticeView(
+        text = notice.detail?.let {
+            stringResource(R.string.photos_notice_with_detail, stringResource(R.string.album_error_title), it)
+        } ?: stringResource(R.string.album_error_title),
+        isError = true,
+        actionLabel = stringResource(R.string.album_retry),
+        onAction = { viewModel.loadMedia() }
+    )
+    is PhotosNotice.ReconnectFailed -> NoticeView(
+        text = notice.detail?.let {
+            stringResource(R.string.photos_notice_with_detail, stringResource(R.string.photos_notice_reconnect_failed), it)
+        } ?: stringResource(R.string.photos_notice_reconnect_failed),
+        isError = true,
+        actionLabel = stringResource(R.string.album_retry),
+        onAction = { viewModel.reconnect() }
+    )
+}
 
 /** 类型筛选（全部 / 照片 / 视频 / RAW） */
 enum class MediaFilter(val labelRes: Int) {

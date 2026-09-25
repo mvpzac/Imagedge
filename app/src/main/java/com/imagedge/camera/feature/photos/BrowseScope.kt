@@ -45,40 +45,55 @@ import com.imagedge.camera.ui.theme.Spacing
  * 为什么不给它一枚筛选芯片（设计 §4.3）：芯片在同一排里意味着「换个显示方式」，
  * 而选片集 ↔ 整卡是切 PTP 功能模式（0x9210），会让既有对象句柄失效——
  * 那是业务动作，长得像筛选就会让人以为点了没代价。
+ *
+ * [blockedReason] 非空时把原因写在**行的下面**（设计 §2「传输期间禁用切换，并在选择行下说明原因」）：
+ * 行本身仍可点，因为用户有权打开面板看清楚为什么现在不能切。
+ * 反过来「点下去才知道不行」正是这条设计要消灭的交互。
  */
 @Composable
 fun BrowseScopeRow(
     scopeLabel: String,
     note: String,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    blockedReason: String? = null
 ) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(Radius.Tag))
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(vertical = Spacing.S),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Spacing.XS)
-    ) {
-        Text(
-            text = scopeLabel,
-            style = MaterialTheme.typography.titleSmall
-        )
-        LucideIcon(
-            lucide = Lucide.ChevronDown,
-            contentDescription = stringResource(R.string.photos_scope_open_hint),
-            size = 16.dp,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = note,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.End,
-            modifier = Modifier.weight(1f)
-        )
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(Radius.Tag))
+                .clickable(role = Role.Button, onClick = onClick)
+                .padding(vertical = Spacing.S),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.XS)
+        ) {
+            Text(
+                text = scopeLabel,
+                style = MaterialTheme.typography.titleSmall
+            )
+            LucideIcon(
+                lucide = Lucide.ChevronDown,
+                contentDescription = stringResource(R.string.photos_scope_open_hint),
+                size = 16.dp,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = note,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.End,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        blockedReason?.let { reason ->
+            Text(
+                text = reason,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = Spacing.XS, bottom = Spacing.S)
+            )
+        }
     }
 }
 

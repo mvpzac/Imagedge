@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -26,6 +27,7 @@ import androidx.compose.foundation.combinedClickable
 import com.imagedge.camera.R
 import com.imagedge.camera.data.model.MediaItem
 import com.imagedge.camera.ptp.PhotoType
+import com.imagedge.camera.ui.components.AppLink
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.LucideIcon
 import com.imagedge.camera.ui.theme.Radius
@@ -61,6 +63,9 @@ fun PhotoGridTile(
     savedLocally: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    /** 这一张的缩略图取回失败（只说这一张，不把整页变成错误态） */
+    thumbnailFailed: Boolean = false,
+    onRetryThumbnail: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val cellShape = RoundedCornerShape(Radius.Tag)
@@ -97,8 +102,27 @@ fun PhotoGridTile(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surfaceVariant, cellShape)
-            )
+                    .background(MaterialTheme.colorScheme.surfaceVariant, cellShape),
+                contentAlignment = Alignment.Center
+            ) {
+                // 坏图自己带重试：没有这一条，格子会永久停在灰块上——触发加载的键
+                // （thumbKey / 缓存代数）都没变，再滚动也不会再取一次（设计 §4.3）
+                if (thumbnailFailed) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = stringResource(R.string.photos_tile_failed),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        AppLink(
+                            text = stringResource(R.string.photos_tile_retry),
+                            onClick = onRetryThumbnail
+                        )
+                    }
+                }
+            }
         }
 
         if (selected) {

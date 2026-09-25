@@ -12,6 +12,7 @@ import com.imagedge.camera.data.remote.CameraRepository
 import com.imagedge.camera.data.transfer.DownloadManager
 import com.imagedge.camera.ui.feedback.Haptics
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +29,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
+import java.io.IOException
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import java.util.Date
@@ -71,8 +73,8 @@ class PhotosViewModel @Inject constructor(
     private val _loading = MutableStateFlow(false)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
 
-    private val _error = MutableStateFlow<String?>(null)
-    val error: StateFlow<String?> = _error.asStateFlow()
+    private val _notice = MutableStateFlow<PhotosNotice?>(null)
+    val notice: StateFlow<PhotosNotice?> = _notice.asStateFlow()
 
     /** 浏览模式（选片集 / 整卡）。默认选片集（与 PTP 默认 functionMode=0 一致） */
     private val _browseMode = MutableStateFlow(BrowseMode.SELECTION)
@@ -99,35 +101,52 @@ class PhotosViewModel @Inject constructor(
      * 切换浏览范围（选片集 ↔ 整卡）。
      *
      * 这是**业务动作**，不是换个筛选芯片：会让相机切 PTP 功能模式，既有对象句柄全部失效。
-     * 两条纪律（设计 §4.3）：
+     * 三条纪律（设计 §4.3 / §8.2）：
      * 1. 传输进行中不切——面板还能打开看说明，但切换被挡住并写明原因；
      * 2. **切换失败就维持原范围**：先确认相机通道切过去了，才动界面上的范围标签和列表。
      *    旧实现先改 `_browseMode` 再判断，失败时界面写着「整卡」而列表还是选片集，
-     *    这正是「标签比事实跑得靠前」的那类假信息。
+     *    这正是「标签比事实跑得靠前」的那类假信息；
+     * 3. 判定要**在真的动通道之前再走一遍**：手指抬起时可能没传输，协程排到这里时
+     *    用户可能刚点了下载（§8.2「不能只靠按钮禁用保证安全」）。
      */
     fun switchScope(mode: BrowseMode) {
         if (mode == _browseMode.value) return
+        val target = functionModeOf(mode)
+        if (!reportChannelGate(target)) return
         viewModelScope.launch {
-            val target = if (mode == BrowseMode.FULL_CARD) 1 else 0
-            if (repository.currentFunctionMode != target && downloadManager.hasActiveDownload.value) {
-                _error.value = "照片/视频传输中，暂不能切换浏览范围，请等待下载完成"
-                return@launch
-            }
+            if (!reportChannelGate(target)) return@launch
             if (repository.currentFunctionMode != target) {
                 val ok = runCatching { repository.switchFunctionMode(target) }.getOrDefault(false)
                 if (!ok) {
                     // 相机没切过去：范围标签、列表、选择集合一律保持原样
-                    _error.value = if (mode == BrowseMode.FULL_CARD) {
-                        "切换到存储卡失败，仍显示相机已选照片"
-                    } else {
-                        "切回选片集失败，仍显示存储卡内容"
-                    }
+                    _notice.value = PhotosNotice.ModeSwitchFailed(mode)
                     return@launch
                 }
             }
             enter(mode)
         }
     }
+
+    /**
+     * 通道现在允许为切范围改功能模式吗；不允许就顺便把原因交给界面（返回 false）。
+     * 相机已在本目标模式时直接放行——那时根本不碰通道，传输中也能切标签。
+     */
+    private fun reportChannelGate(targetMode: Int): Boolean =
+        when (channelGateOf(
+            sessionReady = repository.isConnected,
+            needsModeSwitch = repository.currentFunctionMode != targetMode,
+            transferActive = downloadManager.hasActiveDownload.value
+        )) {
+            ChannelGate.Free -> true
+            ChannelGate.NoSession -> {
+                _notice.value = PhotosNotice.NotConnected
+                false
+            }
+            ChannelGate.BlockedByTransfer -> {
+                _notice.value = PhotosNotice.TransferBusy
+                false
+            }
+        }
 
     /**
      * 校正相机功能模式，使其与当前浏览模式一致（选片集=0 / 整卡=1）。
@@ -161,12 +180,12 @@ class PhotosViewModel @Inject constructor(
         // 两个模式的缩略图会一直堆积在单例缓存里（这正是 OOM 的来源）
         sessionCache.clearThumbnails()
         _selected.value = emptySet()
-        _error.value = null
+        _notice.value = null
         viewModelScope.launch {
-            val targetMode = if (mode == BrowseMode.FULL_CARD) 1 else 0
-            // 下载未完成前不切换通道（选片集↔整卡），避免中断正在进行的传输
-            if (repository.currentFunctionMode != targetMode && hasActiveDownload.value) {
-                _error.value = "照片/视频传输中，暂不能切换浏览通道，请等待下载完成"
+            // 下载未完成前不切换通道（选片集↔整卡），避免中断正在进行的传输。
+            // 这里只管传输：没连接时不该由「进页面」说话，loadMedia 的失败会报
+            if (repository.currentFunctionMode != functionModeOf(mode) && hasActiveDownload.value) {
+                _notice.value = PhotosNotice.TransferBusy
                 return@launch
             }
             loadMedia()
@@ -220,18 +239,14 @@ class PhotosViewModel @Inject constructor(
         if (_loading.value) return
         viewModelScope.launch {
             _loading.value = true
-            _error.value = null
+            _notice.value = null
             try {
                 scanMutex.withLock {
                     // 先校正相机功能模式并**等待切换完成**再扫描（处理上一次离开的延迟退出
                     // 与实际模式错位）。此前 syncFunctionMode 内部异步 launch 不等待，
                     // 与下面的 listMedia 形成竞态，会读到旧通道的快照。
                     if (!syncFunctionMode()) {
-                        _error.value = if (_browseMode.value == BrowseMode.FULL_CARD) {
-                            "切换到整卡失败，请重试"
-                        } else {
-                            "切换到选片集失败，请重试"
-                        }
+                        _notice.value = PhotosNotice.ModeSyncFailed
                         return@withLock
                     }
                     // 增量扫描：边枚举边渲染。整卡上千对象时，一次性枚举会让首屏
@@ -249,7 +264,7 @@ class PhotosViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 AppLog.e("album", "加载媒体失败：${e::class.simpleName}: ${e.message}")
-                _error.value = e.message ?: "加载媒体失败"
+                _notice.value = PhotosNotice.LoadFailed(e.message)
             } finally {
                 _loading.value = false
             }
@@ -262,6 +277,10 @@ class PhotosViewModel @Inject constructor(
 
     @Volatile
     private var silentRefreshing = false
+
+    /** 本轮刷新故障是否已经说过（说过就不再每 4 秒重复打扰，扫成功一次后复位） */
+    @Volatile
+    private var refreshNoticed = false
 
     /** 连接状态（断开后 UI 显示提示横幅） */
     val connectionState = repository.connectionState
@@ -341,6 +360,12 @@ class PhotosViewModel @Inject constructor(
                     val fresh = repository.listMedia()
                     val oldSignature = _items.value.map { it.channelKey to it.sizeBytes }
                     val newSignature = fresh.map { it.channelKey to it.sizeBytes }
+                    // 扫成功过一次：这次的故障已经过去了，允许说下一条，并把那条横幅收回。
+                    // 只收回 RefreshFailed —— 用户可能还在读「入队失败」之类的另一件事
+                    if (refreshNoticed) {
+                        refreshNoticed = false
+                        if (_notice.value is PhotosNotice.RefreshFailed) _notice.value = null
+                    }
                     if (oldSignature != newSignature) {
                         AppLog.i("album", "检测到相机端内容变化：${oldSignature.size} → ${newSignature.size}")
                         _items.value = fresh
@@ -349,8 +374,15 @@ class PhotosViewModel @Inject constructor(
                 }
             }
         } catch (e: Exception) {
-            // 相机断开/暂不可用：静默，不打断用户
-            AppLog.d("album", "轮询刷新暂不可用：${e.message}")
+            // 轮询每 4 秒一次，失败不能每次都说一遍：一次故障连续只报一条横幅，
+            // 扫成功过一次之后才重新允许报下一条。已有内容一律不清空（设计 §4.3 末段）。
+            if (_items.value.isNotEmpty() && !refreshNoticed) {
+                refreshNoticed = true
+                AppLog.w("album", "后台刷新失败，保留已显示内容：${e::class.simpleName}: ${e.message}")
+                _notice.value = PhotosNotice.RefreshFailed
+            } else {
+                AppLog.d("album", "轮询刷新暂不可用：${e.message}")
+            }
         } finally {
             silentRefreshing = false
         }
@@ -366,7 +398,7 @@ class PhotosViewModel @Inject constructor(
                 loadMedia()
             } catch (e: Exception) {
                 AppLog.w("album", "手动重连失败：${e.message}")
-                _error.value = "重连失败：${e.message}"
+                _notice.value = PhotosNotice.ReconnectFailed(e.message)
             } finally {
                 _reconnecting.value = false
             }
@@ -384,24 +416,58 @@ class PhotosViewModel @Inject constructor(
      *
      * key 含 sizeBytes/filename：相机会复用 handle，内容变化需刷新。
      */
+    /**
+     * 取回失败的缩略图 key（键 = thumbKey）。
+     *
+     * 为什么要有这个集合：坏图原先既不入缓存也不报错，格子永久停在灰块上，
+     * 而加载触发键（thumbKey / 缓存代数）没变，再滚动也不会重试——一张解码失败的
+     * 图就这样变成一个说不清原因的空白格。现在坏格自己带「重试」，且只影响它自己
+     * （设计 §4.3「缩略图错用独立重试，不让一张坏图变成全页错误」）。
+     */
+    private val _thumbnailFailures = MutableStateFlow<Set<String>>(emptySet())
+    val thumbnailFailures: StateFlow<Set<String>> = _thumbnailFailures.asStateFlow()
+
+    /** 失败集合属于哪一代缓存；缓存被清过（trim / 切范围）就该重新有机会自动加载 */
+    private var thumbnailFailureEpoch = sessionCache.generation.value
+
     fun loadThumbnail(item: MediaItem) {
         val key = item.thumbKey
         if (sessionCache.gridThumbnails.containsKey(key)) return
+        val epoch = sessionCache.generation.value
+        if (epoch != thumbnailFailureEpoch) {
+            thumbnailFailureEpoch = epoch
+            _thumbnailFailures.value = emptySet()
+        }
         if (!inflightThumbnails.add(key)) return
         viewModelScope.launch(Dispatchers.Default) {
             try {
-                val bytes = repository.getThumbnail(item) ?: return@launch
-                val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@launch
+                val bytes = repository.getThumbnail(item) ?: throw IOException("相机未返回缩略图")
+                val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    ?: throw IOException("缩略图解码失败")
                 // 单一数据源（P1-11）：只写 sessionCache，再把它的快照引用赋给 _thumbnails。
                 // 原先这里 `_thumbnails` 与 `sessionCache.gridThumbnails` 各存一份同样的
                 // Bitmap —— 300 张 × 300KB ≈ 90MB，内存直接翻倍；且每加载一张都要
                 // 复制整个 150 项 Map（N 张 = N² 次插入），滚动时持续抖动。
                 sessionCache.updateThumbnail(key, bitmap)
                 _thumbnails.value = sessionCache.gridThumbnails
+                _thumbnailFailures.update { it - key }
+            } catch (e: Exception) {
+                // 取消不是失败：咽掉它会给一个根本没坏的东西标上重试，
+                // 还会让离页时的协程取消看起来像通道故障
+                if (e is CancellationException) throw e
+                AppLog.w("album", "缩略图失败 ${item.filename}：${e::class.simpleName}: ${e.message}")
+                _thumbnailFailures.update { it + key }
             } finally {
                 inflightThumbnails.remove(key)
             }
         }
+    }
+
+    /** 单格重试：把这一项从失败集合里摘掉，让 loadThumbnail 真的再去取一次 */
+    fun retryThumbnail(item: MediaItem) {
+        val key = item.thumbKey
+        _thumbnailFailures.update { it - key }
+        loadThumbnail(item)
     }
 
     /** 切换选中 */
@@ -439,7 +505,7 @@ class PhotosViewModel @Inject constructor(
                     clearSelection()
                 } else {
                     // 选择保持原样，用户可以直接再试一次，不必重新勾选
-                    _error.value = "加入传输队列失败（可能是存储不可用），选择已保留"
+                    _notice.value = PhotosNotice.QueueRejected
                 }
             } finally {
                 _submitting.value = false

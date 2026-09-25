@@ -69,6 +69,16 @@
     <string name="photos_scope_full_card_note">枚举整张存储卡，可能较慢；本机型未完整实测，切换失败会保持当前范围</string>
     <string name="photos_scope_note_card">手机侧枚举存储卡</string>
     <string name="photos_scope_blocked">照片/视频传输中，暂不能切换浏览范围</string>
+    <!-- 相册页的说明文案：ViewModel 只报「是什么事」，措辞留在这里（设计 §8.2 结构化原因） -->
+    <string name="photos_notice_not_connected">相机未连接，连上以后才能切换浏览范围</string>
+    <string name="photos_notice_queue_rejected">加入传输队列失败（可能是存储不可用），选择已保留</string>
+    <string name="photos_notice_refresh_failed">后台刷新失败，下面显示的是上一次取到的内容</string>
+    <string name="photos_notice_mode_switch_failed">切换浏览范围失败，仍显示 %1$s</string>
+    <string name="photos_notice_mode_sync_failed">相机未能进入当前浏览范围，请重试</string>
+    <string name="photos_notice_with_detail">%1$s：%2$s</string>
+    <string name="photos_notice_reconnect_failed">重连失败</string>
+    <string name="photos_tile_retry">重试</string>
+    <string name="photos_tile_failed">缩略图没取到</string>
     <string name="photos_select_action">选择</string>
     <string name="photos_transfer_action">传输</string>
     <string name="photos_cancel_selection">取消选择</string>
