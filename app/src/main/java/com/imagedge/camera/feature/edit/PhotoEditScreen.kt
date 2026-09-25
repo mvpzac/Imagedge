@@ -61,20 +61,19 @@ import com.imagedge.camera.R
 import com.imagedge.camera.data.lut.LutType
 import com.imagedge.camera.image.Geometry
 import com.imagedge.camera.image.NormRect
-import com.imagedge.camera.ui.components.AppButton
 import com.imagedge.camera.ui.components.AppButtonType
 import com.imagedge.camera.ui.components.AppChip
 import com.imagedge.camera.ui.components.AppChipRow
 import com.imagedge.camera.ui.components.AppDivider
 import com.imagedge.camera.ui.components.AppLink
-import com.imagedge.camera.ui.components.AppPage
+import com.imagedge.camera.ui.layout.EditorFrame
+import com.imagedge.camera.ui.layout.EditorFrameState
+import com.imagedge.camera.ui.layout.EditorBusy
 import com.imagedge.camera.ui.components.AppSection
 import com.imagedge.camera.ui.components.AppSlider
 import com.imagedge.camera.ui.components.EmptyState
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.LucideIcon
-import com.imagedge.camera.ui.components.ProcessingView
-import com.imagedge.camera.ui.components.ResultMessage
 import com.imagedge.camera.ui.glass.GlassCard
 import com.imagedge.camera.ui.theme.Radius
 import com.imagedge.camera.ui.theme.Spacing
@@ -119,9 +118,23 @@ fun PhotoEditScreen(
     val blurModifier = if (showHelp) Modifier.blur(12.dp) else Modifier
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // 统一页面骨架（UI 规范 §5.1）：内边距 16dp、整页可滚动、底部避开导航栏
-        AppPage(
+        // 统一编辑器骨架（批次 E，设计 §4.7）：返回/标题/重置 → 预览 → 工具区 → 保存副本。
+        // 导出期间返回不假装取消、重置过确认、结果常驻——这三条由骨架统一保证
+        EditorFrame(
             title = stringResource(R.string.edit_photo_title),
+            state = EditorFrameState(
+                hasSubject = state.hasImage,
+                busy = when {
+                    state.exporting -> EditorBusy.Exporting
+                    state.processing -> EditorBusy.Preparing
+                    else -> EditorBusy.None
+                },
+                canReset = state.hasEdits,
+                result = state.message,
+                resultOk = state.saved
+            ),
+            onSave = { viewModel.save() },
+            onReset = { viewModel.resetEdits() },
             onBack = onBack,
             modifier = blurModifier
         ) {
@@ -129,11 +142,19 @@ fun PhotoEditScreen(
                     imagePicker.launch(arrayOf("image/*"))
                 })
 
-                state.message?.let {
-                    ResultMessage(text = it, ok = state.saved)
-                }
-
                 if (state.hasImage) {
+                    // 对比原图给一个**显式**按钮，长按只是快捷方式（设计 §4.7）：
+                    // 长按是不可发现的，而且读屏用户拿不到它
+                    if (state.tab != EditTab.CROP) {
+                        AppLink(
+                            text = stringResource(
+                                if (state.comparing) R.string.editor_show_result
+                                else R.string.editor_compare_original
+                            ),
+                            onClick = { viewModel.setComparing(!state.comparing) }
+                        )
+                    }
+
                     // ── 分区切换（互斥选项 ≤ 4 → AppChipRow）──
                     AppChipRow(
                         items = EditTab.entries.toList(),
@@ -155,16 +176,6 @@ fun PhotoEditScreen(
                         EditTab.ROTATE -> RotatePanel(state = state, viewModel = viewModel)
                     }
 
-                    // ── 保存 ──
-                    if (state.exporting) {
-                        ProcessingView(message = stringResource(R.string.edit_exporting))
-                    }
-                    AppButton(
-                        text = if (state.exporting) stringResource(R.string.edit_exporting)
-                        else stringResource(R.string.edit_save),
-                        onClick = { viewModel.save() },
-                        enabled = state.hasImage && !state.processing && !state.exporting
-                    )
                 }
         }
 

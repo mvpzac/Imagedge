@@ -196,13 +196,11 @@
     <string name="edit_pick_image">选择图片</string>
     <string name="edit_pick_hint">选择一张本机照片开始调色（更多滤镜可在设置 → LUT 管理导入）</string>
     <string name="edit_strength">强度</string>
-    <string name="edit_save">保存到相册</string>
     <!-- 调色与导出（LUT 编辑页）：对比度/饱和度/色温复用「基础调整」的既有文案 -->
     <string name="edit_adjust_title">调整</string>
     <string name="edit_exposure">曝光</string>
     <string name="edit_compare_hint">长按对比原图</string>
     <string name="edit_compare_original">原图</string>
-    <string name="edit_exporting">正在按原分辨率导出…</string>
 
     <!-- 编辑调节（几何 + 调色） -->
     <string name="edit_photo_title">编辑调节</string>
@@ -378,6 +376,17 @@
     <string name="transfer_resume_whole_object">失败整文件重传</string>
     <string name="transfer_resume_partial">分块续传</string>
     <string name="control_shutter_label">拍照</string>
+    <string name="editor_reset">重置</string>
+    <string name="editor_save_copy">保存副本</string>
+    <string name="editor_exporting">正在生成…</string>
+    <string name="editor_exporting_stay">正在生成副本，返回键暂时不起作用——导出没有安全的取消点，中途离开会留下半成品文件</string>
+    <string name="editor_preparing">正在读取这张图…</string>
+    <string name="editor_reset_confirm_title">放弃这次调整？</string>
+    <string name="editor_reset_confirm_body">回到原图的初始状态。已经保存到相册的副本不会被改动。</string>
+    <string name="editor_keep_editing">继续编辑</string>
+    <string name="editor_compare_original">对比原图</string>
+    <string name="editor_show_result">显示调整结果</string>
+
     <string name="control_avail_viewfinder">画面</string>
     <string name="control_avail_shutter">快门</string>
     <string name="control_avail_autosave">拍后保存</string>
