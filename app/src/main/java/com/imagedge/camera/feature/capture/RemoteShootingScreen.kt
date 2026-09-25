@@ -3,12 +3,11 @@ package com.imagedge.camera.feature.capture
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -17,7 +16,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -49,12 +47,13 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.R
 import com.imagedge.camera.core.permission.PermissionGate
-import com.imagedge.camera.ui.glass.GlassCard
+import com.imagedge.camera.ui.layout.AppPageHeader
+import com.imagedge.camera.ui.layout.ImmersiveLayout
+import com.imagedge.camera.ui.layout.ImmersiveFrame
 import com.imagedge.camera.ui.theme.OnViewer
 import com.imagedge.camera.ui.theme.Spacing
 import com.imagedge.camera.ui.theme.ViewerBackdrop
 import com.imagedge.camera.ui.components.Lucide
-import com.imagedge.camera.ui.components.PageHeader
 import com.imagedge.camera.ui.components.StatusBanner
 import com.imagedge.camera.ui.guidance.ContextHint
 import com.imagedge.camera.ui.components.AppLink
@@ -167,7 +166,7 @@ fun RemoteShootingScreen(
     }
 
     // 监看工作台是对话框（独立 window），放在这里即可整屏覆盖，
-    // 不需要把下面那棵 Scaffold 重排成 Box 兄弟节点
+    // 不需要把下面那棵沉浸页骨架重排成 Box 兄弟节点
     if (workstationOpen) {
         MonitoringWorkstation(
             viewModel = viewModel,
@@ -175,23 +174,58 @@ fun RemoteShootingScreen(
         )
     }
 
-    Scaffold(
-        topBar = {
-            PageHeader(
-                title = stringResource(R.string.remote_title),
-                onBack = onBack
+    // 三件能力分别说（设计 §4.6），排布判定与提示文案都依赖它，先在这儿算一次
+    val bleConnected = bleState is BleShutterState.Connected
+    val availability = captureAvailabilityOf(
+        connected = state.isConnected,
+        viewfinderPaused = state.viewfinderPaused,
+        hasFrame = frame != null,
+        bleConnected = bleConnected,
+        ptpCaptureAvailable = state.captureAvailable,
+        capabilitiesStale = state.capabilitiesStale,
+        busy = state.busy,
+        autoSaveEnabled = policy.autoSaveAfterCapture
+    )
+
+    // 快门提示（设计 §4.6「首次或操作模式变化时显示一行」+ §5 记录按机型/模式分开）：
+    // 认出相机之前不说——那时连按了会发生什么都不知道，提示本身就是猜测
+    var shutterHint by remember { mutableStateOf(false) }
+    LaunchedEffect(state.identity.model, state.identity.mode) {
+        shutterHint = state.identity.isKnown &&
+            viewModel.shouldShowShutterHint(state.identity.model, state.identity.mode)
+    }
+
+    ImmersiveFrame(
+        header = { layout ->
+            Column {
+                AppPageHeader(
+                    title = stringResource(R.string.remote_title),
+                    onBack = onBack,
+                    // 横屏时标题要收小：三行状态加一行大标题就把画面挤没了
+                    large = layout != ImmersiveLayout.SideBySide
+                )
+                // 画面状态说在画面**之前**：先看能不能用，再看画面（设计 §3.3 线框）。
+                // 并排时改说在控件栏顶部——那里同样是「按快门之前先看的东西」，
+                // 却不再占画面的高度
+                if (layout != ImmersiveLayout.SideBySide) {
+                    CaptureAvailabilityBar(availability = availability)
+                }
+            }
+        },
+        media = { layout ->
+            // ── 实时取景（电脑遥控/智能手机连接模式下相机开放 LiveView 流）──
+            LiveViewPreview(
+                viewModel = viewModel,
+                // 工作台打开时这块画面被完全遮住，连绘制都不必再挂着我们白烧一帧
+                active = !workstationOpen,
+                // 并排时槽的高度是限死的：还按宽度定 3:2 就会顶出槽外、压住上面的状态行
+                boundedByHeight = layout == ImmersiveLayout.SideBySide
             )
         }
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp)
-                // 页面可滚动：小屏/横屏时拍摄参数不被截断
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+    ) { layout ->
+            if (layout == ImmersiveLayout.SideBySide) {
+                CaptureAvailabilityBar(availability = availability)
+            }
             // 断连提示横幅（内容首部，视口内始终可见）：未连接即显示，
             // 连接中切「重连中…」文案并禁用点击，等效 PhotosScreen 的防抖守卫；
             // ViewModel.connect() 内部另有 connecting 去重，重复点击不会发起并发连接
@@ -207,182 +241,166 @@ fun RemoteShootingScreen(
                 )
             }
 
-            GlassCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = Spacing.S)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+            // ── 主快门（时序在 ViewModel，见 runBleCapture）+ 录像 ──
+            // 手势式：按下开始（半按对焦 + 全按），松开结束曝光；
+            // 按住期间相机按自身连拍设置持续曝光
+            val shutterEnabled = !state.taking &&
+                (bleConnected || state.captureAvailable) && !state.busy
+            // 提示排在快门**上面**：它是「这个按钮怎么按」的说明，排在下面就成了事后解释
+            if (shutterHint) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // ── 实时取景（电脑遥控/智能手机连接模式下相机开放 LiveView 流）──
-                    LiveViewPreview(
-                        viewModel = viewModel,
-                        // 工作台打开时这块画面被完全遮住，连绘制都不必再挂着我们白烧一帧
-                        active = !workstationOpen
-                    )
-                    AppButton(
-                        text = stringResource(R.string.monitoring_enter),
-                        subtitle = stringResource(R.string.monitoring_entry_desc),
-                        onClick = { workstationOpen = true },
-                        leadingIcon = Lucide.Maximize,
-                        type = AppButtonType.SECONDARY
-                    )
-
-                    // ── 蓝牙遥控快门连接区（位于取景与快门之间：连接动作紧邻拍摄操作）──
-                    when (val ble = bleState) {
-                        is BleShutterState.Connected -> {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Text(
-                                    text = stringResource(R.string.ble_connected_prefix) + ble.name,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                AppLink(
-                                    text = stringResource(R.string.ble_disconnect_btn),
-                                    onClick = viewModel::disconnectBle,
-                                )
-                            }
-                            // 相机实时状态（BLE ff02 通知：对焦/快门/录像）。
-                            // 三态：null = 未知（尚未收到通知或已断线），不能显示成「否」
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                StatusChip(stringResource(R.string.control_status_focus), cameraStatus.focus)
-                                StatusChip(stringResource(R.string.control_status_shutter), cameraStatus.shutter)
-                                StatusChip(stringResource(R.string.control_status_recording), cameraStatus.recording)
-                            }
-                        }
-                        is BleShutterState.Scanning -> {
-                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                            Text(
-                                text = stringResource(R.string.ble_scanning),
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                        is BleShutterState.Connecting -> {
-                            Text(
-                                text = stringResource(R.string.ble_connecting_prefix) + ble.name,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                        else -> {
-                            AppButton(
-                                text = stringResource(R.string.ble_connect_btn),
-                                onClick = blePermissionRequest,
-                                leadingIcon = Lucide.Bluetooth
-                            )
-                            Text(
-                                text = stringResource(R.string.ble_connect_hint),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    // ── 三件能力分别说（设计 §4.6）──
-                    // 原来这里摆的是蓝牙连接状态：BLE 没连但通道支持遥控时快门其实能用，
-                    // BLE 连上了但相机没回能力时快门其实未知——「BLE 已连接」回答不了「能不能拍」
-                    val bleConnected = bleState is BleShutterState.Connected
-                    val availability = captureAvailabilityOf(
-                        connected = state.isConnected,
-                        viewfinderPaused = state.viewfinderPaused,
-                        hasFrame = frame != null,
-                        bleConnected = bleConnected,
-                        ptpCaptureAvailable = state.captureAvailable,
-                        capabilitiesStale = state.capabilitiesStale,
-                        busy = state.busy,
-                        autoSaveEnabled = policy.autoSaveAfterCapture
-                    )
-                    CaptureAvailabilityBar(availability = availability)
-
-                    // ── 主快门（时序在 ViewModel，见 runBleCapture）──
-                    // 手势式：按下开始（半按对焦 + 全按），松开结束曝光；
-                    // 按住期间相机按自身连拍设置持续曝光
-                    val shutterEnabled = !state.taking &&
-                        (bleConnected || state.captureAvailable) && !state.busy
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        ShutterControl(
-                            // 圆里只放两个字：整句「按住对焦 · 松开拍照」塞进 72dp 会溢出到
-                            // 圆外，看着像一行浮空的说明而不是一个按钮
-                            label = stringResource(R.string.control_shutter_label),
-                            enabled = shutterEnabled,
-                            onPress = viewModel::shutterDown,
-                            onRelease = viewModel::shutterUp,
-                            modifier = Modifier.size(ShutterSize)
-                        )
-                    }
                     ContextHint(
-                        text = stringResource(R.string.control_btn_shoot),
-                        modifier = Modifier.fillMaxWidth()
+                        text = stringResource(
+                            // 两条通道的操作不一样：BLE 是半按对焦/松开拍摄，
+                            // 没连 BLE 的通道按下就是单次触发——说错比不说更糟
+                            if (bleConnected) R.string.control_btn_shoot
+                            else R.string.control_shutter_hint_ptp
+                        ),
+                        modifier = Modifier.weight(1f)
                     )
-                    // 已连接但通道不支持遥控拍摄（UPnP「发送到智能手机」模式）：明说，
-                    // 而不是让快门按下去毫无反应
-                    if (state.isConnected && !state.captureAvailable && !bleConnected) {
-                        Text(
-                            text = stringResource(R.string.control_shutter_unavailable),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    // ── 录像：状态只认相机回报 ──
-                    // 设计 §4.6「根据相机已确认通知显示，不用本地布尔值猜测」。
-                    // 原来这里只看蓝牙连上就给一个「录像」切换按钮，等于替相机假设当前是空闲态
-                    when (recordActionOf(bleConnected, cameraStatus)) {
-                        RecordAction.Start, RecordAction.Stop -> {
-                            val stopping =
-                                recordActionOf(bleConnected, cameraStatus) == RecordAction.Stop
-                            AppButton(
-                                text = stringResource(
-                                    if (stopping) R.string.control_record_stop
-                                    else R.string.control_record_start
-                                ),
-                                onClick = { viewModel.recordToggle() },
-                                leadingIcon = Lucide.Video,
-                                type = AppButtonType.SECONDARY
-                            )
-                        }
-
-                        RecordAction.Unknown -> {
-                            AppButton(
-                                text = stringResource(R.string.control_record_start),
-                                onClick = { viewModel.recordToggle() },
-                                leadingIcon = Lucide.Video,
-                                type = AppButtonType.SECONDARY
-                            )
-                            ContextHint(stringResource(R.string.control_record_state_unknown))
-                        }
-
-                        RecordAction.Unavailable -> Unit
-                    }
-
-                    // ── 拍摄方式：自拍倒计时与间隔拍摄（T3）──
-                    CaptureWorkflowSection(viewModel = viewModel, state = state)
-
-                    // ── 参数收进底部面板（设计 §4.6）──
-                    // 取景 + 快门是这一屏的主角；ISO/光圈/快门是偶尔要动的东西，
-                    // 平铺在快快门下面等于让主操作一直往下躲
-                    // 相机身份：能力快照按「型号 + 固件 + 连接方式 + 功能模式」归档，
-                    // 下面每一项能不能调都由它决定，必须让用户看见当前是哪台相机
-                    IdentitySummary(state.identity)
                     AppLink(
-                        text = stringResource(R.string.control_params_action),
-                        onClick = { settingsOpen = true }
+                        text = stringResource(R.string.control_shutter_hint_ok),
+                        onClick = {
+                            shutterHint = false
+                            viewModel.dismissShutterHint()
+                        }
                     )
                 }
             }
+            // ── 录像动作：状态只认相机回报 ──
+            // 设计 §4.6「根据相机已确认通知显示，不用本地布尔值猜测」。
+            // 原来这里只看蓝牙连上就给一个「录像」切换按钮，等于替相机假设当前是空闲态
+            val record = recordActionOf(bleConnected, cameraStatus)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                // 相机没回报过录像状态时这一栏只有快门一个东西，居中放；
+                // 有录像按钮时才按线框那样并排（快门孤零零靠左会让人以为这行没走完）
+                horizontalArrangement = if (record == RecordAction.Unavailable)
+                    Arrangement.Center else Arrangement.spacedBy(Spacing.L)
+            ) {
+                ShutterControl(
+                    // 圆里只放两个字：整句「按住对焦 · 松开拍照」塞进 72dp 会溢出到
+                    // 圆外，看着像一行浮空的说明而不是一个按钮
+                    label = stringResource(R.string.control_shutter_label),
+                    enabled = shutterEnabled,
+                    onPress = viewModel::shutterDown,
+                    onRelease = viewModel::shutterUp,
+                    modifier = Modifier.size(ShutterSize)
+                )
+                when (record) {
+                    RecordAction.Start, RecordAction.Stop -> AppButton(
+                        text = stringResource(
+                            if (record == RecordAction.Stop) R.string.control_record_stop
+                            else R.string.control_record_start
+                        ),
+                        onClick = { viewModel.recordToggle() },
+                        leadingIcon = Lucide.Video,
+                        type = AppButtonType.SECONDARY,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    RecordAction.Unknown -> AppButton(
+                        text = stringResource(R.string.control_record_start),
+                        onClick = { viewModel.recordToggle() },
+                        leadingIcon = Lucide.Video,
+                        subtitle = stringResource(R.string.control_record_state_unknown),
+                        type = AppButtonType.SECONDARY,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    RecordAction.Unavailable -> Unit
+                }
+            }
+            // 已连接但通道不支持遥控拍摄（UPnP「发送到智能手机」模式）：明说，
+            // 而不是让快门按下去毫无反应
+            if (state.isConnected && !state.captureAvailable && !bleConnected) {
+                Text(
+                    text = stringResource(R.string.control_shutter_unavailable),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // ── 蓝牙遥控快门连接区（紧挨拍摄操作：快门能不能用由它决定）──
+            when (val ble = bleState) {
+                is BleShutterState.Connected -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.ble_connected_prefix) + ble.name,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        AppLink(
+                            text = stringResource(R.string.ble_disconnect_btn),
+                            onClick = viewModel::disconnectBle,
+                        )
+                    }
+                    // 相机实时状态（BLE ff02 通知：对焦/快门/录像）。
+                    // 三态：null = 未知（尚未收到通知或已断线），不能显示成「否」
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        StatusChip(stringResource(R.string.control_status_focus), cameraStatus.focus)
+                        StatusChip(stringResource(R.string.control_status_shutter), cameraStatus.shutter)
+                        StatusChip(stringResource(R.string.control_status_recording), cameraStatus.recording)
+                    }
+                }
+                is BleShutterState.Scanning -> {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Text(
+                        text = stringResource(R.string.ble_scanning),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                is BleShutterState.Connecting -> {
+                    Text(
+                        text = stringResource(R.string.ble_connecting_prefix) + ble.name,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                else -> {
+                    AppButton(
+                        text = stringResource(R.string.ble_connect_btn),
+                        onClick = blePermissionRequest,
+                        leadingIcon = Lucide.Bluetooth
+                    )
+                    Text(
+                        text = stringResource(R.string.ble_connect_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // ── 拍摄方式：自拍倒计时与间隔拍摄（T3）──
+            CaptureWorkflowSection(viewModel = viewModel, state = state)
+
+            // ── 参数收进底部面板（设计 §4.6）──
+            // 取景 + 快门是这一屏的主角；ISO/光圈/快门是偶尔要动的东西，
+            // 平铺在快快门下面等于让主操作一直往下躲
+            // 相机身份：能力快照按「型号 + 固件 + 连接方式 + 功能模式」归档，
+            // 下面每一项能不能调都由它决定，必须让用户看见当前是哪台相机
+            IdentitySummary(state.identity)
+            AppLink(
+                text = stringResource(R.string.control_params_action),
+                onClick = { settingsOpen = true }
+            )
+            AppButton(
+                text = stringResource(R.string.monitoring_enter),
+                subtitle = stringResource(R.string.monitoring_entry_desc),
+                onClick = { workstationOpen = true },
+                leadingIcon = Lucide.Maximize,
+                type = AppButtonType.SECONDARY
+            )
 
             // 拍后保存的限制与结果常驻说明，不闪过（设计 §4.6）。
             // 之前是一行小字 Text，靠下一次操作覆盖：用户读没读完完全看手速
@@ -394,7 +412,6 @@ fun RemoteShootingScreen(
                     isError = false
                 )
             }
-        }
     }
 
     if (settingsOpen) {
@@ -432,7 +449,7 @@ private fun dispatch(viewModel: CameraControlViewModel, capability: CameraCapabi
  * 旋转与镜像一定会在两个界面之间对不上。
  */
 @Composable
-private fun LiveViewPreview(viewModel: CameraControlViewModel, active: Boolean) {
+private fun LiveViewPreview(viewModel: CameraControlViewModel, active: Boolean, boundedByHeight: Boolean) {
     val settings by viewModel.monitoringSettings.collectAsStateWithLifecycle()
     val frame by viewModel.frame.collectAsStateWithLifecycle()
     val image = remember(frame) { frame?.asImageBitmap() }
@@ -440,8 +457,7 @@ private fun LiveViewPreview(viewModel: CameraControlViewModel, active: Boolean) 
     val description = stringResource(R.string.control_liveview)
 
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = (if (boundedByHeight) Modifier.fillMaxHeight() else Modifier.fillMaxWidth())
             .aspectRatio(3f / 2f)
             .clip(MaterialTheme.shapes.small)
             .background(ViewerBackdrop),

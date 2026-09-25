@@ -21,6 +21,7 @@ import com.imagedge.camera.data.capture.CapturePhase
 import com.imagedge.camera.data.capture.CaptureRoute
 import com.imagedge.camera.data.capture.HeldKey
 import com.imagedge.camera.data.capture.IntervalScheduler
+import com.imagedge.camera.data.guidance.GuidanceStore
 import com.imagedge.camera.data.model.CameraCapabilities
 import com.imagedge.camera.data.model.CameraCapability
 import com.imagedge.camera.data.model.CameraIdentity
@@ -150,7 +151,8 @@ class CameraControlViewModel @Inject constructor(
     private val monitoringStore: MonitoringSettingsStore,
     private val snapshotWriter: ViewfinderSnapshotWriter,
     private val transferStore: TransferPolicyStore,
-    private val autoSaveLedger: AutoSaveLedger
+    private val autoSaveLedger: AutoSaveLedger,
+    private val guidanceStore: GuidanceStore
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ControlState())
@@ -296,6 +298,20 @@ class CameraControlViewModel @Inject constructor(
      * 快门：BLE 已连接时走蓝牙（低延迟可靠，拍摄成功率高）；
      * 否则降级 PTP InitiateCapture（ZV-E10 上固件存在已知怪癖，可能超时）。
      */
+    /**
+     * 快门操作提示该不该说（设计 §4.6「首次或操作模式变化时」+ §5「记录按机型与模式分开」）。
+     *
+     * 机型与操作模式**一起进键**：换了机器要重新说，同一台机器换了拍摄模式也要重新说——
+     * 那时「按住会怎样」这件事本身变了。用户点过「知道了」就压制，直到下一次变化。
+     */
+    fun shouldShowShutterHint(model: String, mode: Int): Boolean =
+        guidanceStore.shouldShow(SHUTTER_GUIDE_ID, "$model#$mode")
+
+    fun dismissShutterHint() {
+        val identity = _state.value.identity
+        guidanceStore.markDismissed(SHUTTER_GUIDE_ID, "${identity.model}#${identity.mode}")
+    }
+
     /**
      * 快门按下（手势开始）：半按对焦（0x07）。
      * 与物理快门两段式一致：按下对焦，抬起（[shutterUp]）拍摄。
@@ -985,6 +1001,9 @@ class CameraControlViewModel @Inject constructor(
     }
 
     private companion object {
+        /** 快门操作提示的引导键（改版就换后缀，旧的「已看过」不该压制新说明） */
+        const val SHUTTER_GUIDE_ID = "shutter-sequence-v1"
+
         /** 倒计时刷新步长：100ms 足够让界面读数不跳字，又不至于每帧都重算 */
         const val COUNTDOWN_TICK_MS = 100L
 

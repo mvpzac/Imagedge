@@ -290,6 +290,9 @@
     <!-- 相机控制 -->
     <string name="remote_title">遥控拍摄</string>
     <string name="control_btn_shoot">按住对焦 · 松开拍照</string>
+    <!-- 没连蓝牙的通道按下就是单次触发，没有半按对焦：说成「按住…松开…」是在承诺一个没有的机制 -->
+    <string name="control_shutter_hint_ptp">点一下即拍摄（这条通道没有半按对焦）</string>
+    <string name="control_shutter_hint_ok">知道了</string>
     <string name="control_shoot_mode">照相模式</string>
     <string name="control_wb">白平衡</string>
     <string name="control_eb">曝光补偿</string>
