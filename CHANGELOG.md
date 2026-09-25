@@ -25,6 +25,19 @@ All notable changes to this project are documented here. Format follows [Keep a 
 - 导航项语义补 `Role.Tab` + `selected`，读屏能报「标签页、当前在第几个」
 - 消除双入口：`edit_hub` 路由删除，相册页的「相册编辑」改为切到创作 Tab。
   同一个页面留两条进入路径，返回键语义就会分叉
+- **相机工作台按 §3.3 线框重排**（批次 B 的「首页」那半）：
+  `AppPageHeader(相机 + 帮助)` → `CameraStatusCard` → 「你想做什么？」两个同级任务入口 →
+  仅必要时出现的 `GuideCard`。原来的超大品牌字 hero 撤下，品牌只留一行小字——
+  首页第一屏该回答「相机现在能干什么」，不是展示 logo
+- 新增 `feature/camera/CameraStatusCard.kt`（**功能私有组件**，不进 `ui/components`）：
+  机型当标题、状态当副行；能力摘要只转述相机当次上报的 `CameraCapabilities`，
+  `UNKNOWN`（没读到）与 `UNSUPPORTED`（读了且不支持）分开写；
+  通道/固件/功能模式收进右上「更多 → 连接详情」，首屏不再出现 PTP/IP 这类词；
+  「断开相机」只在「更多」里，且按是否有传输进行说不同的后果
+- 两个任务入口默认**同级同表面**（都不带 PRIMARY），未连接时禁用并给出原因
+  「先连接相机，连上后这里就能用」，而不是点了没反应或擅自把用户丢进连接流程
+- 扫码/手动连接降为任务入口之下的次级文字入口（批次 D 会收成完整向导）；
+  引导卡改走批次 A 的 `GuideCard` + `GuidanceStore`，「知道了」按机型记忆，进程重建后仍不重复出现
 
 **页面与结构重构 · 批次 A（设计系统）**
 
@@ -103,6 +116,12 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Changed / 变更
 
+- **批次 B（相机工作台）**：删除 `StepsGuideCard`——三步说明改由「用户主动打开的 `HelpSheet`」
+  与「一次性的 `GuideCard`」承担，旧组件在零调用点后被删掉，而不是留着「以后可能用」。
+  同时清掉失效文案 key（`home_channel`、`home_status_hint`、`home_brand_sub`、
+  `home_btn_*_desc`、`remote_entry_*`）。新增 `Lucide.MoreVertical`（与既有图标同为
+  24 视口 / 2dp 描边）。`ConnectionViewModel` 只多暴露两个**只读转发**
+  （`capabilities`、`transferActive`）与引导记忆读写，没有新增任何协议探测。
 - 取景帧改为 ViewModel 内的**单一采集 Job**：此前是交给界面 collect 的 cold flow，
   嵌入预览与监看工作台各自 collect 会同时开两条 60152 流打同一个 `@Singleton LiveViewClient`。
 - 嵌入预览与工作台复用同一套 `drawFrame`/`drawMarkers`，两处的旋转/镜像不会各自漂移。

@@ -49,6 +49,7 @@ object Lucide {
     val Palette = R.drawable.ic_lucide_palette
     val Trash2 = R.drawable.ic_lucide_trash_2
     val Check = R.drawable.ic_lucide_check
+    val MoreVertical = R.drawable.ic_lucide_more_vertical
 
     // ── 监看工作台（T1）新增：几何与 Lucide 官方 SVG 一致，同为描边 2dp/24 视口 ──
     val FlipHorizontal = R.drawable.ic_lucide_flip_horizontal

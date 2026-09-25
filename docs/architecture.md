@@ -63,6 +63,15 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
   也就没法自己 `navigate()` 到别页。四个一级 Tab 各带 `saveState`，切走再切回保留本页状态；
   同一个页面只允许一条进入路径（创作升为一级入口后，`edit_hub` 路由已删）。
   悬浮导航的底部让位量由 `FloatingNavBar` 实测胶囊高度后经 `LocalNavClearance` 下发，不是常量。
+- **相机工作台的层级（重构批次 B）**：`feature/camera/CameraHubScreen` 的顺序是
+  标题栏 → `CameraStatusCard` → 两个同级任务入口 → 仅必要时出现的引导卡。
+  状态卡是**功能私有组件**（`feature/camera/CameraStatusCard.kt`），因为它要懂
+  `ConnectionPhase` 与 `CapabilityState` 的四态语义；放进 `ui/components` 就会退化成
+  `title: String` 参数，各调用点自己猜该填什么。它同时是本页唯一的玻璃卡（§3.2 预算）。
+  能力摘要只转述 `CameraRepository.capabilities`（0x9209 派生），首页不自己探测；
+  「断开」的后果说明读 `DownloadManager.hasActiveDownload`。
+  设计 §6 点名的 `TaskEntry` 由 `ActionRow` 直接承担，**没有**新建同名包装组件——
+  它与 `ActionRow` 的差别只有名字，多一层只会让「该用哪个」变成新问题。
 - **引导呈现与业务解耦**：`ui/guidance/`（`GuideCard`/`ContextHint`/`HelpSheet`）只呈现内容，
   不查权限、不连相机、不决定是否出现；出现与否由 `data/guidance/GuidanceStore` 按
   `guideId + version + 机型` 判定，且「已看过」与「任务成功过」是两条独立记录。

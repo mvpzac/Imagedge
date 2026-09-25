@@ -171,6 +171,7 @@
 | 文本输入 | `AppTextField` | 裸 `OutlinedTextField` |
 | 强调容器（一屏最多一处） | `GlassCard` | 裸 `Card` |
 | 普通入口行 / 设置行 | `ActionRow` / `SettingsRow`（不透明表面） | 给每个入口套玻璃 |
+| 一级页的任务入口 | `ActionRow`（同级同表面，禁用必须带原因）；页面私有组件（如 `CameraStatusCard`）留在 `feature/<页>/` | 为设计文档里的名字（`TaskEntry`）再建一个同义包装 |
 | 分组标题 | `GroupTitle` | 手拼 Row + Text |
 | 引导卡 / 情境提示 / 步骤面板 | `ui/guidance/`：`GuideCard` / `ContextHint` / `HelpSheet` | 页内自拼说明块 |
 | 区块标题 + 内容 | `AppSection` | 手拼 Column |

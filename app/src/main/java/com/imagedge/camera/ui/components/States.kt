@@ -141,30 +141,3 @@ fun StatusBanner(
         }
     }
 }
-
-/** 三步引导条（首页未连接时显示） */
-@Composable
-fun StepsGuideCard(steps: List<String>, modifier: Modifier = Modifier) {
-    Surface(
-        shape = RoundedCornerShape(Radius.Card),
-        color = MaterialTheme.colorScheme.surface,
-        modifier = modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(Spacing.L),
-            verticalArrangement = Arrangement.spacedBy(Spacing.M)
-        ) {
-            steps.forEachIndexed { index, step ->
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.M),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconBadge(icon = Lucide.Info, size = 24.dp, iconSize = 12.dp)
-                    Text("${index + 1}. $step", style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-        }
-    }
-}

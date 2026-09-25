@@ -58,6 +58,8 @@ fun AppNavHost(
     ) {
         composable(TabDestination.CAMERA.route) {
             CameraHubScreen(
+                // 任务入口直达目标页，而不是绕一圈「首页上的连接卡」
+                onOpenPhotos = { navController.selectTab(TabDestination.PHOTOS) },
                 onOpenRemote = { navController.openSubDestination(Route.REMOTE) },
                 snackbarController = snackbarController
             )

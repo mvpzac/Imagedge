@@ -10,22 +10,51 @@
     <string name="tab_create">创作</string>
     <string name="tab_settings">设置</string>
 
-    <!-- 主页 -->
-    <string name="home_brand_sub">Designed for Sony Cameras</string>
+    <!-- 相机工作台（批次 B：状态卡 + 两个同级任务入口 + 次级连接入口） -->
+    <string name="home_brand_line">Imagedge · Designed for Sony Cameras</string>
+    <string name="home_ask">你想做什么？</string>
+    <string name="home_task_photos">把照片存到手机</string>
+    <string name="home_task_photos_desc">浏览相机里的照片，选中的存进手机相册</string>
+    <string name="home_task_remote">用手机遥控拍摄</string>
+    <string name="home_task_remote_desc">实时取景、调参数、按快门都在手机上完成</string>
+    <string name="home_task_need_camera">先连接相机，连上后这里就能用</string>
+    <string name="home_help_action">连接帮助</string>
+    <string name="home_help_title">连接相机的步骤</string>
+    <string name="home_more">更多操作</string>
+    <string name="home_connection_details">连接详情</string>
+    <string name="home_detail_channel">通道</string>
+    <string name="home_detail_firmware">固件</string>
+    <string name="home_detail_mode">功能模式</string>
+    <string name="home_detail_unknown">未读到</string>
+    <string name="home_cap_transfer_label">传照片</string>
+    <string name="home_cap_transfer_value">可以浏览与下载</string>
+    <string name="home_cap_shutter_label">遥控快门</string>
+    <string name="home_cap_shutter_ready">可以拍摄</string>
+    <string name="home_cap_shutter_readonly">只读，不能下发</string>
+    <string name="home_cap_shutter_unsupported">这台相机不支持</string>
+    <string name="home_cap_shutter_unknown">未确认</string>
     <string name="home_status_disconnected">未连接相机</string>
     <string name="home_status_connecting">正在连接相机…</string>
     <string name="home_status_connected">已连接</string>
-    <string name="home_channel">通道：%1$s</string>
     <string name="home_status_error">连接失败</string>
-    <string name="home_status_hint">在相机上打开「智能手机连接」显示二维码，再点下方「扫码连接」自动配网</string>
+    <string name="home_status_connected_sub">相机已就绪</string>
+    <string name="home_status_connecting_sub">正在建立会话，请稍候</string>
+    <string name="home_status_disconnected_sub">在相机上打开「智能手机连接」，再扫码或手动连接</string>
+    <string name="home_status_error_sub">再试一次，或改用手动连接</string>
     <string name="home_btn_disconnect">断开连接</string>
-    <string name="home_btn_disconnect_desc">断开当前相机的连接</string>
+    <string name="home_disconnect_body_busy">正在传输文件，现在断开会让本次下载中断。</string>
+    <string name="home_disconnect_body_idle">断开后需要重新在相机上确认连接。</string>
     <string name="home_btn_manual">手动连接</string>
-    <string name="home_btn_manual_desc">输入相机 IP 地址或自动发现</string>
     <string name="home_manual_hint">若手机已连上相机热点，留空点「连接」即可自动发现；也可手动填写相机 IP（AP 模式固定 192.168.122.1）</string>
     <string name="home_manual_connect">连接</string>
+    <string name="home_cancel">取消</string>
+    <string name="home_close">关闭</string>
+    <string name="home_guide_on_camera">在相机上操作</string>
+    <string name="home_guide_title">先在相机上打开连接菜单</string>
+    <string name="home_guide_body">相机端不打开「智能手机连接」，手机扫码只会一直等待。</string>
+    <string name="home_guide_dismiss">知道了</string>
 
-    <!-- 首页三步连接引导（未连接时显示，连接后自动消失） -->
+    <!-- 连接帮助面板的三个步骤（用户主动打开，不自动出现） -->
     <string name="home_guide_step1">相机进入「智能手机连接」，屏幕出现二维码</string>
     <string name="home_guide_step2">点「扫码连接」，手机自动配网</string>
     <string name="home_guide_step3">相机端勾选照片，即可浏览与下载</string>
@@ -235,9 +264,6 @@
 
     <!-- 相机控制 -->
     <string name="remote_title">遥控拍摄</string>
-    <string name="remote_entry_title">遥控拍摄</string>
-    <string name="remote_entry_desc">实时取景 · 遥控快门 · 录像 · 参数调节（BLE 蓝牙 + Wi-Fi）</string>
-    <string name="remote_entry_open">进入</string>
     <string name="control_btn_shoot">按住对焦 · 松开拍照</string>
     <string name="control_shoot_mode">照相模式</string>
     <string name="control_wb">白平衡</string>
