@@ -27,6 +27,12 @@ ConnectionViewModel ──▶ CameraRepository（通道路由 + 状态）
 ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口连接，全页面同步）
 ```
 
+- **两个连接状态不是重复状态源，别再合并**（批次 F 核对过）：`ConnectionStateHolder` 记的是
+  **用户这次发起连接的尝试**（`CONNECTING` / `ERROR` + 一句给人看的 `errorMessage` / 连上的机型），
+  `CameraRepository.connectionState` 记的是**通道自己**的 `ChannelConnectionState`。
+  两者不能互相推出：UPnP 通道的 `connectionState` 恒为 `DISCONNECTED`（已知坑 6），
+  拿它当「有没有连上」会误杀所有 UPnP 下载；而 holder 里没有通道级重连的中间态。
+  所以照片页/遥控页读通道状态，工作台/向导读尝试状态，各自都是单一真相。
 - **通道抽象**：`CameraChannel` 接口（listMedia/getThumbnail/download/takePicture…），
   带 `connectionState` 与 `contentEvents` 两个可选能力（默认实现），UPnP 通道零改动。
   通道还**自我声明**身份与能力（`deviceModel`/`deviceFirmware`/`supportsCapture`），

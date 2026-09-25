@@ -10,8 +10,6 @@ import com.imagedge.camera.data.lut.LutType
 import com.imagedge.camera.data.lut.UserLutStore
 import com.imagedge.camera.data.model.ConnectionPhase
 import com.imagedge.camera.data.model.ConnectionState
-import com.imagedge.camera.data.model.ConnectionStateHolder
-import com.imagedge.camera.data.remote.CameraRepository
 import com.imagedge.camera.ui.feedback.Haptics
 import com.imagedge.camera.ui.theme.ThemeController
 import com.imagedge.camera.ui.theme.ThemeMode
@@ -36,8 +34,6 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val repository: CameraRepository,
-    private val stateHolder: ConnectionStateHolder,
     private val userLutStore: UserLutStore,
     val themeController: ThemeController,
     private val haptics: Haptics

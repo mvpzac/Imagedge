@@ -806,13 +806,6 @@ class CameraControlViewModel @Inject constructor(
         }
     }
 
-    /** 离开控制面板工作态 */
-    fun disconnect() {
-        viewModelScope.launch {
-            _state.update { it.copy(isConnected = false) }
-        }
-    }
-
     /**
      * 离开遥控页时终止 BLE 扫描/配对/GATT 与取景采集，
      * 不断开仍供相册使用的 Wi-Fi/PTP 会话。

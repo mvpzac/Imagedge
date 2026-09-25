@@ -164,17 +164,6 @@ fun exitsOf(attempt: ConnectAttempt, steps: ConnectSteps): WizardExits = when (a
     )
 }
 
-/**
- * 会话失败时该说什么。
- *
- * 通道层抛上来的是一句很长的中文（含 PTP/UPnP 都试过），直接铺在界面上读不动；
- * 这里只决定「有没有可执行的下一步」，文案本身留在资源里。
- */
-fun sessionFailureIsTimeout(reason: String?): Boolean {
-    val text = reason ?: return false
-    return text.contains("超时") || text.contains("timed out", ignoreCase = true) ||
-        text.contains("timeout", ignoreCase = true)
-}
 
 /** 向导要显示的一份完整结论：输入 → 步骤 → 出口，一次算完 */
 data class WizardView(

@@ -120,11 +120,6 @@ class ConnectionViewModel @Inject constructor(
         _stage.value = WizardStage.PrepareCamera
     }
 
-    /** 准备页的继续按钮：热点还在就直接进连接，不再要求扫一遍 */
-    fun continueFromPrepare() {
-        if (_hotspot.value.joined) startSession() else startScan()
-    }
-
     /** 重跑失败的 Wi-Fi 步骤 = 回到扫码，并把扫码 VM 清干净（由界面调它的 reset） */
     fun retryWifi() {
         _hotspot.value = HotspotObservation()

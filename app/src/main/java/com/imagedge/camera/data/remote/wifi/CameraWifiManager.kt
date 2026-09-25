@@ -10,7 +10,6 @@ import android.net.wifi.WifiManager
 import android.net.wifi.WifiNetworkSpecifier
 import com.imagedge.camera.core.common.AppLog
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.net.NetworkInterface
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -250,20 +249,6 @@ class CameraWifiManager @Inject constructor(
         }
         return null
     }
-
-    /**
-     * 获取当前 WiFi 网络接口（用于按网卡名做诊断/过滤）。
-     *
-     * 注：SSDP 设备发现相关代码（SonyApiClient / SsdpDiscovery / webapi 模块）已于
-     * 2026-08-29 全量清除，本方法不再服务于组播发现，仅保留作为网络诊断工具。
-     */
-    fun getWifiNetworkInterface(): NetworkInterface? {
-        val network = findWifiNetwork() ?: return null
-        val linkProperties = connectivityManager.getLinkProperties(network) ?: return null
-        val interfaceName = linkProperties.interfaceName ?: return null
-        return runCatching { NetworkInterface.getByName(interfaceName) }.getOrNull()
-    }
-
     /** DHCP 网关整型转点分十进制 IP */
     private fun intToIp(value: Int): String {
         return "${value and 0xFF}.${(value shr 8) and 0xFF}.${(value shr 16) and 0xFF}.${(value shr 24) and 0xFF}"
