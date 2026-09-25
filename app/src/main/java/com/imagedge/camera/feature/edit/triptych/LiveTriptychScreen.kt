@@ -74,6 +74,12 @@ fun LiveTriptychScreen(
         if (uris.isNotEmpty()) viewModel.onImagesPicked(uris)
     }
 
+    // 三拼是分段生成的，骨架的主按钮写的就是「当前那一步」。
+    // 各阶段自己再摆一个主按钮会撞出两个下一步，且点骨架那个会从阶段一直接导出、
+    // 在完成页再生成一份——因为 export() 只认「三张素材齐了」，不认阶段。
+    val inEditStage = state.slots.size == 3 && state.phase == LiveTriptychViewModel.Phase.EDIT
+    val inPreviewStage = state.slots.size == 3 && state.phase == LiveTriptychViewModel.Phase.PREVIEW
+
     EditorFrame(
         title = "LIVE 图三拼",
         state = EditorFrameState(
@@ -85,10 +91,19 @@ fun LiveTriptychScreen(
             },
             // 三拼没有「只清调整不清素材」这一档：清空就是重新来过，
             // 所以标题栏不放重置，完成页上的「再拼一张」才是它的后继动作
+            // 选图页与完成页没有「下一步」，主按钮因此不出现
+            saveVisible = inEditStage || inPreviewStage,
             result = state.message,
             resultOk = state.success
         ),
-        onSave = { viewModel.export() },
+        // 导出期间把文案让回骨架的「正在生成…」：那时这一步已经按下了，
+        // 再写「生成三拼 LIVE 图」会让人以为没点到
+        saveLabel = when {
+            state.exporting -> ""
+            inPreviewStage -> "生成三拼 LIVE 图"
+            else -> "进入拼接预览"
+        },
+        onSave = { if (inPreviewStage) viewModel.export() else viewModel.enterPreview() },
         onBack = onBack
     ) {
             when {
@@ -166,11 +181,6 @@ private fun EditStage(
     state.slots.forEachIndexed { index, slot ->
         SlotCard(index = index, slot = slot, viewModel = viewModel)
     }
-
-    AppButton(
-        text = "进入拼接预览",
-        onClick = { viewModel.enterPreview() }
-    )
 }
 
 /** 阶段二：拼图预览 + 预估大小 + 生成 */
@@ -202,10 +212,6 @@ private fun PreviewStage(
         text = "预估导出大小 ≈ %.1f MB".format(state.estimatedBytes / 1024.0 / 1024.0),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-    AppButton(
-        text = "生成三拼 LIVE 图",
-        onClick = { viewModel.export() }
     )
     AppButton(
         text = "返回调整",
