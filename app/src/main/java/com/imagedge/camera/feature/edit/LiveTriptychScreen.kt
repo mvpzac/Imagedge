@@ -36,7 +36,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.ui.components.AppButton
 import com.imagedge.camera.ui.components.AppChipRow
 import com.imagedge.camera.ui.components.AppLink
-import com.imagedge.camera.ui.components.AppPage
+import com.imagedge.camera.ui.components.TaskResultPanel
+import com.imagedge.camera.ui.layout.EditorBusy
+import com.imagedge.camera.ui.layout.EditorFrame
+import com.imagedge.camera.ui.layout.EditorFrameState
 import com.imagedge.camera.ui.components.AppSection
 import com.imagedge.camera.ui.glass.GlassCard
 import com.imagedge.camera.ui.theme.Spacing
@@ -71,16 +74,35 @@ fun LiveTriptychScreen(
         if (uris.isNotEmpty()) viewModel.onImagesPicked(uris)
     }
 
-    AppPage(title = "LIVE 图三拼", onBack = onBack) {
+    EditorFrame(
+        title = "LIVE 图三拼",
+        state = EditorFrameState(
+            hasSubject = state.slots.isNotEmpty(),
+            busy = when {
+                state.exporting -> EditorBusy.Exporting
+                state.parsing || state.previewLoading -> EditorBusy.Preparing
+                else -> EditorBusy.None
+            },
+            // 三拼没有「只清调整不清素材」这一档：清空就是重新来过，
+            // 所以标题栏不放重置，完成页上的「再拼一张」才是它的后继动作
+            result = state.message,
+            resultOk = state.success
+        ),
+        onSave = { viewModel.export() },
+        onBack = onBack
+    ) {
             when {
-                state.parsing || state.exporting -> {
-                    ProcessingView(message = state.progressText ?: "处理中…")
-                }
-
                 // 结果页：导出成功/失败都必须停留展示——v1 复用了预览页且不渲染 message，
                 // 用户生成成功后看不到任何确认，失败也看不到原因，只能感觉「点了没反应」
                 state.phase == LiveTriptychViewModel.Phase.DONE -> {
-                    state.message?.let { ResultMessage(text = it, ok = state.success) }
+                    TaskResultPanel(
+                        ok = state.success,
+                        headline = state.message ?: if (state.success) "已生成 LIVE 图" else "生成失败",
+                        location = state.exportName,
+                        note = if (state.success) null else "三张素材与裁切都还留着，可以直接重试",
+                        primaryLabel = "再拼一张",
+                        onPrimary = { viewModel.startOver() }
+                    )
                     val donePreview = state.previewBitmap
                     if (donePreview != null) {
                         Image(
@@ -93,7 +115,7 @@ fun LiveTriptychScreen(
                                 .clip(RoundedCornerShape(Radius.Card))
                         )
                     }
-                    AppButton(text = "再拼一张", onClick = { viewModel.startOver() })
+
                 }
 
                 state.slots.size == 3 && state.phase == LiveTriptychViewModel.Phase.PREVIEW -> {

@@ -393,6 +393,7 @@
     <string name="control_params_action">调整参数</string>
     <string name="control_params_sheet">拍摄参数</string>
     <string name="control_dismiss">知道了</string>
+    <string name="result_location">位置：%1$s</string>
     <string name="viewer_page">第 %1$d / %2$d 张</string>
     <string name="viewer_marker_saved">已保存到手机</string>
     <string name="viewer_marker_preview">相机预览</string>

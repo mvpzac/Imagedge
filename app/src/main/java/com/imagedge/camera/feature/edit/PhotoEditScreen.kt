@@ -130,6 +130,7 @@ fun PhotoEditScreen(
                     else -> EditorBusy.None
                 },
                 canReset = state.hasEdits,
+                saveVisible = state.hasImage,
                 result = state.message,
                 resultOk = state.saved
             ),

@@ -99,13 +99,24 @@ class ExifFrameViewModel @Inject constructor(
         val exporting: Boolean = false,
         val message: String? = null,
         val success: Boolean = false,
-    )
+    ) {
+        /**
+         * 有没有可撤销的改动。编辑器骨架据此决定「重置」能不能点——
+         * 一张刚选好的照片本来就在默认样式上，摆一个「重置」只会让人以为动了什么。
+         */
+        val hasEdits: Boolean
+            get() = template != FrameTemplate.CLASSIC_WHITE ||
+                customText.isNotBlank() || rounded || !keepLogo ||
+                fields.any { !it.enabled }
+    }
 
     private val _state = MutableStateFlow(ExifFrameState())
     val state: StateFlow<ExifFrameState> = _state.asStateFlow()
 
     /** 基准原图（预览/导出共用，1600px 长边降采样） */
     private var sourceBitmap: Bitmap? = null
+    /** EXIF 刚读出来时的字段快照：「重置」回到这里，而不是回到空白 */
+    private var baselineFields: List<FrameField> = emptyList()
     private var sourceMotionVideo: File? = null
     /** 从 EXIF Make/Model 检测出的相机品牌（渲染商标图片/字标） */
     private var sourceBrand: BrandMark? = null
@@ -396,6 +407,27 @@ class ExifFrameViewModel @Inject constructor(
                 )
             )
         }
+        baselineFields = _state.value.fields
+    }
+
+    /**
+     * 回到这台相机的初始样式：模板/自定义文字/LOGO/圆角与字段显示全部复位，
+     * 拍摄信息回到刚读出来的 EXIF 快照。
+     *
+     * **不动源图**——「重新选择照片」是另一个动作，原来它和重置混在同一个 `reset()` 里，
+     * 用户想撤销一次模板切换就会连照片一起丢。
+     */
+    fun resetStyle() {
+        _state.update {
+            it.copy(
+                template = FrameTemplate.CLASSIC_WHITE,
+                customText = "",
+                keepLogo = true,
+                rounded = false,
+                fields = baselineFields
+            )
+        }
+        renderPreview()
     }
 
     /** EXIF 时间 `2026:09:11 20:31:05` → 显示用 `2026-09-11 20:31`（解析失败原样返回） */

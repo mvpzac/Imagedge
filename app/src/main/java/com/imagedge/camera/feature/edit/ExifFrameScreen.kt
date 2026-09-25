@@ -27,7 +27,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.ui.components.AppButton
 import com.imagedge.camera.ui.components.AppChipRow
-import com.imagedge.camera.ui.components.AppPage
+import com.imagedge.camera.ui.layout.EditorBusy
+import com.imagedge.camera.ui.layout.EditorFrame
+import com.imagedge.camera.ui.layout.EditorFrameState
 import com.imagedge.camera.ui.components.AppSection
 import com.imagedge.camera.ui.components.AppSwitch
 import com.imagedge.camera.ui.components.AppSwitchRow
@@ -58,7 +60,26 @@ fun ExifFrameScreen(
         if (uri != null) viewModel.onImagePicked(uri)
     }
 
-    AppPage(title = "边框水印", onBack = onBack, verticalArrangement = Arrangement.spacedBy(Spacing.L)) {
+    // 统一编辑器骨架（批次 E）：导出期间返回不假装取消、重置过确认、结果常驻
+    EditorFrame(
+        title = "边框水印",
+        state = EditorFrameState(
+            hasSubject = state.sourceUri != null,
+            busy = when {
+                state.exporting -> EditorBusy.Exporting
+                state.rendering -> EditorBusy.Preparing
+                else -> EditorBusy.None
+            },
+            canReset = state.hasEdits,
+            // 还没选图时不摆主按钮：一个灰掉的「保存副本」只会让人先想它为什么是灰的
+            saveVisible = state.sourceUri != null,
+            result = state.message,
+            resultOk = state.success
+        ),
+        onSave = { viewModel.export() },
+        onReset = { viewModel.resetStyle() },
+        onBack = onBack
+    ) {
             when {
                 state.sourceUri == null -> {
                     EmptyState(
@@ -72,10 +93,6 @@ fun ExifFrameScreen(
                             )
                         }
                     )
-                }
-
-                state.exporting -> {
-                    ProcessingView(message = "正在导出…")
                 }
 
                 else -> {
@@ -165,10 +182,7 @@ fun ExifFrameScreen(
                         )
                     }
 
-                    AppButton(
-                        text = "导出到相册",
-                        onClick = { viewModel.export() }
-                    )
+                    // 换一张是另一个动作，不能和「重置样式」混成一个按钮（批次 E）
                     AppButton(
                         text = "重新选择照片",
                         onClick = { viewModel.reset() },

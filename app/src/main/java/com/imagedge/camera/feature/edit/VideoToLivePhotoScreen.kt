@@ -67,7 +67,10 @@ import com.imagedge.camera.ui.theme.Spacing
 import com.imagedge.camera.ui.components.AppButtonType
 import com.imagedge.camera.ui.components.EmptyState
 import com.imagedge.camera.ui.components.Lucide
-import com.imagedge.camera.ui.components.PageHeader
+import com.imagedge.camera.ui.components.TaskResultPanel
+import com.imagedge.camera.ui.layout.EditorBusy
+import com.imagedge.camera.ui.layout.EditorFrame
+import com.imagedge.camera.ui.layout.EditorFrameState
 import com.imagedge.camera.ui.components.ProcessingView
 import com.imagedge.camera.ui.theme.OnViewer
 import com.imagedge.camera.ui.theme.Radius
@@ -91,40 +94,40 @@ fun VideoToLivePhotoScreen(
         if (uris.isNotEmpty()) viewModel.onVideosPicked(uris)
     }
 
-    Scaffold(
-        topBar = {
-            PageHeader(
-                title = "视频转 LIVE 图",
-                onBack = onBack
-            )
-        }
-    ) { innerPadding ->
-        Column(
-            modifier = androidx.compose.ui.Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(innerPadding)
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            when {
+    // 统一编辑器骨架（批次 E）。这里原来自己拼了一套 Scaffold + PageHeader + 滚动列，
+    // 是四个编辑器里唯一没走骨架的——同一件事（标题栏、安全区、主操作位置）就有了两份实现
+    EditorFrame(
+        title = "视频转 LIVE 图",
+        state = EditorFrameState(
+            hasSubject = state.session != null,
+            busy = if (state.processing) EditorBusy.Exporting else EditorBusy.None,
+            saveVisible = state.session != null,
+            result = state.message,
+            resultOk = state.failCount == 0 && state.doneCount > 0
+        ),
+        saveLabel = if (state.pendingUris.isEmpty()) "生成 LIVE 图" else "完成本段",
+        onSave = { viewModel.confirmSession() },
+        onBack = onBack
+    ) {
+        when {
                 // ── 编辑态：选段 + 选封面 ──
                 state.session != null -> SessionEditor(
                     viewModel = viewModel,
                 )
 
-                state.processing -> {
-                    ProcessingView(message = state.progressText ?: "正在处理…")
-                }
-
+                // 结果页用结果面板：EmptyState 是「还没有东西」的意思，
+                // 拿它当完成页会把「刚生成了几张、在哪」说成一个空态
                 state.doneCount > 0 || state.failCount > 0 -> {
-                    EmptyState(
-                        title = state.message.orEmpty(),
-                        icon = if (state.failCount == 0) Lucide.CircleCheck else Lucide.TriangleAlert,
-                        desc = "已保存到系统相册，可在各平台以「实况/动态照片」方式分享",
-                        actionLabel = "继续导出",
-                        onAction = {
+                    TaskResultPanel(
+                        ok = state.failCount == 0,
+                        headline = state.message.orEmpty(),
+                        note = if (state.failCount > 0) {
+                            "有 ${state.failCount} 个视频没做成，其余的已经保存"
+                        } else {
+                            "已保存到系统相册，可在各平台以「实况/动态照片」方式分享"
+                        },
+                        primaryLabel = "继续导出",
+                        onPrimary = {
                             videoPicker.launch(
                                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
                             )
@@ -152,7 +155,6 @@ fun VideoToLivePhotoScreen(
                     )
                 }
             }
-        }
     }
 }
 

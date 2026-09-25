@@ -44,7 +44,12 @@ data class EditorFrameState(
     val hasSubject: Boolean,
     val busy: EditorBusy,
     /** 有可撤销的改动时才让「重置」可点；没有改动还摆一个按钮，点了只会丢东西 */
-    val canReset: Boolean,
+    val canReset: Boolean = false,
+    /**
+     * 这一屏有没有「保存」这回事。选素材页与结果页没有——在那里摆一个灰掉的主按钮，
+     * 用户要先弄清它为什么是灰的，而它本来就不该出现在那儿。
+     */
+    val saveVisible: Boolean = true,
     val result: String? = null,
     val resultOk: Boolean = true
 ) {
@@ -69,8 +74,13 @@ fun EditorFrame(
     title: String,
     state: EditorFrameState,
     onSave: () -> Unit,
-    onReset: () -> Unit,
     onBack: () -> Unit,
+    /** 主按钮文案。默认「保存副本」；分段生成的编辑器自己写当前那一步 */
+    saveLabel: String = "",
+    /** 为 null 表示这个编辑器没有「回到初始状态」这回事（比如三拼的清空会连素材一起丢） */
+    onReset: (() -> Unit)? = null,
+    /** 确认对话框正文。默认说「调整」，会连素材一起清掉的编辑器必须自己写清楚 */
+    resetConfirmBody: String? = null,
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
@@ -86,11 +96,13 @@ fun EditorFrame(
                     if (!state.exporting) onBack()
                 },
                 actions = {
-                    AppLink(
-                        text = stringResource(R.string.editor_reset),
-                        enabled = state.canReset,
-                        onClick = { confirmReset = true }
-                    )
+                    if (onReset != null) {
+                        AppLink(
+                            text = stringResource(R.string.editor_reset),
+                            enabled = state.canReset,
+                            onClick = { confirmReset = true }
+                        )
+                    }
                 }
             )
         }
@@ -117,21 +129,25 @@ fun EditorFrame(
             if (state.busy == EditorBusy.Preparing) {
                 ProcessingView(message = stringResource(R.string.editor_preparing))
             }
-            AppButton(
-                text = stringResource(
-                    if (state.exporting) R.string.editor_exporting else R.string.editor_save_copy
-                ),
-                onClick = onSave,
-                enabled = state.hasSubject && state.busy == EditorBusy.None
-            )
+            if (state.saveVisible) {
+                AppButton(
+                    text = saveLabel.ifBlank {
+                        stringResource(
+                            if (state.exporting) R.string.editor_exporting else R.string.editor_save_copy
+                        )
+                    },
+                    onClick = onSave,
+                    enabled = state.hasSubject && state.busy == EditorBusy.None
+                )
+            }
         }
     }
 
-    if (confirmReset) {
+    if (confirmReset && onReset != null) {
         AlertDialog(
             onDismissRequest = { confirmReset = false },
             title = { Text(stringResource(R.string.editor_reset_confirm_title)) },
-            text = { Text(stringResource(R.string.editor_reset_confirm_body)) },
+            text = { Text(resetConfirmBody ?: stringResource(R.string.editor_reset_confirm_body)) },
             confirmButton = {
                 AppLink(
                     text = stringResource(R.string.editor_reset),

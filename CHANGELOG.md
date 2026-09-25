@@ -10,6 +10,25 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Added / 新增
 
+**批次 H（其余三个编辑器迁 EditorFrame + 完成页结果面板）**
+
+- 新增 `ui/components/TaskResultPanel`（设计 §6）：完成页要说的三件事——**成没成、在哪、下一步**
+  ——`ResultMessage` 只装得下第一件。三拼的完成页与「视频转 LIVE 图」的结果分支改用它；
+  后者原来拿 `EmptyState` 当结果页，「刚生成了几张」被说成一个空态
+- 边框水印 / LIVE 三拼 / 视频转 LIVE 图 全部迁到 `EditorFrame`（§4.7）。
+  「视频转 LIVE 图」是四个编辑器里唯一自己拼 `Scaffold + PageHeader + 滚动列` 的，现在没了
+- `EditorFrame` 补两个口子：`onReset` 可空（三拼的清空会连素材一起丢，标题栏不该放一个
+  语义不符的「重置」），`saveVisible` / `saveLabel`（选素材页与结果页没有「保存」这回事，
+  分段生成的编辑器主按钮写的是当前那一步）
+- 边框水印的「重置」与「重新选择照片」拆成两个动作：前者回到刚读出 EXIF 的初始样式
+  （新增 `resetStyle()` + 字段快照），后者才丢照片。原来它们共用一个 `reset()`，
+  想撤销一次模板切换会连照片一起没
+- 导出中的进度不再靠把整个编辑区换成一个转圈（§4.7「导出期间可浏览进度」）
+
+实测（无需相机）：边框水印走完 选图 → 导出，相册新增 `IMAGEDGE_1790348686783.jpg`；
+刚选完图时「重置」点下去没有反应（`hasEdits` 判定正确，uiautomator 的 enabled 字段不反映
+Compose 的禁用态，所以是实测点出来的而不是看属性看出来的）；选图前不再出现灰掉的「保存副本」。
+
 **批次 G（查看器：设计 §4.4 / §8.1）**
 
 - 查看器从 `feature/photos` 搬进自己的包 `feature/viewer`（§7 的包归属），

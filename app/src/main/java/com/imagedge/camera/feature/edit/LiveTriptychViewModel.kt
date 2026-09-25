@@ -102,6 +102,8 @@ class LiveTriptychViewModel @Inject constructor(
         val estimatedBytes: Long = 0L,
         val message: String? = null,
         val success: Boolean = false,
+        /** 成品在相册里的文件名（结果面板要说「在哪」，只说「已完成」等于没说完） */
+        val exportName: String? = null,
     )
 
     private val _state = MutableStateFlow(UiState())
@@ -534,6 +536,7 @@ class LiveTriptychViewModel @Inject constructor(
                         exporting = false,
                         progressText = null,
                         success = true,
+                        exportName = result.displayName,
                         // 结果页需要停留展示，才能让用户看到「已保存」而不是回到预览一头雾水
                         phase = Phase.DONE,
                         message = "三拼 LIVE 图已保存到相册"
