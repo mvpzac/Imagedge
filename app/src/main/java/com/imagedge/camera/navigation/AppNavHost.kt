@@ -5,10 +5,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
+import android.net.Uri
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.imagedge.camera.feature.photos.PhotosScreen
-import com.imagedge.camera.feature.photos.PhotoViewerScreen
+import com.imagedge.camera.feature.viewer.ViewerRoute
 import com.imagedge.camera.feature.camera.CameraHubScreen
 import com.imagedge.camera.feature.connection.ConnectWizardScreen
 import com.imagedge.camera.feature.connection.ConnectPurpose
@@ -87,7 +88,7 @@ fun AppNavHost(
         composable(TabDestination.CREATE.route) {
             CreateHubScreen(
                 onOpenLivePhoto = { navController.openSubDestination(Route.LIVE_PHOTO) },
-                onOpenEdit = { navController.openSubDestination(Route.PHOTO_EDIT) },
+                onOpenEdit = { navController.openSubDestination(Route.photoEdit()) },
                 onOpenTriptych = { navController.openSubDestination(Route.LIVE_TRIPTYCH) },
                 onOpenExifFrame = { navController.openSubDestination(Route.EXIF_FRAME) },
                 // 一级入口没有「返回上一级」：底栏就是它的来路。
@@ -103,12 +104,25 @@ fun AppNavHost(
         }
 
         composable(Route.PHOTO_VIEWER) {
-            PhotoViewerScreen(
+            ViewerRoute(
                 onBack = { navController.popBackStack() },
+                // 编辑走导航；分享在查看器内部复用既有的导出/分享面板（§7：不重复创建）
+                onEdit = { uri -> navController.openSubDestination(Route.photoEdit(uri)) },
                 snackbarController = snackbarController
             )
         }
-        composable(Route.PHOTO_EDIT) { PhotoEditScreen(onBack = { navController.popBackStack() }) }
+        composable(
+            route = Route.PHOTO_EDIT_PATTERN,
+            arguments = listOf(navArgument("uri") { defaultValue = ""; nullable = false })
+        ) { entry ->
+            val raw = entry.arguments?.getString("uri").orEmpty()
+            PhotoEditScreen(
+                initialUri = raw.takeIf { it.isNotBlank() }?.let {
+                    runCatching { Uri.parse(it) }.getOrNull()
+                },
+                onBack = { navController.popBackStack() }
+            )
+        }
         composable(Route.LIVE_PHOTO) {
             VideoToLivePhotoScreen(onBack = { navController.popBackStack() })
         }

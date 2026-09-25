@@ -1,6 +1,7 @@
-package com.imagedge.camera.feature.photos
+package com.imagedge.camera.feature.viewer
 
 import android.content.Context
+import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.ui.graphics.ImageBitmap
@@ -9,6 +10,8 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.imagedge.camera.core.common.AppLog
+import com.imagedge.camera.domain.media.mediaId
+import com.imagedge.camera.domain.media.resolveIndex
 import com.imagedge.camera.data.model.MediaItem
 import com.imagedge.camera.data.model.MediaSessionCache
 import com.imagedge.camera.ptp.PhotoType
@@ -21,7 +24,10 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
@@ -41,7 +47,7 @@ import javax.inject.Inject
  * </pre>
  */
 @HiltViewModel
-class PhotoViewerViewModel @Inject constructor(
+class ViewerViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val repository: CameraRepository,
     private val downloadManager: DownloadManager,
@@ -54,8 +60,16 @@ class PhotoViewerViewModel @Inject constructor(
     /** 相册当前列表（含顺序） */
     val items: List<MediaItem> = sessionCache.items
 
-    val startIndex: Int = (savedStateHandle.get<String>("index")?.toIntOrNull() ?: 0)
-        .coerceIn(0, (items.size - 1).coerceAtLeast(0))
+    /**
+     * 打开时点名的那张（设计 §8.1：导航传指纹，不传下标）。
+     *
+     * 列表在后台刷新过一次、或进程重建后会话失效时，指纹找不到对应项——
+     * 这时 [startIndex] 为 null，界面显示「相机内容已更新，请重新选择」，
+     * 而不是回退到第 0 张把没被点开的照片说成用户点的。
+     */
+    val mediaId: String? = savedStateHandle.get<String>("mediaId")
+
+    val startIndex: Int? = resolveIndex(items, mediaId)
 
     private val _loading = MutableStateFlow<Set<String>>(emptySet())
     val loading: StateFlow<Set<String>> = _loading.asStateFlow()
@@ -158,6 +172,94 @@ class PhotoViewerViewModel @Inject constructor(
             }
         }
     }
+
+    // ── 「需先保存到手机」的准备流程（设计 §4.4）──────────────────────────
+
+    /** 编辑/分享要的是**原图**；查看器手里的只是采样预览，绝不能拿它当原图导出 */
+    enum class ViewerIntent { Edit, Share }
+
+    data class PrepareState(
+        val intent: ViewerIntent,
+        val mediaKey: String,
+        val progress: Int? = null,
+        val error: String? = null,
+        /** 原图已落盘：界面据此继续原意图（打开编辑器 / 分享面板） */
+        val readyUri: Uri? = null
+    )
+
+    private val _prepare = MutableStateFlow<PrepareState?>(null)
+    val prepare: StateFlow<PrepareState?> = _prepare.asStateFlow()
+
+    init {
+        // 准备流程的进度与结局都来自队列本身：自己另开一条下载就是第二份真相
+        viewModelScope.launch {
+            downloadManager.tasks.collect { tasks ->
+                val current = _prepare.value ?: return@collect
+                if (current.readyUri != null) return@collect
+                val task = tasks.firstOrNull { it.id == current.mediaKey }
+                _prepare.value = when {
+                    task == null -> current.copy(
+                        progress = null,
+                        error = "这个任务不在队列里了（可能被清空），请重新发起"
+                    )
+                    task.state == com.imagedge.camera.data.model.DownloadState.DONE &&
+                        task.savedUri != null -> current.copy(readyUri = task.savedUri)
+                    task.state == com.imagedge.camera.data.model.DownloadState.FAILED ->
+                        current.copy(progress = null, error = task.errorMessage ?: "下载失败")
+                    else -> current.copy(progress = task.progress, error = null)
+                }
+            }
+        }
+    }
+
+    /**
+     * 编辑/分享前先把原图落到相册。
+     *
+     * 已经存过就直接继续，不再传一遍；没存过才入队。入队失败（落库没受理）
+     * 立刻把原因写进准备态，而不是让用户对着进度条等一个不会来的结果。
+     */
+    fun requestLocalCopy(item: MediaItem, intent: ViewerIntent) {
+        val already = savedUriOf(item)
+        if (already != null) {
+            _prepare.value = PrepareState(intent, item.mediaId, readyUri = already)
+            return
+        }
+        _prepare.value = PrepareState(intent, item.mediaId, progress = 0)
+        viewModelScope.launch {
+            if (!downloadManager.enqueueAllAwait(listOf(item))) {
+                _prepare.value = PrepareState(
+                    intent, item.mediaId,
+                    error = "加入下载队列失败（可能是存储不可用），原图没有开始传"
+                )
+            }
+        }
+    }
+
+    /** 取消只结束准备：pager 位置、已加载的预览都不动（设计 §4.4） */
+    fun cancelPrepare() {
+        _prepare.value = null
+    }
+
+    /** 界面消费「原图已就绪」事件（一次性，避免重组重复打开编辑器） */
+    fun consumeReadyUri(): Pair<Uri, ViewerIntent>? {
+        val current = _prepare.value ?: return null
+        val uri = current.readyUri ?: return null
+        _prepare.value = null
+        return uri to current.intent
+    }
+
+    /** 已落盘项的 thumbKey → 相册 Uri（「已保存到手机」标记与编辑/分享能否直接走） */
+    fun savedUrisFlow(): StateFlow<Map<String, Uri>> = downloadManager.tasks
+        .map { tasks ->
+            tasks.asSequence()
+                .filter { it.savedUri != null }
+                .associate { it.id to it.savedUri!! }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /** 这张是否已经落在相册里（决定「已保存到手机」标记与编辑/分享能不能直接走） */
+    fun savedUriOf(item: MediaItem): Uri? =
+        downloadManager.tasks.value.firstOrNull { it.id == item.mediaId }?.savedUri
 
     override fun onCleared() {
         File(context.cacheDir, VIDEO_CACHE_DIRECTORY).listFiles()

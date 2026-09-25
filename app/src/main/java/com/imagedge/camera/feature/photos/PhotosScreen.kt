@@ -41,6 +41,8 @@ import com.imagedge.camera.data.remote.ChannelConnectionState
 import com.imagedge.camera.data.transfer.TransferScope
 import com.imagedge.camera.navigation.BottomSlotHost
 import com.imagedge.camera.navigation.BottomSlotOwner
+import com.imagedge.camera.domain.media.mediaId
+import com.imagedge.camera.domain.media.MediaId
 import com.imagedge.camera.navigation.LocalNavClearance
 import com.imagedge.camera.ui.components.AlbumGridSkeleton
 import com.imagedge.camera.ui.components.AppChipRow
@@ -89,7 +91,7 @@ private const val AWAITING_GUIDE_ID = "photos-await-camera-selection-v1"
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PhotosScreen(
-    onOpenViewer: (Int) -> Unit = {},
+    onOpenViewer: (MediaId) -> Unit = {},
     onOpenTransfer: () -> Unit = {},
     onGoConnect: () -> Unit = {},
     snackbarController: SnackbarController,
@@ -326,7 +328,7 @@ fun PhotosScreen(
                                         savedLocally = item.thumbKey in savedKeys,
                                         onClick = {
                                             if (selectionMode) viewModel.toggleSelect(item)
-                                            else onOpenViewer(items.indexOf(item))
+                                            else onOpenViewer(item.mediaId)
                                         },
                                         onLongClick = {
                                             selectionMode = true

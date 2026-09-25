@@ -10,6 +10,38 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Added / 新增
 
+**批次 G（查看器：设计 §4.4 / §8.1）**
+
+- 查看器从 `feature/photos` 搬进自己的包 `feature/viewer`（§7 的包归属），
+  并拆成 `ViewerRoute`（拿 VM、收状态、接导航）+ `ViewerScreen(state, onAction)`（纯展示）
+- **导航不再传列表下标**：路由改 `photo_viewer/{mediaId}`，mediaId 就是现成的指纹
+  `channelKey|大小|文件名`（`domain/media/MediaId.kt`，3 条单测）。相册后台刷新过、
+  或进程重建后会话失效时解析不出位置，界面显示「相机内容已更新，请返回重新选择」，
+  **不回退到第 0 张**——那等于把用户没点开的照片说成他点的那张
+- 底部动作补到设计要的三个：保存到手机 / 编辑 / 分享（原来只有下载）。编辑与分享
+  永远要相册里的**原图**：没落盘时点它们进入「需先保存到手机」的准备流程（进度来自队列本身，
+  不另开一条下载），成功后继续原意图；取消只结束准备，翻页位置与已加载预览都不动
+- 分享复用既有导出面板，不在查看器里另拼一个 ACTION_SEND（§7「不重复创建」）
+- 顶部补页码「第 N / M 张」与「相机预览 / 已保存到手机」标记；单击显隐工具，
+  画面本身带「显示工具」语义动作，读屏与系统返回在工具隐藏时仍然可达；双指缩放 1–4 倍
+
+**页面与结构重构 · 批次 F（清理与走查）**
+
+- 清掉批次 A–E 留下的无引用代码：`SettingsViewModel` 里 `manualConnect` 残废后不再需要的
+  `CameraRepository` / `ConnectionStateHolder` 依赖、`CameraControlViewModel.disconnect()`
+  （只翻一个 `isConnected`，既不停采集也不停 BLE，留着就是下一个调用点的坑）、
+  `CameraWifiManager.getWifiNetworkInterface()`（SSDP 清除后的诊断残留）
+- 批次 D/E 自己写出来又没用上的两处一并删除：`sessionFailureIsTimeout`、`continueFromPrepare`
+- 6 条孤儿字符串（`qr_permissions_required`、三条 `transfer_scope_*`、`settings_pick_dir`、
+  `settings_section_permission`）
+- 核对「两个连接状态是不是重复状态源」：**不是**，也不该合并——UPnP 通道的
+  `connectionState` 恒为 `DISCONNECTED`（已知坑 6），拿它当「有没有连上」会误杀 UPnP 下载。
+  结论写进 `docs/architecture.md`，避免下一位再判一次
+- 走查（imagede AVD，无相机）：四个一级 Tab、连接向导、照片标题尾部进传输页、
+  创作进编辑调节并 SAF 选图保存副本——全程无崩溃、无 ANR、无死路
+- 旧骨架 `AppPage` / `PageHeader` **保留**：还有三个编辑器在用，删了就是双迁移
+  （批次 E 的「先做一个代表页面」规矩）
+
 **页面与结构重构 · 批次 E 第二刀（编辑器骨架）**
 
 - 新增 `ui/layout/EditorFrame.kt`：设计 §4.7 的编辑器骨架（返回/标题/重置 → 预览 → 工具区 →

@@ -61,7 +61,14 @@ object Route {
     /** 遥控拍摄 */
     const val REMOTE = "remote"
 
-    const val PHOTO_EDIT = "photo_edit"
+    /**
+     * 照片调整。uri 可空：从创作 Tab 进来是「自己选图」，从查看器进来是「就编辑这一张」。
+     * 传的一律是**已落盘的原图** Uri，不是查看器里的预览位图（设计 §4.4）。
+     */
+    const val PHOTO_EDIT_PATTERN = "photo_edit?uri={uri}"
+
+    fun photoEdit(uri: android.net.Uri? = null) =
+        if (uri == null) "photo_edit" else "photo_edit?uri=${android.net.Uri.encode(uri.toString())}"
     const val LIVE_PHOTO = "live_photo"
     const val LIVE_TRIPTYCH = "live_triptych"
     const val EXIF_FRAME = "exif_frame"
@@ -71,8 +78,13 @@ object Route {
     /** 相机档案与参数预设 */
     const val PROFILES = "profiles"
 
-    /** 大图查看器（index = 相册列表起始位置） */
-    const val PHOTO_VIEWER = "photo_viewer/{index}"
+    /**
+     * 大图查看器（mediaId = MediaItem.thumbKey 指纹）。
+     *
+     * 不再传列表下标：相册在后台刷新一次，同一下标就是另一张照片（设计 §8.1）。
+     * 指纹里带 `|`，拼进路由前必须编码。
+     */
+    const val PHOTO_VIEWER = "photo_viewer/{mediaId}"
 
-    fun photoViewer(index: Int) = "photo_viewer/$index"
+    fun photoViewer(mediaId: String) = "photo_viewer/${android.net.Uri.encode(mediaId)}"
 }
