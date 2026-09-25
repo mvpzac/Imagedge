@@ -22,19 +22,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.ui.graphics.Color
-import com.imagedge.camera.ui.glass.LocalGlassLevel
-import com.imagedge.camera.ui.glass.LocalGlassBackdrop
-import com.imagedge.camera.ui.glass.glassSurface
-import com.imagedge.camera.ui.glass.rememberGlassLevel
-import com.imagedge.camera.ui.glass.warrantsBackdropCapture
+import androidx.compose.foundation.background
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -74,9 +65,12 @@ import com.google.zxing.common.BitArray
 import com.google.zxing.common.BitMatrix
 import com.imagedge.camera.R
 import com.imagedge.camera.core.permission.PermissionGate
+import com.imagedge.camera.ui.components.AppButton
+import com.imagedge.camera.ui.components.AppButtonType
+import com.imagedge.camera.ui.guidance.ContextHint
 import com.imagedge.camera.ui.theme.Radius
+import com.imagedge.camera.ui.theme.Spacing
 import com.imagedge.camera.core.common.AppLog
-import com.imagedge.camera.ui.feedback.SnackbarController
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import com.imagedge.camera.ui.components.AppLink
@@ -88,9 +82,10 @@ private const val TAG = "qrscan"
  * <pre>
  *     author : Imagedge Team
  *     time   : 2026/08/28
- *     desc   : 扫码连接（半屏弹窗内容）——扫描相机屏幕的连接二维码，解析 SSID/密码自动配网。
- *              宿主为主页的 ModalBottomSheet（对齐系统扫码半屏弹窗的交互形态）。
- *     version: 2.0
+ *     desc   : 扫码这一步——扫描相机屏幕的连接二维码，解析 SSID/密码自动配网。
+ *              批次 D 起宿主是连接向导的第 2 段（原来是主页上的 ModalBottomSheet）；
+ *              解码与 CameraX 绑定的实现原样保留，改的只是它在流程里的位置。
+ *     version: 3.0
  * </pre>
  */
 
@@ -161,7 +156,7 @@ private fun decodeOnce(
  * `ContextCompat.getMainExecutor(ctx)`，把全帧二值化 + 解码跑在**主线程**，
  * 单帧耗时可达数百毫秒 → 界面触摸无响应、系统 ANR、手机发烫。必须走后台单线程。
  *
- * 用**守护线程**且为进程级单例：不随弹窗销毁（避免二次打开时 RejectedExecutionException），
+ * 用**守护线程**且为进程级单例：不随离开这一步（避免二次打开时 RejectedExecutionException），
  * 守护线程不会阻止进程退出，因此也不需要在 DisposableEffect 里 shutdown。
  */
 private val qrAnalyzerExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
@@ -252,14 +247,24 @@ private class OtsuBinarizer(
 }
 
 /**
- * 扫码连接半屏弹窗内容（配网权限由 Manifest 声明，相机权限在此页内请求）。
- * @param onConnected 配网成功回调（宿主关闭弹窗，用户回主页点「连接」进入相机）
+ * 扫码这一步（批次 D）：取景窗 + 扫描框 + 状态行。
+ *
+ * 解码实现（zxing reader、Otsu 二值化、CameraX 绑定与节流）从半屏弹窗原样搬过来，
+ * 一行没改——那些注释里每一条都是真机踩出来的（二次打开黑屏、取景器上飘、
+ * decoding 标志不复位导致静默失效）。批次 D 换的是**它在流程里的位置**，不是它本身。
+ *
+ * 权限改成了「先讲理由，再按「允许扫码」」：设计 §4.2 明确不许黑屏等待，
+ * 而自动弹系统权限框等于把理由的时机交给系统。没拿到权限时不初始化 CameraX。
+ *
+ * @param onSessionStart 配网成功后发起会话连接
+ * @param onNeedOtherPaths 权限被拒 / 相机没出二维码时的出口
+ * @param onBack 回到「相机准备」一步
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun QrScanSheetContent(
-    onConnected: () -> Unit = {},
-    snackbarController: SnackbarController? = null,
+fun QrScanStep(
+    onSessionStart: () -> Unit,
+    onNeedOtherPaths: () -> Unit,
+    onBack: () -> Unit,
     viewModel: QrScanViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.state.collectAsStateWithLifecycle()
@@ -279,51 +284,49 @@ fun QrScanSheetContent(
             )
         }
     }
-    var permissionsGranted by remember {
-        mutableStateOf(
-            requiredPermissions.all { PermissionGate.isGranted(context, it) }
-        )
-    }
+    fun allGranted() = requiredPermissions.all { PermissionGate.isGranted(context, it) }
+    var permissionsGranted by remember { mutableStateOf(allGranted()) }
+    // 拒绝过一次和「永久拒绝」要给的不是同一个出口：
+    // 前者还能再问一次，后者系统框已经不再出现，只能去设置里开
+    var permissionDenied by remember { mutableStateOf(false) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) {
-        permissionsGranted = requiredPermissions.all { PermissionGate.isGranted(context, it) }
-    }
-
-    LaunchedEffect(requiredPermissions) {
-        val missing = requiredPermissions.filterNot { PermissionGate.isGranted(context, it) }
-        if (missing.isNotEmpty()) {
-            val ask = { permissionLauncher.launch(missing.toTypedArray()) }
-            if (snackbarController != null) {
-                PermissionGate.check(
-                    context,
-                    missing.first(),
-                    snackbarController
-                ) { ask() }
-            } else {
-                ask()
+        permissionsGranted = allGranted()
+        if (!permissionsGranted) {
+            permissionDenied = requiredPermissions.any {
+                !androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(
+                    context as android.app.Activity, it
+                )
             }
+        } else {
+            permissionDenied = false
         }
+    }
+    fun askPermissions() {
+        val missing = requiredPermissions.filterNot { PermissionGate.isGranted(context, it) }
+        if (missing.isEmpty()) permissionsGranted = true
+        else permissionLauncher.launch(missing.toTypedArray())
     }
 
     val reader = remember { newQrReader() }
-    // 持有 CameraX provider，弹窗关闭时必须 unbind：
+    // 持有 CameraX provider，离开这一步时必须 unbind：
     // 否则预览销毁后 ImageAnalysis 仍在跑，二次打开会因重复 bind 导致黑屏/绑定失败
     val cameraProviderRef = remember { AtomicReference<ProcessCameraProvider?>(null) }
-    // 弹窗存活标记：CameraX 是异步就绪的，若在就绪前就关闭弹窗，需阻止后续 bind
-    val sheetAlive = remember { AtomicBoolean(true) }
+    // 这一步仍在组合中：CameraX 是异步就绪的，若在就绪前就关闭弹窗，需阻止后续 bind
+    val stepAlive = remember { AtomicBoolean(true) }
 
-    // 连接成功后自动关闭弹窗（consumeSuccess 一次性，避免旋转重复触发）
+    // 配网成功后先让人看见「已连接」，再发起会话（consumeSuccess 一次性，避免旋转重复触发）
     LaunchedEffect(uiState) {
         if (viewModel.consumeSuccess()) {
             kotlinx.coroutines.delay(800)
-            onConnected()
+            onSessionStart()
         }
     }
 
     DisposableEffect(Unit) {
         onDispose {
-            sheetAlive.set(false)
+            stepAlive.set(false)
             runCatching { cameraProviderRef.getAndSet(null)?.unbindAll() }
             viewModel.release()
         }
@@ -359,6 +362,12 @@ fun QrScanSheetContent(
                         text = stringResource(R.string.qr_retry),
                         onClick = { viewModel.reset() }
                     )
+                    // 二维码本身不对（WEP、没带密码、不是 WiFi 格式）时，重扫一次
+                    // 大概率还是同一张码——所以这一步同时给「换条路」
+                    AppLink(
+                        text = stringResource(R.string.wizard_other_title),
+                        onClick = onNeedOtherPaths
+                    )
                 }
                 is QrScanUiState.Connecting -> QrStatusText(
                     text = stringResource(R.string.qr_connecting, s.ssid),
@@ -375,16 +384,12 @@ fun QrScanSheetContent(
             }
         }
 
-        // 取景区：正方形取景窗，整体缩小、贴顶放置（上移），底部留白与两侧均衡。
-        // 几何：左右缝 = (W-s)/2，底缝 = H-s；严格相等要求 s = 2H-W，
-        // 在 40% 弹窗高度下该解会小于 0（宽 > 两倍高），故取「短边正方形 × 0.9」
-        // 的近似：窗贴顶上移，底部留白自然增大，视觉重心均衡。
+        // 取景区：正方形取景窗。向导里这一步在可滚动列中，没有固定高度可分配，
+        // 所以按**屏宽**取正方形（原来是按弹窗剩余高度取短边）
         BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
+            modifier = Modifier.fillMaxWidth()
         ) {
-            val side = minOf(maxWidth, maxHeight) * 0.88f
+            val side = maxWidth * 0.88f
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
@@ -392,11 +397,50 @@ fun QrScanSheetContent(
                     .clip(RoundedCornerShape(Radius.Container))
             ) {
                 if (!permissionsGranted) {
-                    Text(
-                        text = stringResource(R.string.qr_permissions_required),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(16.dp)
-                    )
+                    // 不黑屏等权限：窗位留空，理由和动作写在同一块地方
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .padding(Spacing.L),
+                        verticalArrangement = Arrangement.spacedBy(Spacing.M)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.wizard_scan_permission_reason),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (permissionDenied) {
+                            Text(
+                                text = stringResource(R.string.wizard_permission_denied),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                        AppButton(
+                            text = stringResource(R.string.wizard_allow_scan),
+                            onClick = { askPermissions() },
+                            type = if (permissionDenied) AppButtonType.SECONDARY
+                            else AppButtonType.PRIMARY
+                        )
+                        if (permissionDenied) {
+                            AppLink(
+                                text = stringResource(R.string.wizard_open_settings),
+                                onClick = {
+                                    context.startActivity(
+                                        android.content.Intent(
+                                            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                            android.net.Uri.fromParts("package", context.packageName, null)
+                                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    )
+                                }
+                            )
+                        }
+                        AppLink(
+                            text = stringResource(R.string.wizard_other_title),
+                            onClick = onNeedOtherPaths
+                        )
+                    }
                 }
                 if (permissionsGranted) {
                 AndroidView(
@@ -412,9 +456,9 @@ fun QrScanSheetContent(
                         // 解码节流：单帧解码完成前丢弃后续帧，避免积压加速扫描
                         val decoding = AtomicBoolean(false)
                         val bound = AtomicBoolean(false)
-                        // 分析是否仍在运行（弹窗关闭后置 false，异步回调据此跳过后续处理）
+                        // 分析是否仍在运行（离开这一步后置 false，异步回调据此跳过后续处理）
                         val analyzing = AtomicBoolean(true)
-                        // 弹窗销毁时回收 executor 与 analyzing 标记，避免线程泄漏
+                        // 离开这一步时回收 executor 与 analyzing 标记，避免线程泄漏
                         previewView.addOnAttachStateChangeListener(
                             object : android.view.View.OnAttachStateChangeListener {
                                 override fun onViewAttachedToWindow(v: android.view.View) {}
@@ -431,14 +475,14 @@ fun QrScanSheetContent(
                         previewView.doOnLayout { v ->
                             if (v.width <= 0 || v.height <= 0) return@doOnLayout
                             if (!bound.compareAndSet(false, true)) return@doOnLayout
-                            if (!sheetAlive.get()) return@doOnLayout
+                            if (!stepAlive.get()) return@doOnLayout
                             AppLog.i(TAG, "PreviewView 就绪 ${v.width}x${v.height}，绑定相机")
                             val providerFuture = ProcessCameraProvider.getInstance(ctx)
                             providerFuture.addListener({
                                 val provider = runCatching { providerFuture.get() }.getOrNull() ?: return@addListener
                                 cameraProviderRef.set(provider)
-                                // 弹窗在相机就绪前已关闭（用户快速下滑）：立即解绑，避免空跑
-                                if (!sheetAlive.get()) {
+                                // 这一步在相机就绪前已离开（用户快速下滑）：立即解绑，避免空跑
+                                if (!stepAlive.get()) {
                                     runCatching { provider.unbindAll() }
                                     return@addListener
                                 }
@@ -479,7 +523,7 @@ fun QrScanSheetContent(
                                         decoded != null &&
                                         permissionsGranted &&
                                         analyzing.get() &&
-                                        sheetAlive.get()
+                                        stepAlive.get()
                                     ) {
                                         viewModel.onQrContent(decoded)
                                     }
@@ -509,10 +553,12 @@ fun QrScanSheetContent(
 
             // 扫码框（四角 L 形角标，中间透明对准二维码）：容器已是正方形，角标直接贴边
             QrScanFrame()
-            // 连接状态由取景框下方的状态文字提示，不在取景区叠加转圈动画
+            // 连接状态由取景框上方的状态行提示，不在取景区叠加转圈动画
             }
         }
 
+        ContextHint(text = stringResource(R.string.wizard_scan_hint))
+        AppLink(text = stringResource(R.string.wizard_back), onClick = onBack)
     }
 }
 
@@ -582,65 +628,5 @@ private fun QrScanFrame(modifier: Modifier = Modifier) {
             arcTo(androidx.compose.ui.geometry.Rect(w - 2 * r, h - 2 * r, w, h), 0f, 90f, false)
             lineTo(w - cornerLen, h)
         })
-    }
-}
-
-/**
- * 扫码连接半屏弹窗：从底部弹出/收回。ModalBottomSheet 默认动画为
- * tween + FastOutSlowInEasing（两端慢、中间快的加速度缓动），符合预期手感。
- * 宽度铺满，固定高度为屏幕的 40%，顶部圆角。
- * @param onDismiss 用户下滑/点外部关闭
- * @param onConnected 配网成功关闭后回调（宿主据此自动连接相机）
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun QrScanDialog(
-    onDismiss: () -> Unit,
-    onConnected: () -> Unit,
-    snackbarController: SnackbarController? = null,
-    viewModel: QrScanViewModel = hiltViewModel()
-) {
-    // 玻璃弹窗：Sheet 容器透明，内容底下铺玻璃（引用页面背景层，无递归风险）
-    val backdrop = LocalGlassBackdrop.current
-    val glassLevel = LocalGlassLevel.current
-    val useGlass = backdrop != null && glassLevel.warrantsBackdropCapture()
-    val sheetShape = RoundedCornerShape(topStart = Radius.Sheet, topEnd = Radius.Sheet)
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        // 内容高度固定 40%，禁用半展开中间态：确保下滑只走 dismiss，
-        // 不会停在 half-expanded 锚点导致内容被裁剪或产生相对位移
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = sheetShape,
-        containerColor = if (useGlass) {
-            Color.Transparent
-        } else {
-            BottomSheetDefaults.ContainerColor
-        }
-    ) {
-        Box(
-            modifier = Modifier.glassSurface(
-                backdrop = backdrop,
-                level = glassLevel,
-                shape = sheetShape,
-                surfaceColor = MaterialTheme.colorScheme.surfaceContainerLow
-            )
-        ) {
-        // 高度用父约束的 40%（而非 LocalConfiguration）：UI 锁定缩放下
-        // Configuration 的 dp 值不随 density 缩放，约束值才是缩放一致的
-        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(maxHeight * 0.4f)
-            ) {
-                QrScanSheetContent(
-                    onConnected = onConnected,
-                    snackbarController = snackbarController,
-                    viewModel = viewModel
-                )
-            }
-            }
-        }
     }
 }

@@ -2,6 +2,7 @@ package com.imagedge.camera.navigation
 
 import androidx.annotation.StringRes
 import com.imagedge.camera.R
+import com.imagedge.camera.feature.connection.ConnectPurpose
 import com.imagedge.camera.ui.components.Lucide
 
 /**
@@ -47,6 +48,15 @@ enum class TabDestination(
 object Route {
     /** 全局传输页（队列 + 记录），从任意页可达、返回原页 */
     const val TRANSFER = "transfer"
+
+    /**
+     * 连接向导。带「为什么连接」进去，成功页的继续按钮才说得出人话
+     * （「查看照片」/「进入遥控」，而不是一个含糊的「完成」）。
+     */
+    const val CONNECT_WIZARD = "connect/{purpose}"
+
+    /** purpose 缺省 = Browse：用户只是从工作台点「连接相机」，还没有单一目标 */
+    fun connectWizard(purpose: ConnectPurpose) = "connect/${purpose.name}"
 
     /** 遥控拍摄 */
     const val REMOTE = "remote"

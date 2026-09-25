@@ -27,20 +27,15 @@ import com.imagedge.camera.ui.components.ActionRow
 import com.imagedge.camera.ui.components.AppButton
 import com.imagedge.camera.ui.components.AppIconButton
 import com.imagedge.camera.ui.components.AppLink
-import com.imagedge.camera.ui.components.AppTextField
-import com.imagedge.camera.ui.components.AppButtonType
 import com.imagedge.camera.ui.components.GroupTitle
 import com.imagedge.camera.ui.components.Lucide
-import com.imagedge.camera.ui.feedback.SnackbarController
-import com.imagedge.camera.ui.guidance.GuideCard
-import com.imagedge.camera.ui.guidance.GuideContent
 import com.imagedge.camera.ui.guidance.HelpSheet
 import com.imagedge.camera.ui.layout.AppPageHeader
 import com.imagedge.camera.ui.layout.AppScreenFrame
 import com.imagedge.camera.ui.theme.SmileySansFamily
 import com.imagedge.camera.ui.theme.Spacing
+import com.imagedge.camera.feature.connection.ConnectPurpose
 import com.imagedge.camera.feature.connection.ConnectionViewModel
-import com.imagedge.camera.feature.connection.QrScanDialog
 
 /**
  * <pre>
@@ -69,22 +64,16 @@ private const val CONNECT_GUIDE_ID = "camera-connect-v1"
 fun CameraHubScreen(
     onOpenPhotos: () -> Unit = {},
     onOpenRemote: () -> Unit = {},
-    snackbarController: SnackbarController,
+    onOpenConnect: (ConnectPurpose) -> Unit = {},
     viewModel: ConnectionViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val capabilities by viewModel.capabilities.collectAsStateWithLifecycle()
     val transferActive by viewModel.transferActive.collectAsStateWithLifecycle()
 
-    // 扫码连接半屏弹窗（对齐系统扫码的交互形态）
-    var showQrSheet by rememberSaveable { mutableStateOf(false) }
-    // 手动连接展开 + IP 输入（留空则自动网关发现）
-    var showManual by rememberSaveable { mutableStateOf(false) }
-    var manualIp by rememberSaveable { mutableStateOf("") }
     var showHelp by rememberSaveable { mutableStateOf(false) }
 
     val connected = state.phase == ConnectionPhase.CONNECTED
-    val isConnecting = state.phase == ConnectionPhase.CONNECTING
 
     AppScreenFrame(
         topBar = {
@@ -131,90 +120,37 @@ fun CameraHubScreen(
                 verticalArrangement = Arrangement.spacedBy(Spacing.M)
             ) {
                 GroupTitle(stringResource(R.string.home_ask))
-                // 同级、同表面：不给任何一个入口加 PRIMARY 强度，避免替用户做选择
+                // 同级、同表面：不给任何一个入口加 PRIMARY 强度，避免替用户做选择。
+                // 批次 D：没连上时点它不是「按不动」也不是被自动弹去连接，而是带着目标
+                // 进连接向导，成功后正好落回这件事（设计 §2「传照片→连接向导或照片」）
                 ActionRow(
                     title = stringResource(R.string.home_task_photos),
                     description = if (connected)
-                        stringResource(R.string.home_task_photos_desc) else null,
+                        stringResource(R.string.home_task_photos_desc)
+                    else stringResource(R.string.home_task_need_camera),
                     icon = Lucide.Download,
-                    enabled = connected,
-                    disabledReason = stringResource(R.string.home_task_need_camera),
-                    onClick = onOpenPhotos
+                    onClick = { if (connected) onOpenPhotos else onOpenConnect(ConnectPurpose.Photos) }
                 )
                 ActionRow(
                     title = stringResource(R.string.home_task_remote),
                     description = if (connected)
-                        stringResource(R.string.home_task_remote_desc) else null,
+                        stringResource(R.string.home_task_remote_desc)
+                    else stringResource(R.string.home_task_need_camera),
                     icon = Lucide.Camera,
-                    enabled = connected,
-                    disabledReason = stringResource(R.string.home_task_need_camera),
-                    onClick = onOpenRemote
+                    onClick = { if (connected) onOpenRemote else onOpenConnect(ConnectPurpose.Remote) }
                 )
             }
 
-            // 次级连接入口：批次 D 之前保持可达，但不与上面的任务入口抢层级
             if (!connected) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(Spacing.S)
-                ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.L)) {
-                        AppLink(
-                            text = stringResource(R.string.home_btn_qr),
-                            onClick = { showQrSheet = true }
-                        )
-                        AppLink(
-                            text = stringResource(R.string.home_btn_manual),
-                            onClick = { showManual = !showManual }
-                        )
-                    }
-                    if (showManual) {
-                        AppTextField(
-                            value = manualIp,
-                            onValueChange = { manualIp = it },
-                            label = stringResource(R.string.settings_ip_label)
-                        )
-                        Text(
-                            text = stringResource(R.string.home_manual_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        AppButton(
-                            text = stringResource(R.string.home_manual_connect),
-                            onClick = { viewModel.connect(manualIp.ifBlank { null }) },
-                            enabled = !isConnecting,
-                            type = AppButtonType.SECONDARY
-                        )
-                    }
-                }
-            }
-
-            // 引导卡：不透明普通表面，且「已知道了」按机型记忆，不重复骚扰
-            if (!connected && viewModel.shouldShowGuide(CONNECT_GUIDE_ID)) {
-                GuideCard(
-                    guide = GuideContent(
-                        id = CONNECT_GUIDE_ID,
-                        locationLabel = stringResource(R.string.home_guide_on_camera),
-                        title = stringResource(R.string.home_guide_title),
-                        body = stringResource(R.string.home_guide_body),
-                        actionLabel = stringResource(R.string.home_guide_dismiss)
-                    ),
-                    onAction = { viewModel.dismissGuide(CONNECT_GUIDE_ID) }
+                // 原来这里是「扫码连接 / 手动连接」两个文字入口加一段内联 IP 输入框，
+                // 扫码还是半屏弹窗——三样东西说的是同一件事，且都只到「发起连接」为止。
+                // 批次 D 把它们收进向导：这里只留一条路，进去以后再分扫码/其他
+                AppLink(
+                    text = stringResource(R.string.wizard_title),
+                    onClick = { onOpenConnect(ConnectPurpose.Browse) }
                 )
             }
         }
-    }
-
-    if (showQrSheet) {
-        QrScanDialog(
-            onDismiss = { showQrSheet = false },
-            onConnected = {
-                showQrSheet = false
-                // 扫码配网成功后自动连接相机（无需再手动点「连接」）
-                viewModel.connect()
-            },
-            snackbarController = snackbarController
-        )
     }
 
     if (showHelp) {

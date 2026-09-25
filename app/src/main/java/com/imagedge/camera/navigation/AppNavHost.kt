@@ -6,9 +6,12 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.navArgument
 import com.imagedge.camera.feature.photos.PhotosScreen
 import com.imagedge.camera.feature.photos.PhotoViewerScreen
 import com.imagedge.camera.feature.camera.CameraHubScreen
+import com.imagedge.camera.feature.connection.ConnectWizardScreen
+import com.imagedge.camera.feature.connection.ConnectPurpose
 import com.imagedge.camera.feature.control.RemoteShootingScreen
 import com.imagedge.camera.feature.create.CreateHubScreen
 import com.imagedge.camera.feature.transfer.TransferScreen
@@ -60,7 +63,10 @@ fun AppNavHost(
                 // 任务入口直达目标页，而不是绕一圈「首页上的连接卡」
                 onOpenPhotos = { navController.selectTab(TabDestination.PHOTOS) },
                 onOpenRemote = { navController.openSubDestination(Route.REMOTE) },
-                snackbarController = snackbarController
+                // 没连上时任务入口带目标进向导；向导成功后再落回那件事
+                onOpenConnect = { purpose ->
+                    navController.openSubDestination(Route.connectWizard(purpose))
+                }
             )
         }
         // 照片 TAB 直接就是照片页：中枢那两张入口卡只是把「换个范围」伪装成「换一页」，
@@ -69,7 +75,11 @@ fun AppNavHost(
             PhotosScreen(
                 onOpenViewer = { index -> navController.openSubDestination(Route.photoViewer(index)) },
                 onOpenTransfer = { navController.openSubDestination(Route.TRANSFER) },
-                onGoConnect = { navController.selectTab(TabDestination.CAMERA) },
+                // 「不跳回首页」（设计 §2）：照片页的断线空态就地给一条连接的路，
+                // 而不是把用户弹去相机 Tab 让他自己找入口
+                onGoConnect = {
+                    navController.openSubDestination(Route.connectWizard(ConnectPurpose.Photos))
+                },
                 snackbarController = snackbarController,
                 bottomSlot = bottomSlot
             )
@@ -117,6 +127,33 @@ fun AppNavHost(
             RemoteShootingScreen(
                 onBack = { navController.popBackStack() },
                 snackbarController = snackbarController
+            )
+        }
+        composable(
+            route = Route.CONNECT_WIZARD,
+            arguments = listOf(
+                navArgument("purpose") {
+                    defaultValue = ConnectPurpose.Browse.name
+                    nullable = false
+                }
+            )
+        ) { entry ->
+            val purpose = runCatching {
+                ConnectPurpose.valueOf(entry.arguments?.getString("purpose").orEmpty())
+            }.getOrDefault(ConnectPurpose.Browse)
+            ConnectWizardScreen(
+                purpose = purpose,
+                onBack = { navController.popBackStack() },
+                // 成功页的继续按钮：先把向导从回退栈摘掉，再去目标——
+                // 留着它，用户在照片页按返回会掉回一个已经连接完成的向导
+                onOpenPhotos = {
+                    navController.popBackStack()
+                    navController.selectTab(TabDestination.PHOTOS)
+                },
+                onOpenRemote = {
+                    navController.popBackStack()
+                    navController.openSubDestination(Route.REMOTE)
+                }
             )
         }
         composable(Route.TRANSFER) {

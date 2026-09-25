@@ -10,6 +10,53 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Added / 新增
 
+**页面与结构重构 · 批次 D（连接流程）**
+
+- 新增 `feature/connection/ConnectWizardScreen.kt`：连接是一条**完整子流程**，不是主页上的
+  一个半屏弹窗。三段步骤头（相机准备 / 手机连接 / 确认连接），扫码降为其中一步
+- 新增 `feature/connection/ConnectWizard.kt`（纯函数阶段机）：`stepsOf` 把「加入热点 /
+  连接服务 / 确认可用能力」三条步骤从真实信号算出来，**不画百分比**——PTP 握手与 0x9209
+  读取都是单次阻塞往返，没有可线性化的进度来源；`exitsOf` 保证权限拒绝、相机没出二维码、
+  手机已连别的 Wi-Fi、配网超时、用户取消这五种情况各有一个**能点**的出口
+- 会话连上但 0x9209 没读回来时显示「未知」而不是失败：把一次超时报成红色失败，
+  用户下一步做的就是重连，而重连正是会让相机端句柄全部失效的那个动作（已知坑 14）
+- 「其他连接方式」收两条：手机已在相机热点上直接连、手动 IP。两者都**不发起配网请求**，
+  所以 Wi-Fi 那一步显示为「不适用」而不是已完成。手动 IP 的格式校验从原来那份没人调用的
+  设置页实现里搬进纯函数并补了单测，写错的地址当场说明，不再丢给 socket 等一个读不懂的超时
+- 扫码实现原样保留（zxing reader / Otsu 二值化 / CameraX 绑定与节流一行没动），只换宿主。
+  权限改成先讲理由再按「允许扫码」，不黑屏等待；没拿到权限不初始化 CameraX；
+  拒绝后同屏给「其他连接方式」与「打开系统设置」
+- 相机工作台的「扫码连接 / 手动连接」两个文字入口加内联 IP 输入框收成一条「连接相机」；
+  两个任务入口不再禁用，没连上时带着目标进向导，成功后正好落回那件事（设计 §2）
+- 照片页的断线空态不再把用户弹回相机 Tab，就地进向导（§2「显示对应修复动作，不跳回首页」）
+- 合并重复的目标上下文：相机准备这段说明原来在三处各写一遍（状态卡副行、引导卡、
+  帮助面板步骤），现在引导卡搬进向导的准备步，工作台只留状态卡一行事实 + 按需的帮助面板
+- 删除 `SettingsViewModel.manualConnect` / `ManualConnectState`（设置页从来没有连接 UI，
+  那份实现零调用）与孤儿字符串 `home_btn_qr` / `home_btn_manual` / `home_btn_qr_desc`
+
+**页面与结构重构 · 批次 C 第二刀（传输数据层与四个界面能力）**
+
+- `download.db` v2 → v3：任务行补 `state`/`progress`/`errorMessage`/`savedUri`/`batchId`/
+  `failureViewed`，记录行补 `channelKey`/`handle`/`photoType`/`captureDate`/`savedUri`/
+  `errorMessage`。只用 `ALTER TABLE ADD COLUMN`，不重建表、不清库
+- `download()` 的 finally **不再删行**：一次传输的结局写回同一行，删除时机只剩「取消」与「清空」。
+  写入包在 `NonCancellable + queueMutationMutex` 里——下载协程是被取消才走到 finally，
+  那里任何普通挂起都会直接抛出，结局就永远进不了库
+- 一次提交算一批（`batchId` 在入队互斥锁内取库里最大值 +1）；重启时只有当时未完成的行重新排队，
+  完成/失败按账目原样恢复，**没有自动重试**
+- 传输页顶部批次摘要「已保存 N 项，M 项未完成」+ 一键重试未完成项；记录行主动作「查看」
+  只在拿得到真 Uri 时提供，打不开时分两种原因如实说（没有应用认领这个格式 → 给分享；
+  系统读不到这份文件 → 只给位置，分享出去同样是空的）
+- 新增全局 `TransferMiniBar`：只显示活动任务或本批**尚未看过**的失败，无任务即消失；
+  与悬浮导航叠放（设计 §8.3），选择态整摞让位。`bottomLayoutOf` 是全应用唯一决定
+  「这一帧底部画什么」的地方，`BottomSlotOwner.TransferMiniBar` 因此删掉——小条是派生状态，
+  不是页面占位，让它也来 claim 会多出「谁挤掉了、何时还」的状态
+- `DownloadTask` 现在自带 `mediaItem`（`id`/`filename`/`sizeBytes` 改为派生），重试不再依赖
+  相册那份可能已经换了范围的列表；零调用方的 `retry(task, item)` 删除
+- 「清空记录」仍然只清表：实测清空后 MediaStore 那条记录与磁盘上的文件都在
+- 实测修掉两个自己写出来的 bug：取消会给每次取消写一条失败记录（重构时丢了
+  `if (!cancelled)`）；`cancelAllActive` 逐条 `cancel` 是 O(n²)，15 000 条时主线程 ANR
+
 **页面与结构重构 · 批次 C（照片与传输）**
 
 - 照片 Tab 直接就是照片页：删掉 `AlbumHubScreen` 与 `album_selection` / `album_full_card` 两条子路由。

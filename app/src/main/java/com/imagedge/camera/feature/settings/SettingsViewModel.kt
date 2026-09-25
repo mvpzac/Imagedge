@@ -27,16 +27,12 @@ import javax.inject.Inject
  * <pre>
  *     author : Imagedge Team
  *     time   : 2026/08/28
- *     desc   : 设置页——主题外观（持久化）、手动 IP 连接、下载信息、关于。
+ *     desc   : 设置页——主题外观（持久化）、下载信息、关于。
+ *              手动 IP 连接原来在这里有一份**没人调用**的实现（批次 D 删除）：
+ *              设置页从来没有连接 UI，那条路后来收进了连接向导的「其他连接方式」。
  *     version: 1.0
  * </pre>
  */
-data class ManualConnectState(
-    val connecting: Boolean = false,
-    val message: String? = null,
-    val connected: Boolean = false
-)
-
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -158,41 +154,5 @@ class SettingsViewModel @Inject constructor(
         // 先持久化再震动：开→关时震动会被 Haptics 的应用开关闸拦截（符合预期，关闭后不再震）；不要调换顺序
         haptics.setEnabled(enabled)
         haptics.click()
-    }
-
-    private val _manual = MutableStateFlow(ManualConnectState())
-    val manual: StateFlow<ManualConnectState> = _manual.asStateFlow()
-
-    /** 手动 IP 连接（AP 模式下网关发现的兜底路径；相机固定 192.168.122.1） */
-    fun manualConnect(host: String) {
-        val ip = host.trim()
-        if (_manual.value.connecting) return
-        if (!ip.matches(Regex("\\d{1,3}(\\.\\d{1,3}){3}"))) {
-            _manual.value = ManualConnectState(message = "IP 格式不正确（示例 192.168.122.1）")
-            return
-        }
-        viewModelScope.launch {
-            _manual.value = ManualConnectState(connecting = true)
-            stateHolder.update { ConnectionState(ConnectionPhase.CONNECTING) }
-            try {
-                val result = repository.connect(ip)
-                stateHolder.update {
-                    ConnectionState(
-                        phase = ConnectionPhase.CONNECTED,
-                        channelType = result.channelType,
-                        cameraModel = result.identity.model
-                    )
-                }
-                _manual.value = ManualConnectState(
-                    connected = true,
-                    message = "已连接 ${result.identity.model}（${result.channelType}）"
-                )
-            } catch (e: Exception) {
-                stateHolder.update {
-                    ConnectionState(ConnectionPhase.ERROR, errorMessage = e.message ?: "连接失败")
-                }
-                _manual.value = ManualConnectState(message = "连接失败：${e.message}")
-            }
-        }
     }
 }

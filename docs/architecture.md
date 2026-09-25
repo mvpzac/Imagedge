@@ -97,7 +97,12 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
   `guideId + version + 机型` 判定，且「已看过」与「任务成功过」是两条独立记录。
 - **相册刷新**：事件流（`StoreAdded/Removed/ObjectAdded`）触发即时静默刷新，
   4 秒轮询兜底；`MediaSessionCache` 让相册与二级页（大图/编辑）共享列表。
-- **配网**：`QrScanViewModel` → `CameraWifiManager.connectToCameraHotspot`（WifiNetworkSpecifier）。
+- **配网与连接向导（重构批次 D）**：`feature/connection/ConnectWizardScreen` 是一条完整子流程
+  （相机准备 → 手机连接 → 确认连接），扫码只是其中一步——原来它是主页上的一个半屏弹窗，
+  权限框和手动 IP 又各自叠在别的层上。阶段与步骤全部由 `ConnectWizard.kt` 的纯函数
+  （`stepsOf` / `exitsOf` / `hotspotAfter` / `parseManualHost`）从真实信号算出来，
+  **不画百分比**，且五种走不通的情况各有一个能点的出口。
+  `QrScanViewModel` → `CameraWifiManager.connectToCameraHotspot`（WifiNetworkSpecifier）这条实现未动。
   关键约束见下节。
 
 ## 线程与可靠性
@@ -111,12 +116,15 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
 ## 导航
 
 ```
-主页 TAB ─ 连接卡片 + 扫码连接(半屏弹窗) + 遥控拍摄入口
-相册 TAB ─ 中枢（零加载）：1 相册查看 / 2 相册传输(下载队列) / 3 相册编辑(LUT)
-设置 TAB ─ 外观(主题) / LUT 管理 / 下载目录 / 相机档案与预设 / 手动 IP / 关于
+相机 TAB ─ 状态卡 + 两个同级任务入口 + 一条「连接相机」
+照片 TAB ─ 直接是照片页（范围行 / 网格 / 选择态底栏），标题尾部「传输」
+创作 TAB ─ 四个工具入口（编辑调节 / 边框水印 / 视频转动态 / LIVE 三拼）
+设置 TAB ─ 外观(主题) / LUT 管理 / 下载目录 / 权限与使用帮助 / 相机档案与预设 / 关于
+子页     ─ 连接向导(扫码为其中一步) / 传输页 / 遥控 / 查看器 / 各编辑器
 ```
 
-所有二级页面隐藏底部 TAB，左上角返回图标。
+所有二级页面隐藏底部 TAB，左上角返回图标。四个一级 Tab 之间切换保留各自状态；
+底栏画什么由 `navigation/BottomSlot.kt` 的 `bottomLayoutOf` 一处决定。
 
 ## 关键类速查
 
