@@ -75,10 +75,20 @@ class TransferViewModel @Inject constructor(
     val history: StateFlow<List<DownloadHistoryEntity>> = historyDao.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    /** 本批次摘要（设计 §4.5）。规则在 batchSummaryOf 里，是纯函数，有单测 */
+    /**
+     * 本批次摘要（设计 §4.5）。规则在 batchSummaryOf 里，是纯函数，有单测。
+     *
+     * 初值**不能是 null**：摘要卡片是列表的第一项。第一帧没有它、下一帧才插进来时，
+     * LazyColumn 把视口锚在「当前第一项」（也就是传输策略）上，刚插进来的摘要就被顶到
+     * 屏幕上方——冷启动进传输页看不到批次数字（实测如此）。
+     */
     val batchSummary: StateFlow<TransferBatchSummary?> = downloadManager.tasks
         .map { batchSummaryOf(it) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            batchSummaryOf(downloadManager.tasks.value)
+        )
 
     private val _notice = MutableStateFlow<TransferNotice?>(null)
     val notice: StateFlow<TransferNotice?> = _notice.asStateFlow()
