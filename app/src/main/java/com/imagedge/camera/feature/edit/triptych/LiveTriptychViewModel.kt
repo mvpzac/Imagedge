@@ -1,4 +1,4 @@
-package com.imagedge.camera.feature.edit
+package com.imagedge.camera.feature.edit.triptych
 
 import android.content.Context
 import android.graphics.Bitmap

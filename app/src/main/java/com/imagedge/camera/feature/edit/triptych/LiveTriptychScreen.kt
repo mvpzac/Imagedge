@@ -1,4 +1,4 @@
-package com.imagedge.camera.feature.edit
+package com.imagedge.camera.feature.edit.triptych
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest

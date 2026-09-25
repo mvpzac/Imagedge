@@ -1,4 +1,4 @@
-package com.imagedge.camera.feature.edit
+package com.imagedge.camera.feature.edit.photo
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory

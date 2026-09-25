@@ -36,6 +36,7 @@ import com.imagedge.camera.R
 import com.imagedge.camera.data.model.CameraCapability
 import com.imagedge.camera.data.model.CapabilityState
 import com.imagedge.camera.data.model.ConnectionPhase
+import com.imagedge.camera.domain.camera.ConnectPurpose
 import com.imagedge.camera.navigation.LocalNavClearance
 import com.imagedge.camera.ui.components.ActionRow
 import com.imagedge.camera.ui.components.AppButton

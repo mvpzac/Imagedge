@@ -34,7 +34,7 @@ import com.imagedge.camera.ui.layout.AppPageHeader
 import com.imagedge.camera.ui.layout.AppScreenFrame
 import com.imagedge.camera.ui.theme.SmileySansFamily
 import com.imagedge.camera.ui.theme.Spacing
-import com.imagedge.camera.feature.connection.ConnectPurpose
+import com.imagedge.camera.domain.camera.ConnectPurpose
 import com.imagedge.camera.feature.connection.ConnectionViewModel
 
 /**

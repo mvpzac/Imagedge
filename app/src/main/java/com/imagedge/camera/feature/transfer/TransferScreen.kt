@@ -55,7 +55,7 @@ import com.imagedge.camera.data.transfer.ResumeMode
 import com.imagedge.camera.data.transfer.TransferBatchSummary
 import com.imagedge.camera.data.transfer.TransferPolicy
 import com.imagedge.camera.data.transfer.TransferSizeMode
-import com.imagedge.camera.feature.edit.PhotoEditScreen
+import com.imagedge.camera.feature.edit.photo.PhotoEditScreen
 import com.imagedge.camera.feature.share.ExportSettingsSheet
 import com.imagedge.camera.feature.share.ShareViewModel
 import com.imagedge.camera.ui.components.AppChipRow

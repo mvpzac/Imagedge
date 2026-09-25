@@ -1,4 +1,4 @@
-package com.imagedge.camera.feature.edit
+package com.imagedge.camera.feature.edit.photo
 
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult

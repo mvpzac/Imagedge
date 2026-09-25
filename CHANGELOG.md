@@ -10,6 +10,24 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Added / 新增
 
+**批次 I（设计 §7 包结构：先拆职责，不增加 Gradle 模块）**
+
+- `feature/edit` 按四个编辑器分包：`photo/`（编辑调节）、`frame/`（边框水印）、
+  `triptych/`（LIVE 三拼）、`video_to_motion/`（视频转 LIVE 图）。8 个文件 `git mv` + 包名与
+  引用改写，**不含行为改动**（`git diff` 只剩 package / import 行）
+- `ConnectPurpose` 从 `feature/connection/ConnectWizard.kt` 提到 `domain/camera/`：导航层
+  （`AppDestination` / `AppNavHost`）和相机工作台都要引用它，留在 feature 包里等于让
+  `navigation` 依赖某个 feature 的内部
+- `domain/` 只落地这两个真正跨页的概念（另一个是批次 G 的 `domain/media/MediaId.kt`）。
+  **`domain/transfer` 明确不建**：`TransferBatch` 的三个纯函数读的是 `data.model.DownloadTask`
+  （里面装着 `MediaItem`），把它搬进 domain 只多出一个类型、不多一条保证——`data/transfer`
+  已经是这条链的边界。设计 §7「domain 只收跨页面共享的概念」在这里按字面执行，不照抄目录树
+- 仍未做的一条：§8.7 的 `XxxRoute` / `XxxScreen` 拆分目前只有查看器完成，
+  其余页面还是一个 Screen 直接 `hiltViewModel()`
+
+实测：四个编辑器全部从创作 TAB 逐个打开（迁移后 `test` + `uiSpecCheck` + `lintDebug` +
+`assembleDebug` 全绿，173 单测不变）。
+
 **批次 H（其余三个编辑器迁 EditorFrame + 完成页结果面板）**
 
 - 新增 `ui/components/TaskResultPanel`（设计 §6）：完成页要说的三件事——**成没成、在哪、下一步**

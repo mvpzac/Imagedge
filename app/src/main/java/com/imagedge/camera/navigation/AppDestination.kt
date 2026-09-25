@@ -2,7 +2,7 @@ package com.imagedge.camera.navigation
 
 import androidx.annotation.StringRes
 import com.imagedge.camera.R
-import com.imagedge.camera.feature.connection.ConnectPurpose
+import com.imagedge.camera.domain.camera.ConnectPurpose
 import com.imagedge.camera.ui.components.Lucide
 
 /**
