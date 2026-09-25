@@ -201,6 +201,12 @@
     <string name="edit_title">相册编辑</string>
     <string name="edit_hub_livephoto_desc">选择视频导出为动态照片</string>
     <string name="edit_hub_edit_desc">裁剪、旋转、拉直 + 基础调色 + LUT 滤镜，导出按原分辨率并保留 EXIF</string>
+    <!-- 创作首页（设计 §4.7：标题就是 Tab 名，副标题说「拿手机里的素材就能开始」） -->
+    <string name="create_subtitle">选择手机素材开始</string>
+    <string name="edit_hub_triptych_title">LIVE 图三拼</string>
+    <string name="edit_hub_triptych_desc">3 张横屏实况图纵向无缝拼接为一张 9:16 LIVE 图，每段声音独立可控</string>
+    <string name="edit_hub_frame_title">边框水印</string>
+    <string name="edit_hub_frame_desc">品牌 LOGO + 相机参数（型号/焦距/快门/ISO）信息边框，EXIF 自动读取可手动修正</string>
     <string name="edit_pick_image">选择图片</string>
     <string name="edit_pick_hint">选择一张本机照片开始调色（更多滤镜可在设置 → LUT 管理导入）</string>
     <string name="edit_strength">强度</string>

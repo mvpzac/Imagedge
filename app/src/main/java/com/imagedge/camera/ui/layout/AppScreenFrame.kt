@@ -37,8 +37,8 @@ import com.imagedge.camera.ui.theme.UiSize
  * 普通页面的唯一安全区域所有者。
  *
  * 之前顶部 inset 被加了两次：根布局给 NavHost 外层补了一次 statusBars，
- * [com.imagedge.camera.ui.components.PageHeader] 自己又吃一次——所有带标题栏的二级页
- * 顶部都多出一条空隙。这里把所有权收在一处：top 只给 topBar，bottom + horizontal 给内容。
+ * 旧标题栏自己又吃一次——所有带标题栏的二级页顶部都多出一条空隙。
+ * 这里把所有权收在一处：top 只给 topBar，bottom + horizontal 给内容。
  *
  * 内容侧的内边距**在这里加完**，不往页面传 `PaddingValues`：
  * 实测过传参的写法会翻车——页面把 `padding(innerPadding)` 写在 `verticalScroll()` **之后**，
@@ -84,8 +84,9 @@ fun AppScreenFrame(
 /**
  * 新标题栏：不消费系统边距（由 [AppScreenFrame] 负责），高度只设下限。
  *
- * 与旧 [com.imagedge.camera.ui.components.PageHeader] 的区别就这两点；
- * 旧组件保留给尚未迁移的页面，观感一致（同一个返回钮、同一个标题字阶）。
+ * 与它取代的旧标题栏只差这两点：旧的不吃边距就无法嵌套，而这里由骨架统一给。
+ * 返回钮与标题字阶沿用同一套（[com.imagedge.camera.ui.components.HeaderBackButton]），
+ * 迁移前后看不出区别。
  *
  * @param large 一级入口页（相机/照片/创作/设置）用 headlineMedium，子页用 headlineSmall
  * @param actions 尾部动作槽。规范上**最多一个主要动作**，其余降级为文字动作

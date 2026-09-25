@@ -10,7 +10,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
@@ -37,7 +42,7 @@ import com.imagedge.camera.core.permission.PermissionGate
 import com.imagedge.camera.ui.components.IconBadge
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.LucideIcon
-import com.imagedge.camera.ui.components.PageHeader
+import com.imagedge.camera.ui.layout.AppPageHeader
 
 /**
  * <pre>
@@ -70,17 +75,21 @@ fun PermissionScreen(onBack: () -> Unit = {}) {
         AppPermissions.normal.filter { it.appliesTo(Build.VERSION.SDK_INT) }
     }
 
-    // 标题**不悬浮**：PageHeader 与正文在同一个可滚 Column 里，
-    // 下滑时标题随内容一起移出（用户要求取消权限页标题的固定效果）
+    // 标题**不悬浮**：AppPageHeader 与正文在同一个可滚 Column 里，
+    // 下滑时标题随内容一起移出（用户要求取消权限页标题的固定效果）。
+    // 状态栏让位仍留在滚动之外—— inset 进了滚动内容，往下滑正文就会压到状态栏上
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .windowInsetsPadding(
+                WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+            )
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp)
             .padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        PageHeader(
+        AppPageHeader(
             title = stringResource(R.string.permission_title),
             onBack = onBack
         )

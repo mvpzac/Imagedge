@@ -10,6 +10,32 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Added / 新增
 
+**批次 L（设计 §8.3 / §8.7 收尾：inset 只有一个所有者，工作台拆成 Route + Screen）**
+
+- `AppPage` 改成 `AppScreenFrame` 的**薄封装**。它原来自己拼 `Scaffold + PageHeader`，
+  并在 `padding(innerPadding)` 之后**又**加一次 `windowInsetsPadding(navigationBars)`——
+  底部让位被算两遍，滚到底时最后一行下面凭空多一条空白（§8.3 禁止的就是「两处都用」）。
+  相机档案页与创作页因此一起修好，不必把 800 行文件逐个展开；适配层只转发，不再持有 inset
+- 旧 `PageHeader` 的最后一处调用点（权限页——它的标题**故意**随内容滚走）迁到 `AppPageHeader`，
+  状态栏让位留在滚动之外：inset 若进了滚动内容，往下滑正文就会压到状态栏上。
+  `PageHeader` 已无引用，删掉，只留两套标题栏共用的 `HeaderBackButton`（文件随之改名）。
+  `docs/UI-SPEC.md` 里三处提到它的段落同步改掉，不留「旧组件保留给未迁移页面」这种已不成立的话
+- 创作首页：标题从「相册编辑」改成 Tab 名「创作」（同一个地方不该有两个名字），
+  补上设计要的副标题「选择手机素材开始」，最后一行按实测下发让位给悬浮导航；
+  四个入口的中文从代码搬进 `strings.xml`（原来两个用资源、两个硬编码在 Kotlin 里）
+- 相机工作台拆成 `CameraHubRoute`（拿 VM、收三个流）+ `CameraHubScreen(phase, cameraModel,
+  errorMessage, capabilities, transferActive, 四个回调)`。这一页先做是因为它 5 个值 1 个动作
+  就能说全，不需要再造一个 `CameraHubUiState` 去复制 `ConnectionViewModel` 已有的字段
+- **有意没做**：其余页面（照片 / 传输 / 向导 / 四个编辑器 / 设置）没有机械展开成 Route + Screen。
+  它们的状态不是一个数据类而是 8~11 个流，硬拆只有两种坏结果——Screen 收十几个参数
+  （§8.7 要的是 `Screen(state, onAction)`，不是参数堆），或在 VM 外面再造一个汇总状态类，
+  多一处需要跟真相同步的地方。§9 的节奏本来就是「每批先做一个代表页面，其余再迁移」
+
+实测（AVD）：创作 Tab（标题 / 副标题 / 四个入口 / 最后一行不被导航挡住）、相机档案页
+（标题栏与内容间距正常，滚到底不再多一条空白）、权限页（标题随内容滚走的行为保留）、
+工作台（拆分后四个入口与帮助面板照旧）。183 单测、`uiSpecCheck`、`lintDebug`、
+`assembleDebug` 全绿。
+
 **批次 M（设计 §10 验收矩阵：能到达的状态全过一遍）**
 
 AVD（1080×2400，无相机）上把 12 组状态里可到达的部分各跑了一遍，含浅色 / 深色 / 200% 字体 /

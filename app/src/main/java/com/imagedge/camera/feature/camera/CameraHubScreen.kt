@@ -21,6 +21,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.R
+import com.imagedge.camera.data.model.CameraCapabilities
 import com.imagedge.camera.data.model.ConnectionPhase
 import com.imagedge.camera.navigation.LocalNavClearance
 import com.imagedge.camera.ui.components.ActionRow
@@ -50,6 +51,34 @@ import com.imagedge.camera.feature.connection.ConnectionViewModel
 private const val CONNECT_GUIDE_ID = "camera-connect-v1"
 
 /**
+ * 相机工作台的接线（设计 §8.7）：拿 ViewModel、按生命周期收状态、把意图翻译成回调。
+ * 页面本体是下面的 `CameraHubScreen`，它不认识 ViewModel，也不认识 NavController。
+ */
+@Composable
+fun CameraHubRoute(
+    onOpenPhotos: () -> Unit = {},
+    onOpenRemote: () -> Unit = {},
+    onOpenConnect: (ConnectPurpose) -> Unit = {},
+    viewModel: ConnectionViewModel = hiltViewModel()
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val capabilities by viewModel.capabilities.collectAsStateWithLifecycle()
+    val transferActive by viewModel.transferActive.collectAsStateWithLifecycle()
+
+    CameraHubScreen(
+        phase = state.phase,
+        cameraModel = state.cameraModel,
+        errorMessage = state.errorMessage,
+        capabilities = capabilities,
+        transferActive = transferActive,
+        onOpenPhotos = onOpenPhotos,
+        onOpenRemote = onOpenRemote,
+        onOpenConnect = onOpenConnect,
+        onDisconnect = { viewModel.disconnect() }
+    )
+}
+
+/**
  * 相机工作台。
  *
  * 顺序照设计 §3.3 的线框：标题栏 → 状态卡 → 「你想做什么？」两个同级入口 →
@@ -62,18 +91,19 @@ private const val CONNECT_GUIDE_ID = "camera-connect-v1"
  */
 @Composable
 fun CameraHubScreen(
-    onOpenPhotos: () -> Unit = {},
-    onOpenRemote: () -> Unit = {},
-    onOpenConnect: (ConnectPurpose) -> Unit = {},
-    viewModel: ConnectionViewModel = hiltViewModel()
+    phase: ConnectionPhase,
+    cameraModel: String?,
+    errorMessage: String?,
+    capabilities: CameraCapabilities,
+    transferActive: Boolean,
+    onOpenPhotos: () -> Unit,
+    onOpenRemote: () -> Unit,
+    onOpenConnect: (ConnectPurpose) -> Unit,
+    onDisconnect: () -> Unit
 ) {
-    val state by viewModel.state.collectAsStateWithLifecycle()
-    val capabilities by viewModel.capabilities.collectAsStateWithLifecycle()
-    val transferActive by viewModel.transferActive.collectAsStateWithLifecycle()
-
     var showHelp by rememberSaveable { mutableStateOf(false) }
 
-    val connected = state.phase == ConnectionPhase.CONNECTED
+    val connected = phase == ConnectionPhase.CONNECTED
 
     AppScreenFrame(
         topBar = {
@@ -107,12 +137,12 @@ fun CameraHubScreen(
             )
 
             CameraStatusCard(
-                phase = state.phase,
-                cameraModel = state.cameraModel,
-                errorMessage = state.errorMessage,
+                phase = phase,
+                cameraModel = cameraModel,
+                errorMessage = errorMessage,
                 capabilities = capabilities,
                 transferActive = transferActive,
-                onDisconnect = { viewModel.disconnect() }
+                onDisconnect = onDisconnect
             )
 
             Column(

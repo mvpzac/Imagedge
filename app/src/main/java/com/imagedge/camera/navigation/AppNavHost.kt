@@ -10,7 +10,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.imagedge.camera.feature.photos.PhotosScreen
 import com.imagedge.camera.feature.viewer.ViewerRoute
-import com.imagedge.camera.feature.camera.CameraHubScreen
+import com.imagedge.camera.feature.camera.CameraHubRoute
 import com.imagedge.camera.feature.connection.ConnectWizardScreen
 import com.imagedge.camera.domain.camera.ConnectPurpose
 import com.imagedge.camera.feature.capture.RemoteShootingScreen
@@ -60,7 +60,7 @@ fun AppNavHost(
         )
     ) {
         composable(TabDestination.CAMERA.route) {
-            CameraHubScreen(
+            CameraHubRoute(
                 // 任务入口直达目标页，而不是绕一圈「首页上的连接卡」
                 onOpenPhotos = { navController.selectTab(TabDestination.PHOTOS) },
                 onOpenRemote = { navController.openSubDestination(Route.REMOTE) },

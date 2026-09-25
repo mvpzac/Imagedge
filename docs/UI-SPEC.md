@@ -40,7 +40,7 @@
    而不是只换颜色（色弱用户同样要能分辨）。
 
 4. **结构可预测**
-   同一层级的页面用同一骨架：`PageHeader → 内容（统一 16dp 边距、12/16 节奏）→ 主操作`。
+   同一层级的页面用同一骨架：`AppPageHeader → 内容（统一 16dp 边距、12/16 节奏）→ 主操作`。
    用户在 A 页学到的结构，在 B 页必须成立。
 
 5. **默认可达（Accessible by default）**
@@ -93,7 +93,7 @@
 | `displayLarge` | 48 | Medium | 56 | 首屏品牌字（仅首页/空态大标题） |
 | `headlineLarge` | 36 | Bold | 44 | 页面主标题 |
 | `headlineMedium` | 30 | Bold | 38 | 区块大标题 |
-| `headlineSmall` / `titleLarge` | 24 | Bold | 32 | `PageHeader` 标题、卡片组标题 |
+| `headlineSmall` / `titleLarge` | 24 | Bold | 32 | 子页标题（`AppPageHeader`）、卡片组标题 |
 | `titleMedium` / `titleSmall` | 16 | Medium | 24 | 卡片/列表项标题、行内强调 |
 | `bodyLarge` / `bodyMedium` / `bodySmall` | 16 / 14 / 14 | Regular | 24 / 22 / 20 | 正文与说明 |
 | `labelLarge` / `labelMedium` / `labelSmall` | 14 / 12 / 12 | Medium | 20 / 16 / 16 | 按钮、标签、角标 |
@@ -138,8 +138,10 @@
 
 1. **页面骨架**统一走 `AppScreenFrame`：它是**安全区域的唯一所有者**——top 只给标题栏，
    bottom + horizontal 只给内容；标题用 `AppPageHeader`（只设最小高度，不自己吃系统边距）。
-   旧的 `AppPage` / `PageHeader` 保留给尚未迁移的页面，**同一页只能有一套**：
-   外层再补一次 `statusBars` 就是所有二级页顶部多出一条空隙（批次 A 收口的就是这个）。
+   `AppPage` 保留给「标题 → 可滚动内容」这类标准二级页，但它**只是 `AppScreenFrame` 的薄封装**：
+   适配层不许持有第二份 inset 逻辑（旧实现在 `padding(innerPadding)` 之后又加一次
+   `windowInsetsPadding(navigationBars)`，滚到底时最后一行下面凭空多一条空白）。
+   旧的 `PageHeader` 已随最后一处调用点迁走而删除，只留下共用的 `HeaderBackButton`。
 2. **所有非沉浸页必须可滚动**。安全区内边距由 `AppScreenFrame` **自己加完**，不再往页面传
    `PaddingValues`：传参写法实测翻车过——页面把 `padding(innerPadding)` 写在 `verticalScroll()`
    **之后**，内边距就成了滚动内容的一部分，往下滚时正文直接压在大字标题上；
