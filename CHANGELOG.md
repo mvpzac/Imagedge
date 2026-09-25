@@ -10,6 +10,26 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Added / 新增
 
+**页面与结构重构 · 批次 E 第一刀（遥控）**
+
+- `feature/control` → `feature/capture`（含 `monitoring/` 子包与三份测试）
+- 新增 `CaptureAvailabilityBar`：**画面 / 快门 / 拍后保存** 分三行说，不再只显示「BLE 已连接/未连接」。
+  三件事来路不同（60152 推流、BLE 或 PTP 的 CAPTURE 能力、用户偏好 + 会话状态），
+  合成一个「可用/不可用」用户仍然不知道能不能拍
+- 新增 `CaptureAvailability.kt`（纯函数判定，13 条单测）：能力没读回来一律 `Unknown` 而不是
+  「不支持」（已知坑 14）；忙时快门是 `NotNow` 并写明「上一次拍摄还没结束」，与
+  ViewModel 的「忙时不叠加快门」同一口径——界面禁用与不发命令必须是同一件事
+- 录像按钮改为**只认相机 ff02 回报**（`recordActionOf` 四态）。原来只看蓝牙连上就给一个
+  「录像」切换，等于替相机假设当前是空闲态；没回报时明说「相机还没回报录像状态」
+- 主快门抽成 `ShutterControl`：72dp 圆形视觉（`UiSize.ShutterDiameter`）+ 短标签，
+  读屏的一次点击 = 按下 + 抬起。**手势体逐字照搬**，半按时序仍然只在
+  `CameraControlViewModel.runBleCapture()`，UI 里不出现拍摄序列（已知坑 22）
+- ISO/光圈/快门收进 `CaptureSettingsSheet` 底部面板：取景与快门是这一屏的主角，
+  参数平铺在快门下面时每次进遥控都要先滚过一屏参数。每行仍自带可写状态与不可调原因
+- 拍后保存的限制与结果改用常驻 `StatusBanner` + 「知道了」（设计 §4.6「不闪过」）。
+  原来是一行小字，靠下一次操作覆盖，用户读没读完完全看手速
+- 删除随迁移失效的 `control_btn_record` / `control_params_title` 两条字符串
+
 **页面与结构重构 · 批次 D（连接流程）**
 
 - 新增 `feature/connection/ConnectWizardScreen.kt`：连接是一条**完整子流程**，不是主页上的

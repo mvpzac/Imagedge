@@ -41,8 +41,8 @@ import com.imagedge.camera.data.profile.PresetItemStatus
 import com.imagedge.camera.data.profile.PresetParameters
 import com.imagedge.camera.data.profile.ProfileCapability
 import com.imagedge.camera.data.profile.RecentConnection
-import com.imagedge.camera.feature.control.IdentitySummary
-import com.imagedge.camera.feature.control.label
+import com.imagedge.camera.feature.capture.IdentitySummary
+import com.imagedge.camera.feature.capture.label
 import com.imagedge.camera.ui.components.AppButton
 import com.imagedge.camera.ui.components.AppButtonType
 import com.imagedge.camera.ui.components.AppLink

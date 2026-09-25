@@ -1,4 +1,4 @@
-package com.imagedge.camera.feature.control
+package com.imagedge.camera.feature.capture
 
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
@@ -39,7 +39,7 @@ import com.imagedge.camera.data.transfer.AutoSaveLedger
 import com.imagedge.camera.data.transfer.DownloadManager
 import com.imagedge.camera.data.transfer.TransferPolicy
 import com.imagedge.camera.data.transfer.TransferPolicyStore
-import com.imagedge.camera.feature.control.monitoring.ViewfinderSnapshotWriter
+import com.imagedge.camera.feature.capture.monitoring.ViewfinderSnapshotWriter
 import com.imagedge.camera.ui.feedback.Haptics
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -277,6 +277,17 @@ class CameraControlViewModel @Inject constructor(
     fun disconnectBle() = bleShutter.disconnect()
 
     /** 蓝牙权限被拒绝时给用户明确提示（避免静默失败） */
+    /**
+     * 关掉那条常驻结果说明。
+     *
+     * 设计 §4.6 要求「拍后保存限制与保存结果用 StatusBanner，不闪过」——不闪过就意味着
+     * 它得留在屏上直到用户主动收掉，所以这里需要一个真的能收掉的入口，
+     * 而不是等下一次操作把它覆盖掉（那会让用户以为消息又变成新结果）。
+     */
+    fun dismissMessage() {
+        _state.update { it.copy(message = null) }
+    }
+
     fun notifyBlePermissionDenied() {
         _state.update { it.copy(message = "蓝牙权限未授予，无法连接蓝牙遥控——请在系统设置中允许") }
     }

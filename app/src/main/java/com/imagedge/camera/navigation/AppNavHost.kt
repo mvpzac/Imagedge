@@ -12,7 +12,7 @@ import com.imagedge.camera.feature.photos.PhotoViewerScreen
 import com.imagedge.camera.feature.camera.CameraHubScreen
 import com.imagedge.camera.feature.connection.ConnectWizardScreen
 import com.imagedge.camera.feature.connection.ConnectPurpose
-import com.imagedge.camera.feature.control.RemoteShootingScreen
+import com.imagedge.camera.feature.capture.RemoteShootingScreen
 import com.imagedge.camera.feature.create.CreateHubScreen
 import com.imagedge.camera.feature.transfer.TransferScreen
 import com.imagedge.camera.feature.edit.ExifFrameScreen

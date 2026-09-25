@@ -1,4 +1,4 @@
-package com.imagedge.camera.feature.control.monitoring
+package com.imagedge.camera.feature.capture.monitoring
 
 import androidx.compose.ui.geometry.Rect
 import com.imagedge.camera.data.model.AspectMarker

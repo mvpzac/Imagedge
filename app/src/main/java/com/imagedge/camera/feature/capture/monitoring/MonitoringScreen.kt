@@ -1,4 +1,4 @@
-package com.imagedge.camera.feature.control.monitoring
+package com.imagedge.camera.feature.capture.monitoring
 
 import android.app.Activity
 import android.content.Context
@@ -54,8 +54,8 @@ import com.imagedge.camera.R
 import com.imagedge.camera.data.model.AspectMarker
 import com.imagedge.camera.data.model.GridMode
 import com.imagedge.camera.data.model.MonitoringSettings
-import com.imagedge.camera.feature.control.CameraControlViewModel
-import com.imagedge.camera.feature.control.IdentitySummary
+import com.imagedge.camera.feature.capture.CameraControlViewModel
+import com.imagedge.camera.feature.capture.IdentitySummary
 import com.imagedge.camera.ui.components.AppIconButton
 import com.imagedge.camera.ui.components.AppLink
 import com.imagedge.camera.ui.components.Lucide

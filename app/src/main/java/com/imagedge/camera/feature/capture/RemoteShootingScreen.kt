@@ -1,8 +1,7 @@
-package com.imagedge.camera.feature.control
+package com.imagedge.camera.feature.capture
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -14,13 +13,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -39,7 +36,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -60,6 +56,7 @@ import com.imagedge.camera.ui.theme.ViewerBackdrop
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.PageHeader
 import com.imagedge.camera.ui.components.StatusBanner
+import com.imagedge.camera.ui.guidance.ContextHint
 import com.imagedge.camera.ui.components.AppLink
 import com.imagedge.camera.ui.feedback.SnackbarController
 import com.imagedge.camera.data.ble.BleShutterState
@@ -70,10 +67,10 @@ import com.imagedge.camera.data.model.CameraCapability
 import com.imagedge.camera.data.model.CameraIdentity
 import com.imagedge.camera.data.model.CameraTransport
 import com.imagedge.camera.data.model.CapabilityState
-import com.imagedge.camera.feature.control.monitoring.MonitoringWorkstation
-import com.imagedge.camera.feature.control.monitoring.ViewportTransform
-import com.imagedge.camera.feature.control.monitoring.drawFrame
-import com.imagedge.camera.feature.control.monitoring.drawMarkers
+import com.imagedge.camera.feature.capture.monitoring.MonitoringWorkstation
+import com.imagedge.camera.feature.capture.monitoring.ViewportTransform
+import com.imagedge.camera.feature.capture.monitoring.drawFrame
+import com.imagedge.camera.feature.capture.monitoring.drawMarkers
 import com.imagedge.camera.ui.components.AppButton
 import com.imagedge.camera.ui.components.AppButtonType
 import com.imagedge.camera.ui.components.AppChipRow
@@ -92,16 +89,6 @@ import com.imagedge.camera.ui.components.AppSwitchRow
  * </pre>
  */
 
-/** 参数区展示顺序与标题（能力项 → 标题字符串资源） */
-private val PARAM_ROWS = listOf(
-    CameraCapability.EXPOSURE_PROGRAM_MODE to R.string.control_shoot_mode,
-    CameraCapability.ISO to R.string.control_iso,
-    CameraCapability.F_NUMBER to R.string.control_fnumber,
-    CameraCapability.SHUTTER_SPEED to R.string.control_shutter,
-    CameraCapability.WHITE_BALANCE to R.string.control_wb,
-    CameraCapability.EXPOSURE_BIAS to R.string.control_eb
-)
-
 /**
  * 遥控拍摄屏幕
  * @param onBack 返回主页回调
@@ -117,6 +104,9 @@ fun RemoteShootingScreen(
     val bleState by viewModel.bleState.collectAsStateWithLifecycle()
     val cameraStatus by viewModel.cameraStatus.collectAsStateWithLifecycle()
     var workstationOpen by remember { mutableStateOf(false) }
+    var settingsOpen by remember { mutableStateOf(false) }
+    val frame by viewModel.frame.collectAsStateWithLifecycle()
+    val policy by viewModel.transferPolicy.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     // 蓝牙权限：API 31+ 用 CONNECT/SCAN；29/30 用定位（manifest 已按版本声明，
@@ -298,44 +288,45 @@ fun RemoteShootingScreen(
                         }
                     }
 
-                    // ── 遥控快门（蓝牙已连走 BLE；否则降级 PTP，且需通道声明支持遥控拍摄）──
-                    // 手势式快门：按下开始拍摄（半按对焦+全按），松开结束曝光；
-                    // 按住期间相机按自身连拍设置持续曝光（长按连拍）
+                    // ── 三件能力分别说（设计 §4.6）──
+                    // 原来这里摆的是蓝牙连接状态：BLE 没连但通道支持遥控时快门其实能用，
+                    // BLE 连上了但相机没回能力时快门其实未知——「BLE 已连接」回答不了「能不能拍」
                     val bleConnected = bleState is BleShutterState.Connected
-                    val shutterEnabled = !state.taking && (bleConnected || state.captureAvailable)
+                    val availability = captureAvailabilityOf(
+                        connected = state.isConnected,
+                        viewfinderPaused = state.viewfinderPaused,
+                        hasFrame = frame != null,
+                        bleConnected = bleConnected,
+                        ptpCaptureAvailable = state.captureAvailable,
+                        capabilitiesStale = state.capabilitiesStale,
+                        busy = state.busy,
+                        autoSaveEnabled = policy.autoSaveAfterCapture
+                    )
+                    CaptureAvailabilityBar(availability = availability)
+
+                    // ── 主快门（时序在 ViewModel，见 runBleCapture）──
+                    // 手势式：按下开始（半按对焦 + 全按），松开结束曝光；
+                    // 按住期间相机按自身连拍设置持续曝光
+                    val shutterEnabled = !state.taking &&
+                        (bleConnected || state.captureAvailable) && !state.busy
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
+                        horizontalArrangement = Arrangement.Center
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                                .clip(MaterialTheme.shapes.small)
-                                .background(
-                                    if (shutterEnabled) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.surfaceVariant
-                                )
-                                .pointerInput(shutterEnabled) {
-                                    detectTapGestures(
-                                        onPress = {
-                                            if (shutterEnabled) {
-                                                viewModel.shutterDown()   // 按下：对焦
-                                                tryAwaitRelease()
-                                                viewModel.shutterUp()     // 抬起：拍摄
-                                            }
-                                        }
-                                    )
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                stringResource(R.string.control_btn_shoot),
-                                color = if (shutterEnabled) MaterialTheme.colorScheme.onPrimary
-                                else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        ShutterControl(
+                            // 圆里只放两个字：整句「按住对焦 · 松开拍照」塞进 72dp 会溢出到
+                            // 圆外，看着像一行浮空的说明而不是一个按钮
+                            label = stringResource(R.string.control_shutter_label),
+                            enabled = shutterEnabled,
+                            onPress = viewModel::shutterDown,
+                            onRelease = viewModel::shutterUp,
+                            modifier = Modifier.size(ShutterSize)
+                        )
                     }
+                    ContextHint(
+                        text = stringResource(R.string.control_btn_shoot),
+                        modifier = Modifier.fillMaxWidth()
+                    )
                     // 已连接但通道不支持遥控拍摄（UPnP「发送到智能手机」模式）：明说，
                     // 而不是让快门按下去毫无反应
                     if (state.isConnected && !state.captureAvailable && !bleConnected) {
@@ -346,59 +337,73 @@ fun RemoteShootingScreen(
                         )
                     }
 
-                    // ── 录像切换（仅蓝牙遥控可用）──
-                    if (bleConnected) {
-                        AppButton(
-                            text = stringResource(R.string.control_btn_record),
-                            onClick = { viewModel.recordToggle() },
-                            leadingIcon = Lucide.Video,
-                            type = AppButtonType.SECONDARY
-                        )
+                    // ── 录像：状态只认相机回报 ──
+                    // 设计 §4.6「根据相机已确认通知显示，不用本地布尔值猜测」。
+                    // 原来这里只看蓝牙连上就给一个「录像」切换按钮，等于替相机假设当前是空闲态
+                    when (recordActionOf(bleConnected, cameraStatus)) {
+                        RecordAction.Start, RecordAction.Stop -> {
+                            val stopping =
+                                recordActionOf(bleConnected, cameraStatus) == RecordAction.Stop
+                            AppButton(
+                                text = stringResource(
+                                    if (stopping) R.string.control_record_stop
+                                    else R.string.control_record_start
+                                ),
+                                onClick = { viewModel.recordToggle() },
+                                leadingIcon = Lucide.Video,
+                                type = AppButtonType.SECONDARY
+                            )
+                        }
+
+                        RecordAction.Unknown -> {
+                            AppButton(
+                                text = stringResource(R.string.control_record_start),
+                                onClick = { viewModel.recordToggle() },
+                                leadingIcon = Lucide.Video,
+                                type = AppButtonType.SECONDARY
+                            )
+                            ContextHint(stringResource(R.string.control_record_state_unknown))
+                        }
+
+                        RecordAction.Unavailable -> Unit
                     }
 
                     // ── 拍摄方式：自拍倒计时与间隔拍摄（T3）──
                     CaptureWorkflowSection(viewModel = viewModel, state = state)
 
-                    // ── PTP DeviceProp 参数区（经 0x9205/0x9209 调节）──
-                    // 分组标题：明确这块是"参数"，与上面的快门/录像区分开
-                    Text(
-                        text = stringResource(R.string.control_params_title),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    // ── 参数收进底部面板（设计 §4.6）──
+                    // 取景 + 快门是这一屏的主角；ISO/光圈/快门是偶尔要动的东西，
+                    // 平铺在快快门下面等于让主操作一直往下躲
                     // 相机身份：能力快照按「型号 + 固件 + 连接方式 + 功能模式」归档，
                     // 下面每一项能不能调都由它决定，必须让用户看见当前是哪台相机
                     IdentitySummary(state.identity)
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            PARAM_ROWS.forEach { (capability, labelRes) ->
-                                CapabilityParamRow(
-                                    label = stringResource(labelRes),
-                                    param = state.params[capability],
-                                    stale = state.capabilitiesStale,
-                                    onSelect = { raw -> dispatch(viewModel, capability, raw) }
-                                )
-                            }
-                        }
-                    }
+                    AppLink(
+                        text = stringResource(R.string.control_params_action),
+                        onClick = { settingsOpen = true }
+                    )
                 }
             }
 
-            state.message?.let {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            // 拍后保存的限制与结果常驻说明，不闪过（设计 §4.6）。
+            // 之前是一行小字 Text，靠下一次操作覆盖：用户读没读完完全看手速
+            state.message?.let { text ->
+                StatusBanner(
+                    message = text,
+                    actionLabel = stringResource(R.string.control_dismiss),
+                    onAction = { viewModel.dismissMessage() },
+                    isError = false
                 )
             }
         }
+    }
+
+    if (settingsOpen) {
+        CaptureSettingsSheet(
+            params = state.params,
+            stale = state.capabilitiesStale,
+            onDismiss = { settingsOpen = false },
+            onSelect = { capability, raw -> dispatch(viewModel, capability, raw) }
+        )
     }
 }
 
@@ -645,84 +650,6 @@ private fun captureStatusOf(job: CaptureJob): Int = when {
     job.failure == CaptureFailure.DISCONNECTED -> R.string.control_status_disconnected
     job.phase == CapturePhase.CANCELLED -> R.string.control_status_cancelled
     else -> R.string.control_status_failed
-}
-
-/**
- * 单个拍摄参数行（三态渲染）。
- *
- * 可写且相机给了档位 → 下拉选择器；其余一律只读文本 + 原因说明。
- * 「未知」必须与「不支持」分开显示：前者是链路/探测问题（重连可能就好），
- * 后者才是相机给出的事实。两者都禁用控件，但用户需要知道该怪谁。
- */
-@Composable
-private fun CapabilityParamRow(
-    label: String,
-    param: ParamUiState?,
-    stale: Boolean,
-    onSelect: (Long) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val options = param?.options.orEmpty()
-    val editable = param?.editable == true && options.isNotEmpty()
-
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f)
-            )
-            if (editable) {
-                Box {
-                    AppLink(
-                        text = param.currentLabel ?: "--",
-                        onClick = { expanded = true }
-                    )
-                    DropdownMenu(
-                        expanded = expanded,
-                        onDismissRequest = { expanded = false }
-                    ) {
-                        options.forEach { (name, code) ->
-                            DropdownMenuItem(
-                                text = { Text(name) },
-                                onClick = {
-                                    onSelect(code)
-                                    expanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-            } else {
-                Text(
-                    text = param?.currentLabel ?: "--",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        if (!editable) {
-            Text(
-                text = stringResource(blockReasonOf(param, stale)),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-/** 不可调整的原因 → 文案资源（顺序即优先级） */
-private fun blockReasonOf(param: ParamUiState?, stale: Boolean): Int = when {
-    param == null -> R.string.control_capability_unknown
-    param.detail.state == CapabilityState.UNKNOWN -> R.string.control_capability_unknown
-    param.detail.state == CapabilityState.UNSUPPORTED -> R.string.control_capability_unsupported
-    param.detail.state == CapabilityState.READ_ONLY -> R.string.control_capability_read_only
-    stale -> R.string.control_capability_stale
-    else -> R.string.control_capability_no_options
 }
 
 /**

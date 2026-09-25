@@ -92,7 +92,16 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
   它只在**有活动任务**或**本批有尚未看过的失败**时存在，进传输页即算看过。
   只在一级入口出现：二级页没有任何东西为它预留高度，浮上去就是压住最后一行。
   它的高度与胶囊一起经 `LocalNavClearance` 实测下发，不是常量。
-- **引导呈现与业务解耦**：`ui/guidance/`（`GuideCard`/`ContextHint`/`HelpSheet`）只呈现内容，
+- **遥控的可用性判定（重构批次 E 第一刀）**：`feature/control` → `feature/capture`（含 monitoring 子包）。
+  页面顶部不再摆「BLE 已连接」这类技术词，而是 `CaptureAvailabilityBar` 分三行说
+  **画面 / 快门 / 拍后保存**——三件事来路不同（60152 推流、BLE 或 PTP CAPTURE 能力、用户偏好 + 会话），
+  合成一个「可用/不可用」就是在撒谎。判定全在 `CaptureAvailability.kt` 的纯函数里：
+  能力没读回来是 `Unknown` 而不是「不支持」（已知坑 14），忙时快门 `NotNow` 而不是让按钮按下去没反应。
+  录像按钮只认相机 ff02 回报的三态（`recordActionOf`），没回报时明说「状态未知」，
+  不拿本地布尔值猜相机在不在录。主快门抽成 `ShutterControl`（72dp 圆 + 短标签 + 读屏一次点击 = 按下+抬起），
+  **手势体逐字照搬**：时序仍归 `CameraControlViewModel.runBleCapture()`，UI 里不许出现半按序列。
+  ISO/光圈/快门收进 `CaptureSettingsSheet`，每行仍自带可写状态与原因。
+：`ui/guidance/`（`GuideCard`/`ContextHint`/`HelpSheet`）只呈现内容，
   不查权限、不连相机、不决定是否出现；出现与否由 `data/guidance/GuidanceStore` 按
   `guideId + version + 机型` 判定，且「已看过」与「任务成功过」是两条独立记录。
 - **相册刷新**：事件流（`StoreAdded/Removed/ObjectAdded`）触发即时静默刷新，
@@ -136,8 +145,8 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
 | `CameraProfileStore` | `:app/data/profile` | 档案 / 能力快照 / 最近连接 / 命名预设的读写门面（`profile.db`） |
 | `PresetPlanner` | `:app/data/profile` | 预设逐项「校验 → 下发 → 读回」判定（纯函数，七种结果状态） |
 | `PresetDocument` | `:app/data/profile` | 预设导出/导入格式：SHA-256 校验和 + 有界输入 + 越界整份拒绝 |
-| `ViewportTransform` | `:app/feature/control/monitoring` | 监看画面统一坐标模型：正向供绘制、逆向供触摸反查 |
-| `MonitoringWorkstation` | `:app/feature/control/monitoring` | 全屏监看工作台（Dialog 独立 window，横屏 + 沉浸） |
+| `ViewportTransform` | `:app/feature/capture/monitoring` | 监看画面统一坐标模型：正向供绘制、逆向供触摸反查 |
+| `MonitoringWorkstation` | `:app/feature/capture/monitoring` | 全屏监看工作台（Dialog 独立 window，横屏 + 沉浸） |
 | `SonyBleShutter` | `:app/data/ble` | 蓝牙遥控快门（配对/GATT/命令队列） |
 | `CameraWifiManager` | `:app/data/remote/wifi` | 热点配网、网关发现、进程网络绑定 |
 | `EmbeddedJpegDecoder` | `:raw` | ARW TIFF 解析提取内嵌预览 |

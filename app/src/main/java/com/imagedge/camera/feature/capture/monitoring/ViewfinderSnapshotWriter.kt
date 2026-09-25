@@ -1,4 +1,4 @@
-package com.imagedge.camera.feature.control.monitoring
+package com.imagedge.camera.feature.capture.monitoring
 
 import android.content.ContentValues
 import android.content.Context
@@ -47,7 +47,7 @@ class ViewfinderSnapshotWriter @Inject constructor(
 ) {
 
     /**
-     * @param bitmap 取景帧。由 [com.imagedge.camera.feature.control.CameraControlViewModel]
+     * @param bitmap 取景帧。由 [com.imagedge.camera.feature.capture.CameraControlViewModel]
      *               的下采样解码产出，尺寸受控（≤ 目标宽高），故此处不再另设大小上限
      * @param capturedAt 画面被采集的时刻（毫秒），写入 DATE_TAKEN 以便相册按拍摄时间排序
      * @return 落盘后的 MediaStore Uri
