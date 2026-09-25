@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -54,10 +55,16 @@ import kotlinx.coroutines.delay
  * 之前它们挤在一个 500 行的文件里，改任何一处都要先在一堆无关逻辑里找位置。
  */
 @Composable
-fun AppRoot(snackbarController: SnackbarController) {
+fun AppRoot(
+    snackbarController: SnackbarController,
+    bottomSlot: BottomSlotHost
+) {
     val navController = rememberNavController()
     val currentTab = navController.currentTab()
-    val showBottomBar = currentTab != null
+    // 底部条位互斥：页面占位时（选择态 / 传输小条）悬浮导航让位，
+    // 否则三条各自贴底只会互相盖住（设计 §4.3 禁止三层叠加）
+    val slotOwner by bottomSlot.owner.collectAsStateWithLifecycle()
+    val showBottomBar = currentTab != null && slotOwner == BottomSlotOwner.Navigation
 
     // 全局轻提示：任意页面 show() 一条消息，这里统一以顶部滑入弹窗呈现
     var bannerMessage by remember { mutableStateOf<String?>(null) }
@@ -107,6 +114,7 @@ fun AppRoot(snackbarController: SnackbarController) {
                 ) {
                     AppNavHost(
                         navController = navController,
+                        bottomSlot = bottomSlot,
                         snackbarController = snackbarController,
                         navBackdrop = if (captureNavBackdrop) navBackdrop else null
                     )

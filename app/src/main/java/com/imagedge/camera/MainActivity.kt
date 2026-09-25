@@ -11,6 +11,7 @@ import coil.imageLoader
 import com.imagedge.camera.data.model.MediaSessionCache
 import com.imagedge.camera.data.remote.CameraRepository
 import com.imagedge.camera.navigation.AppRoot
+import com.imagedge.camera.navigation.BottomSlotHost
 import com.imagedge.camera.ui.feedback.SnackbarController
 import com.imagedge.camera.ui.theme.DesignScaleLocked
 import com.imagedge.camera.ui.theme.ImagedgeTheme
@@ -34,6 +35,9 @@ class MainActivity : ComponentActivity() {
 
     @javax.inject.Inject
     lateinit var snackbarController: SnackbarController
+
+    @javax.inject.Inject
+    lateinit var bottomSlot: BottomSlotHost
 
     @javax.inject.Inject
     lateinit var cameraRepository: CameraRepository
@@ -67,7 +71,10 @@ class MainActivity : ComponentActivity() {
             ) {
                 // UI 锁定：全屏等比缩放到设计基准宽（394dp），跨机型保持版式不变
                 DesignScaleLocked {
-                    AppRoot(snackbarController = snackbarController)
+                    AppRoot(
+                        snackbarController = snackbarController,
+                        bottomSlot = bottomSlot
+                    )
                 }
             }
         }

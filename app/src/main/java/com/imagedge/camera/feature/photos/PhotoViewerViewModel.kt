@@ -1,4 +1,4 @@
-package com.imagedge.camera.feature.album
+package com.imagedge.camera.feature.photos
 
 import android.content.Context
 import android.graphics.Bitmap

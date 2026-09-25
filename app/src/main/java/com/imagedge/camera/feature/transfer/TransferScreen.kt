@@ -1,4 +1,4 @@
-package com.imagedge.camera.feature.download
+package com.imagedge.camera.feature.transfer
 
 import android.net.Uri
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -24,9 +24,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -59,6 +56,7 @@ import com.imagedge.camera.data.transfer.TransferSizeMode
 import com.imagedge.camera.feature.edit.PhotoEditScreen
 import com.imagedge.camera.feature.share.ExportSettingsSheet
 import com.imagedge.camera.feature.share.ShareViewModel
+import com.imagedge.camera.ui.components.AppChipRow
 import com.imagedge.camera.ui.components.AppLink
 import com.imagedge.camera.ui.components.EmptyState
 import com.imagedge.camera.ui.glass.glassDialog
@@ -88,10 +86,10 @@ import com.imagedge.camera.ui.components.AppIconButton
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun DownloadScreen(
+fun TransferScreen(
     onBack: () -> Unit = {},
     onGoAlbum: () -> Unit = {},
-    viewModel: DownloadViewModel = hiltViewModel()
+    viewModel: TransferViewModel = hiltViewModel()
 ) {
     val tasks by viewModel.tasks.collectAsStateWithLifecycle()
     val history by viewModel.history.collectAsStateWithLifecycle()
@@ -145,24 +143,19 @@ fun DownloadScreen(
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp)
         ) {
-            // 分段切换：下载队列 / 传输记录
-            val segmentedColors = SegmentedButtonDefaults.colors(
-                inactiveContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest
+            // 进行中 / 记录：设计 §4.5 指定用 AppChipRow。
+            // 原来是裸 M3 分段按钮——它不在 uiSpecCheck 的禁用名单里，所以规范检查一路放行，
+            // 但观感上与全站其它互斥选项（主题档位、类型筛选）不是同一套东西
+            val tabLabels = listOf(
+                stringResource(R.string.download_queue_tab),
+                stringResource(R.string.download_history_tab)
             )
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                SegmentedButton(
-                    selected = tab == 0,
-                    onClick = { tab = 0 },
-                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                    colors = segmentedColors
-                ) { Text(stringResource(R.string.download_queue_tab)) }
-                SegmentedButton(
-                    selected = tab == 1,
-                    onClick = { tab = 1 },
-                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                    colors = segmentedColors
-                ) { Text(stringResource(R.string.download_history_tab)) }
-            }
+            AppChipRow(
+                items = listOf(0, 1),
+                selected = tab,
+                label = { tabLabels[it] },
+                onSelect = { tab = it }
+            )
             Spacer(Modifier.height(12.dp))
 
             if (tab == 0) {
@@ -296,20 +289,35 @@ private fun DownloadTaskRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            val sizeUnknown = task.sizeBytes <= 0
             Text(
-                text = formatSize(task.sizeBytes),
+                // 大小未知要说出「未知」：留白会被读成「没有内容」，
+                // 而下面那条永远 0% 的进度条更糟——它看起来像卡死
+                text = if (sizeUnknown) stringResource(R.string.transfer_size_unknown)
+                       else formatSize(task.sizeBytes),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             if (task.state == DownloadState.DOWNLOADING) {
-                LinearProgressIndicator(
-                    progress = { task.progress / 100f },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp)
-                        .height(4.dp)
-                )
+                if (sizeUnknown) {
+                    // 未知总长 → 不定长进度条。百分比在这种任务上根本算不出来
+                    // （DownloadManager 只在 total>0 时算 progress），显示数字就是撒谎
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .height(4.dp)
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        progress = { task.progress / 100f },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .height(4.dp)
+                    )
+                }
             }
         }
 

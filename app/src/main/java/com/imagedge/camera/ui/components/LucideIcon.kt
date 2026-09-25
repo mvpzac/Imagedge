@@ -30,6 +30,7 @@ object Lucide {
     val ShieldCheck = R.drawable.ic_lucide_shield_check
     val CircleQuestionMark = R.drawable.ic_lucide_circle_question_mark
     val ChevronRight = R.drawable.ic_lucide_chevron_right
+    val ChevronDown = R.drawable.ic_lucide_chevron_down
     val CircleCheck = R.drawable.ic_lucide_circle_check
     val Info = R.drawable.ic_lucide_info
     val TriangleAlert = R.drawable.ic_lucide_triangle_alert

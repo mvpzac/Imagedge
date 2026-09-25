@@ -1,4 +1,4 @@
-package com.imagedge.camera.feature.download
+package com.imagedge.camera.feature.transfer
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -25,7 +25,7 @@ import javax.inject.Inject
  */
 
 @HiltViewModel
-class DownloadViewModel @Inject constructor(
+class TransferViewModel @Inject constructor(
     private val downloadManager: DownloadManager,
     private val historyDao: DownloadHistoryDao,
     transferPolicyStore: TransferPolicyStore

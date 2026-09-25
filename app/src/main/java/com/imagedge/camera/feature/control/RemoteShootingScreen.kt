@@ -203,7 +203,7 @@ fun RemoteShootingScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // 断连提示横幅（内容首部，视口内始终可见）：未连接即显示，
-            // 连接中切「重连中…」文案并禁用点击，等效 AlbumScreen 的防抖守卫；
+            // 连接中切「重连中…」文案并禁用点击，等效 PhotosScreen 的防抖守卫；
             // ViewModel.connect() 内部另有 connecting 去重，重复点击不会发起并发连接
             if (!state.isConnected) {
                 StatusBanner(

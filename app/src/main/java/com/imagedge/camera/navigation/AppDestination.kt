@@ -46,13 +46,10 @@ enum class TabDestination(
  */
 object Route {
     /** 全局传输页（队列 + 记录），从任意页可达、返回原页 */
-    const val DOWNLOAD = "download"
+    const val TRANSFER = "transfer"
 
     /** 遥控拍摄 */
     const val REMOTE = "remote"
-
-    const val ALBUM_SELECTION = "album_selection"
-    const val ALBUM_FULL_CARD = "album_full_card"
 
     const val PHOTO_EDIT = "photo_edit"
     const val LIVE_PHOTO = "live_photo"

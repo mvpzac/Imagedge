@@ -1,10 +1,11 @@
-package com.imagedge.camera.feature.album
+package com.imagedge.camera.feature.photos
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.imagedge.camera.core.common.AppLog
+import com.imagedge.camera.data.model.DownloadState
 import com.imagedge.camera.data.model.MediaItem
 import com.imagedge.camera.data.model.MediaSessionCache
 import com.imagedge.camera.data.remote.CameraRepository
@@ -20,7 +21,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.shareIn
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
@@ -54,7 +58,7 @@ enum class BrowseMode { SELECTION, FULL_CARD }
  */
 
 @HiltViewModel
-class AlbumViewModel @Inject constructor(
+class PhotosViewModel @Inject constructor(
     private val repository: CameraRepository,
     private val downloadManager: DownloadManager,
     private val sessionCache: MediaSessionCache,
@@ -76,6 +80,54 @@ class AlbumViewModel @Inject constructor(
 
     /** 是否有活跃下载（下载未完成前禁止切换浏览通道） */
     val hasActiveDownload: StateFlow<Boolean> = downloadManager.hasActiveDownload
+
+    /**
+     * 已保存到手机 / 正在保存的项（键 = thumbKey，与任务 id 同一口径）。
+     *
+     * 格子右下角的「已保存」角标由它来，**不另开一条查询**：任务真相在内存队列里，
+     * 历史表没有 thumbKey，去查历史只会得到一个看起来对其实恒空的结果。
+     */
+    val savedKeys: StateFlow<Set<String>> = downloadManager.tasks
+        .map { tasks -> tasks.filter { it.state == DownloadState.DONE }.mapTo(mutableSetOf()) { it.id } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    /** 提交中：入队要落 Room，落库失败时选择必须保留，所以这里要能表达「还没受理」 */
+    private val _submitting = MutableStateFlow(false)
+    val submitting: StateFlow<Boolean> = _submitting.asStateFlow()
+
+    /**
+     * 切换浏览范围（选片集 ↔ 整卡）。
+     *
+     * 这是**业务动作**，不是换个筛选芯片：会让相机切 PTP 功能模式，既有对象句柄全部失效。
+     * 两条纪律（设计 §4.3）：
+     * 1. 传输进行中不切——面板还能打开看说明，但切换被挡住并写明原因；
+     * 2. **切换失败就维持原范围**：先确认相机通道切过去了，才动界面上的范围标签和列表。
+     *    旧实现先改 `_browseMode` 再判断，失败时界面写着「整卡」而列表还是选片集，
+     *    这正是「标签比事实跑得靠前」的那类假信息。
+     */
+    fun switchScope(mode: BrowseMode) {
+        if (mode == _browseMode.value) return
+        viewModelScope.launch {
+            val target = if (mode == BrowseMode.FULL_CARD) 1 else 0
+            if (repository.currentFunctionMode != target && downloadManager.hasActiveDownload.value) {
+                _error.value = "照片/视频传输中，暂不能切换浏览范围，请等待下载完成"
+                return@launch
+            }
+            if (repository.currentFunctionMode != target) {
+                val ok = runCatching { repository.switchFunctionMode(target) }.getOrDefault(false)
+                if (!ok) {
+                    // 相机没切过去：范围标签、列表、选择集合一律保持原样
+                    _error.value = if (mode == BrowseMode.FULL_CARD) {
+                        "切换到存储卡失败，仍显示相机已选照片"
+                    } else {
+                        "切回选片集失败，仍显示存储卡内容"
+                    }
+                    return@launch
+                }
+            }
+            enter(mode)
+        }
+    }
 
     /**
      * 校正相机功能模式，使其与当前浏览模式一致（选片集=0 / 整卡=1）。
@@ -368,11 +420,31 @@ class AlbumViewModel @Inject constructor(
         _selected.value = emptySet()
     }
 
-    /** 下载选中项（交给全局下载队列串行处理） */
+    /**
+     * 下载选中项（交给全局下载队列串行处理）。
+     *
+     * **队列受理之后才清选择**：入队的提交点是 Room 落库（`enqueuePersisted` 以它为准，
+     * 落库失败就不入队）。旧实现先 `enqueueAll` 再无条件 `clearSelection()`，
+     * 于是一次落库失败会把用户的选择一起清掉——重新选一遍之前，谁也看不出什么都没入队。
+     */
     fun downloadSelected() {
+        if (_submitting.value) return
         val toDownload = _items.value.filter { it.channelKey in _selected.value }
-        downloadManager.enqueueAll(toDownload)
-        clearSelection()
+        if (toDownload.isEmpty()) return
+        viewModelScope.launch {
+            _submitting.value = true
+            try {
+                val accepted = downloadManager.enqueueAllAwait(toDownload)
+                if (accepted) {
+                    clearSelection()
+                } else {
+                    // 选择保持原样，用户可以直接再试一次，不必重新勾选
+                    _error.value = "加入传输队列失败（可能是存储不可用），选择已保留"
+                }
+            } finally {
+                _submitting.value = false
+            }
+        }
     }
 
     /**

@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.Collections
@@ -233,6 +234,20 @@ class DownloadManager @Inject constructor(
         scope.launch {
             if (enqueuePersisted(items)) startDownloadService()
         }
+    }
+
+    /**
+     * 批量入队并**等待落库结果**。
+     *
+     * [enqueueAll] 是 fire-and-forget，调用方无从知道这批有没有真的进队列。照片页要
+     * 「队列受理之后才清选择」，所以需要一个能等的入口：语义与 [enqueueAll] 完全一致
+     * （同一把互斥锁、同一次批量落库、同样只在落库成功时启动服务），只是把结果回传。
+     */
+    suspend fun enqueueAllAwait(items: List<MediaItem>): Boolean = withContext(Dispatchers.IO) {
+        if (items.isEmpty()) return@withContext false
+        val accepted = enqueuePersisted(items)
+        if (accepted) startDownloadService()
+        accepted
     }
 
     /** 清空已完成/失败的任务 */

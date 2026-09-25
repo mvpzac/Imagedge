@@ -72,6 +72,13 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
   「断开」的后果说明读 `DownloadManager.hasActiveDownload`。
   设计 §6 点名的 `TaskEntry` 由 `ActionRow` 直接承担，**没有**新建同名包装组件——
   它与 `ActionRow` 的差别只有名字，多一层只会让「该用哪个」变成新问题。
+- **照片页与底部条位（重构批次 C）**：`feature/photos/PhotosScreen` 是照片 Tab 的根，
+  不再有「相册中枢」那一层；范围（选片集 ↔ 存储卡）是**业务动作**，走 `BrowseScopeSheet`
+  切换并先确认相机通道成功才更新界面状态，传输中禁用切换但面板仍可打开看说明。
+  底部同一时刻只能有一条栏：`navigation/BottomSlot` 是唯一真相，
+  页面进入选择态时 `claim(SelectionBar)`、离页/退出时 `release`，`AppRoot` 只在
+  `Navigation` 时画悬浮胶囊。网格格子（`PhotoGridTile`）**整格一个触点**，
+  勾选标记不注册第二个点击。
 - **引导呈现与业务解耦**：`ui/guidance/`（`GuideCard`/`ContextHint`/`HelpSheet`）只呈现内容，
   不查权限、不连相机、不决定是否出现；出现与否由 `data/guidance/GuidanceStore` 按
   `guideId + version + 机型` 判定，且「已看过」与「任务成功过」是两条独立记录。

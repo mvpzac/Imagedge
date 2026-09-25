@@ -60,13 +60,42 @@
     <string name="home_guide_step3">相机端勾选照片，即可浏览与下载</string>
 
     <!-- 相册 -->
-    <string name="album_selection_title">选片集</string>
-    <string name="album_full_card_title">整卡查看</string>
-    <string name="album_empty_hint">等待相机内容…\n请保持相机处于「智能手机连接」页面；「选片集」还需在相机「发送到智能手机」里勾选要发送的照片，「整卡」则直接列出卡内全部照片</string>
+    <!-- 照片页（批次 C：Tab 根 + 范围面板 + 选择态底栏） -->
+    <string name="photos_scope_open_hint">切换浏览范围</string>
+    <string name="photos_scope_sheet_title">浏览范围</string>
+    <string name="photos_scope_sheet_body">切换范围会让相机换一条读取通道，列表会重新加载。这不是筛选，正在传输时不能切换。</string>
+    <string name="photos_scope_selection">相机已选照片</string>
+    <string name="photos_scope_selection_note">由你在相机上勾选决定，不等于卡里全部</string>
+    <string name="photos_scope_full_card">浏览相机存储卡</string>
+    <string name="photos_scope_full_card_note">枚举整张存储卡，可能较慢；本机型未完整实测，切换失败会保持当前范围</string>
+    <string name="photos_scope_note_card">手机侧枚举存储卡</string>
+    <string name="photos_scope_blocked">照片/视频传输中，暂不能切换浏览范围</string>
+    <string name="photos_select_action">选择</string>
+    <string name="photos_transfer_action">传输</string>
+    <string name="photos_cancel_selection">取消选择</string>
+    <string name="photos_saving">正在加入队列…</string>
+    <string name="photos_pick_first">请选择照片</string>
+    <string name="photos_tile_toggle_hint">选择这张</string>
+    <string name="photos_tile_open_hint">查看大图</string>
+    <string name="photos_tile_saved">已保存到手机</string>
+    <string name="photos_need_connect_title">连接相机后查看照片</string>
+    <string name="photos_need_connect_desc">手机里的素材可以直接在「创作」中编辑</string>
+    <string name="photos_need_connect_action">连接相机</string>
+    <string name="photos_awaiting_title">等待相机端选片</string>
+    <string name="photos_awaiting_body">在相机上把照片加入「发送到智能手机」，选好后回到这里刷新列表。</string>
+    <string name="photos_refresh_action">刷新照片</string>
+    <plurals name="photos_selected_count">
+        <item quantity="one">已选 %1$d 项</item>
+        <item quantity="other">已选 %1$d 项</item>
+    </plurals>
+    <plurals name="photos_save_action">
+        <item quantity="one">保存 %1$d 项到手机</item>
+        <item quantity="other">保存 %1$d 项到手机</item>
+    </plurals>
+    <string name="album_empty_hint">等待相机内容…\n请保持相机处于「智能手机连接」页面；「相机已选照片」还需在相机「发送到智能手机」里勾选，「存储卡」则直接列出卡内全部照片</string>
     <string name="album_empty_title">还没有照片</string>
     <string name="album_error_title">加载失败</string>
     <string name="album_retry">重试</string>
-    <string name="album_btn_download">下载 %1$d 项</string>
     <string name="album_filter_all">全部</string>
     <string name="album_filter_photo">照片</string>
     <string name="album_filter_video">视频</string>
@@ -158,15 +187,6 @@
     <string name="permission_foreground_purpose">后台持续传输照片/视频时保持连接稳定</string>
 
     <string name="settings_about_body">开源项目（Apache-2.0 License）\n基于 PTP/IP 与 BLE 无线协议栈，面向索尼相机\n\n免责声明：本项目与 Sony Corporation 无关；Sony 及相关商标归其所有者所有。协议实现基于公开资料与社区逆向成果，仅供学习研究。</string>
-    <string name="hub_selection_title">选片集</string>
-    <string name="hub_selection_desc">浏览相机已勾选发送的照片</string>
-    <string name="hub_full_card_title">整卡查看</string>
-    <string name="hub_full_card_desc">浏览 SD 卡内全部照片</string>
-    <string name="hub_full_card_busy_hint">照片/视频传输中，请等待下载完成后再查看整卡</string>
-    <string name="hub_transfer_title">相册传输</string>
-    <string name="hub_transfer_desc">下载队列与传输进度</string>
-    <string name="hub_edit_title">相册编辑</string>
-    <string name="hub_edit_desc">视频转 LIVE 图 · LUT 滤镜调色</string>
     <string name="edit_title">相册编辑</string>
     <string name="edit_hub_livephoto_desc">选择视频导出为动态照片</string>
     <string name="edit_hub_edit_desc">裁剪、旋转、拉直 + 基础调色 + LUT 滤镜，导出按原分辨率并保留 EXIF</string>
@@ -222,13 +242,13 @@
     <string name="album_disconnected_reconnecting">重连中…</string>
 
     <!-- 下载队列 -->
-    <string name="download_title">下载</string>
+    <string name="download_title">传输</string>
     <string name="download_clear">清空</string>
     <string name="download_cancel">取消任务</string>
     <string name="download_cancel_all">全部取消</string>
-    <string name="download_empty">没有下载任务</string>
-    <string name="download_empty_desc">在相册里长按选择照片后点「下载」，任务会出现在这里</string>
-    <string name="download_empty_action">去相册选片</string>
+    <string name="download_empty">没有进行中的任务</string>
+    <string name="download_empty_desc">在「照片」里点「选择」，勾选后点「保存到手机」，任务会出现在这里</string>
+    <string name="download_empty_action">去照片</string>
 
     <!-- 编辑环节（通用文案：对比度/饱和度/色温/重置由「编辑调节」与基础调整共用） -->
     <string name="edit_contrast">对比度</string>
@@ -250,8 +270,8 @@
     <string name="share_strip_all_hint">清除全部拍摄信息，适合发到公开平台</string>
 
     <!-- 传输记录 -->
-    <string name="download_queue_tab">下载队列</string>
-    <string name="download_history_tab">传输记录</string>
+    <string name="download_queue_tab">进行中</string>
+    <string name="download_history_tab">记录</string>
     <string name="download_history_clear">清空记录</string>
     <string name="download_history_empty">暂无传输记录</string>
     <string name="download_history_empty_desc">完成照片/视频下载后，记录会显示在这里，长按可查看详情</string>
@@ -350,6 +370,7 @@
     <string name="transfer_scope_camera_selection">相机选片集</string>
     <string name="transfer_scope_whole_card">整卡</string>
     <string name="transfer_scope_by_camera">该范围由相机决定，不等于相机上的全部照片</string>
+    <string name="transfer_size_unknown">大小未知</string>
     <string name="transfer_size_label">尺寸与格式</string>
     <string name="transfer_size_original">原对象</string>
     <string name="transfer_size_local_thumbnail">原对象 + 本机缩图</string>

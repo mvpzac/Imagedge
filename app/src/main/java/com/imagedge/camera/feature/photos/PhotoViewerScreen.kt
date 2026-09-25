@@ -1,4 +1,4 @@
-package com.imagedge.camera.feature.album
+package com.imagedge.camera.feature.photos
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement

@@ -10,6 +10,33 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Added / 新增
 
+**页面与结构重构 · 批次 C（照片与传输）**
+
+- 照片 Tab 直接就是照片页：删掉 `AlbumHubScreen` 与 `album_selection` / `album_full_card` 两条子路由。
+  中枢那两张入口卡只是把「换个范围」伪装成「换一页」，用户要先选进哪个相册才看得到照片
+- 新增 `BrowseScopeRow` + `BrowseScopeSheet`：范围是**业务动作**（切 PTP 功能模式 0x9210，
+  既有对象句柄全部失效），所以不是一枚筛选芯片。传输中面板照样能打开看说明，但切换项禁用
+  并就地写明原因；整卡那条只说「本机型未完整实测」，不替相机宣称支持或不支持
+- 新增 `navigation/BottomSlot.kt`：底部条位互斥的单一真相。设计禁止
+  「导航 + 任务条 + 保存按钮」三层叠加，而三条各自贴底只会互相盖住——互斥必须是一处的决定
+- 新增 `SelectionActionBar`：选择态占住底部，悬浮导航同时让位；上行数量与「取消选择」，
+  下行一个主按钮；没选东西时禁用并把「请选择照片」写在按钮下面
+- 新增 `PhotoGridTile`：**整格承担点击与勾选语义**，右上勾选只是视觉结果。
+  选择此前只能长按（触屏上既不可见也不可发现），现在选择态点任意位置即勾选，
+  读屏拿到一个 `Role.Checkbox` + `selected` 节点，而不是几 dp 的隐形方块
+- 网格改自适应列（`UiSize.PhotoTileMin`，窄屏自然掉到 2 列），不再写死 3 列
+- 未连接的照片页只给一条修复路径（空态「连接相机」），不再同时摆红色断线横幅、
+  范围行和类型筛选——那是在对一个不存在的数据集提供控件
+- 传输页：裸 M3 分段按钮换成 `AppChipRow`（进行中 / 记录），与全站其它互斥选项同一套观感；
+  空态文案跟上批次 C 的改动（原来还在教用户「在相册里长按选择」，那个页面已经不存在了）
+- `DownloadManager.enqueueAllAwait`：等落库结果再回话。照片页据此**在队列受理之后才清选择**
+- `feature/album` → `feature/photos`（`AlbumScreen`→`PhotosScreen`、`AlbumViewModel`→`PhotosViewModel`），
+  与 §9 的包名归属对齐
+- `feature/download` → `feature/transfer`（`DownloadScreen`→`TransferScreen`、
+  `DownloadViewModel`→`TransferViewModel`），路由 `download` → `transfer`。
+  数据层的 `DownloadManager` / `DownloadService` / `DownloadTask*` 名字不动：它们确实是在下载，
+  改叫 transfer 只会让「传输」这个界面词渗进协议层
+
 **页面与结构重构 · 批次 B（导航与一级入口）**
 
 - 新增 `navigation/` 包，把原来 500 行的 `feature/root/RootScreen.kt` 拆成五份各管一件事：
@@ -162,6 +189,12 @@ All notable changes to this project are documented here. Format follows [Keep a 
   不再往页面传 `PaddingValues`——顺序写错编译器与单测都不管，那就别给页面写错的机会。
 - **导航磁吸方向算错**：「上一次选中的是谁」被每个条目各记一份，记到的其实是
   「我自己上次被选中的时刻」，A→C→A 会朝错误方向弹。状态上提到导航栏，一处一份。
+- **范围切换失败时标签会说谎**（批次 C）：旧 `enter()` 先把 `_browseMode` 改成目标范围，
+  再去判断/执行通道切换，于是传输中或切换失败时界面写着「存储卡」，列表却还是选片集的内容。
+  现在顺序反过来：先确认相机通道切过去了，才动范围标签、列表和选择集合。
+- **大小未知的任务挂着一条永远 0% 的进度条**（批次 C）：`progress` 只在 `total > 0` 时才计算，
+  未知总长的任务因此恒定 0%，看起来像卡死而不是「算不出来」。
+  现在这类任务显示不定长进度条并写明「大小未知」——§4.5 的「大小未知不显示百分比」就是这个意思。
 - **预设/快照写入后列表不刷新**：`observeAll()` 只跟踪 `parameter_preset` 一张表，
   在 `map` 里逐行查子表的写法永远不会被 `parameter_preset_item` 的写入唤醒
   （数据在库里，界面显示空）。改用 `@Transaction` + `@Relation`，同时去掉 N+1 查询。

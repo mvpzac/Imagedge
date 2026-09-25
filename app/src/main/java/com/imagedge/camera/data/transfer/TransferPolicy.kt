@@ -23,7 +23,7 @@ import javax.inject.Singleton
  * 传输范围：这一批到底传哪些。
  *
  * **它不是用户偏好，而是当前会话的事实**——由相册的浏览模式与相机连接方式决定，
- * 所以不存进 [TransferPolicy]，只在展示时从 [com.imagedge.camera.feature.album.BrowseMode] 推导。
+ * 所以不存进 [TransferPolicy]，只在展示时从 [com.imagedge.camera.feature.photos.BrowseMode] 推导。
  * 存成偏好会出现「prefs 写着整卡、实际连着选片集」这种更糟的假信息。
  *
  * 此前界面上完全看不出来：相册有选片集/整卡两种浏览模式，下载页却不说明条目来自哪种范围，

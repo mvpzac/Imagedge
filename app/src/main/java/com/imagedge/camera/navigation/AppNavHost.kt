@@ -6,14 +6,12 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import com.imagedge.camera.feature.album.AlbumHubScreen
-import com.imagedge.camera.feature.album.AlbumScreen
-import com.imagedge.camera.feature.album.BrowseMode
-import com.imagedge.camera.feature.album.PhotoViewerScreen
+import com.imagedge.camera.feature.photos.PhotosScreen
+import com.imagedge.camera.feature.photos.PhotoViewerScreen
 import com.imagedge.camera.feature.camera.CameraHubScreen
 import com.imagedge.camera.feature.control.RemoteShootingScreen
 import com.imagedge.camera.feature.create.CreateHubScreen
-import com.imagedge.camera.feature.download.DownloadScreen
+import com.imagedge.camera.feature.transfer.TransferScreen
 import com.imagedge.camera.feature.edit.ExifFrameScreen
 import com.imagedge.camera.feature.edit.LiveTriptychScreen
 import com.imagedge.camera.feature.edit.PhotoEditScreen
@@ -46,6 +44,7 @@ import com.kyant.backdrop.backdrops.layerBackdrop
 fun AppNavHost(
     navController: NavHostController,
     snackbarController: SnackbarController,
+    bottomSlot: BottomSlotHost,
     modifier: Modifier = Modifier,
     navBackdrop: LayerBackdrop? = null
 ) {
@@ -64,16 +63,15 @@ fun AppNavHost(
                 snackbarController = snackbarController
             )
         }
-        // 照片 TAB = 中枢（不自动加载媒体）：切 Tab 不该顺带发起一次相册扫描
+        // 照片 TAB 直接就是照片页：中枢那两张入口卡只是把「换个范围」伪装成「换一页」，
+        // 用户要先选进哪个相册才看得到照片，而范围随时可换（设计 §2）
         composable(TabDestination.PHOTOS.route) {
-            AlbumHubScreen(
-                onOpenSelection = { navController.openSubDestination(Route.ALBUM_SELECTION) },
-                onOpenFullCard = { navController.openSubDestination(Route.ALBUM_FULL_CARD) },
-                onOpenTransfer = { navController.openSubDestination(Route.DOWNLOAD) },
-                // 编辑已升为一级入口，这里切 Tab 而不是压子路由：留两条路进同一个页面，
-                // 返回键语义就会分叉
-                onOpenEdit = { navController.selectTab(TabDestination.CREATE) },
-                snackbarController = snackbarController
+            PhotosScreen(
+                onOpenViewer = { index -> navController.openSubDestination(Route.photoViewer(index)) },
+                onOpenTransfer = { navController.openSubDestination(Route.TRANSFER) },
+                onGoConnect = { navController.selectTab(TabDestination.CAMERA) },
+                snackbarController = snackbarController,
+                bottomSlot = bottomSlot
             )
         }
         composable(TabDestination.CREATE.route) {
@@ -94,24 +92,6 @@ fun AppNavHost(
             )
         }
 
-        composable(Route.ALBUM_SELECTION) {
-            AlbumScreen(
-                browseMode = BrowseMode.SELECTION,
-                snackbarController = snackbarController,
-                onOpenDownloads = { navController.openSubDestination(Route.DOWNLOAD) },
-                onOpenViewer = { index -> navController.openSubDestination(Route.photoViewer(index)) },
-                onBack = { navController.popBackStack() }
-            )
-        }
-        composable(Route.ALBUM_FULL_CARD) {
-            AlbumScreen(
-                browseMode = BrowseMode.FULL_CARD,
-                snackbarController = snackbarController,
-                onOpenDownloads = { navController.openSubDestination(Route.DOWNLOAD) },
-                onOpenViewer = { index -> navController.openSubDestination(Route.photoViewer(index)) },
-                onBack = { navController.popBackStack() }
-            )
-        }
         composable(Route.PHOTO_VIEWER) {
             PhotoViewerScreen(
                 onBack = { navController.popBackStack() },
@@ -139,8 +119,8 @@ fun AppNavHost(
                 snackbarController = snackbarController
             )
         }
-        composable(Route.DOWNLOAD) {
-            DownloadScreen(
+        composable(Route.TRANSFER) {
+            TransferScreen(
                 onBack = { navController.popBackStack() },
                 onGoAlbum = { navController.selectTab(TabDestination.PHOTOS) }
             )
