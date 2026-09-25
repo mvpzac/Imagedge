@@ -88,6 +88,10 @@
         <item quantity="one">已选 %1$d 项</item>
         <item quantity="other">已选 %1$d 项</item>
     </plurals>
+    <plurals name="transfer_batch_retry">
+        <item quantity="one">重试这 %1$d 项未完成</item>
+        <item quantity="other">重试这 %1$d 项未完成</item>
+    </plurals>
     <plurals name="photos_save_action">
         <item quantity="one">保存 %1$d 项到手机</item>
         <item quantity="other">保存 %1$d 项到手机</item>
@@ -274,7 +278,7 @@
     <string name="download_history_tab">记录</string>
     <string name="download_history_clear">清空记录</string>
     <string name="download_history_empty">暂无传输记录</string>
-    <string name="download_history_empty_desc">完成照片/视频下载后，记录会显示在这里，长按可查看详情</string>
+    <string name="download_history_empty_desc">完成照片/视频下载后，记录会显示在这里，点一行可查看详情</string>
     <string name="download_history_path">保存路径</string>
     <string name="download_history_start">开始时间</string>
     <string name="download_history_end">结束时间</string>
@@ -378,6 +382,23 @@
     <string name="transfer_resume_label">续传</string>
     <string name="transfer_resume_whole_object">失败整文件重传</string>
     <string name="transfer_resume_partial">分块续传</string>
+    <string name="transfer_batch_title">本批次</string>
+    <string name="transfer_batch_summary">已保存 %1$d 项，%2$d 项未完成</string>
+    <string name="transfer_view">查看</string>
+    <string name="transfer_record_ok">已保存</string>
+    <string name="transfer_record_failed">失败</string>
+    <string name="transfer_open_failed">打不开「%1$s」：%2$s</string>
+    <string name="transfer_open_no_app">这台设备没有能打开该格式的应用</string>
+    <string name="transfer_open_not_readable">系统读不到这份文件（可能已被删除或没有访问权限）</string>
+    <string name="transfer_open_location">位置：%1$s</string>
+    <string name="transfer_got_it">知道了</string>
+    <string name="download_history_reason">失败原因</string>
+    <string name="transfer_bar_active">正在传输 %1$d 项</string>
+    <string name="transfer_bar_failed">%1$d 项传输失败</string>
+    <string name="transfer_bar_failure_extra">另有 %1$d 项失败</string>
+    <string name="transfer_bar_failure_next">可查看原因并重试</string>
+    <string name="transfer_bar_active_next">点进去看进度</string>
+    <string name="transfer_bar_open">查看</string>
     <string name="transfer_resume_note">分块续传在 ZV-E10 整卡模式下被相机拒绝（每块回 0x2009），未实测机型上一律不启用</string>
 
     <!-- 相机档案与参数预设（T6） -->

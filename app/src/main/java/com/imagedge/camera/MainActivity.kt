@@ -10,6 +10,7 @@ import androidx.compose.runtime.collectAsState
 import coil.imageLoader
 import com.imagedge.camera.data.model.MediaSessionCache
 import com.imagedge.camera.data.remote.CameraRepository
+import com.imagedge.camera.data.transfer.TransferMiniBarStore
 import com.imagedge.camera.navigation.AppRoot
 import com.imagedge.camera.navigation.BottomSlotHost
 import com.imagedge.camera.ui.feedback.SnackbarController
@@ -45,6 +46,10 @@ class MainActivity : ComponentActivity() {
     @javax.inject.Inject
     lateinit var sessionCache: MediaSessionCache
 
+    /** 全局传输小条的状态源：底栏该画什么是根上的事，不在各页里各算一遍 */
+    @javax.inject.Inject
+    lateinit var transferMiniBar: TransferMiniBarStore
+
     override fun onStart() {
         super.onStart()
         // 功耗标准：回前台恢复 PTP 保活
@@ -73,7 +78,8 @@ class MainActivity : ComponentActivity() {
                 DesignScaleLocked {
                     AppRoot(
                         snackbarController = snackbarController,
-                        bottomSlot = bottomSlot
+                        bottomSlot = bottomSlot,
+                        transferMiniBar = transferMiniBar
                     )
                 }
             }

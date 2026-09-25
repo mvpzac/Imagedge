@@ -49,9 +49,13 @@ fun NavHostController.openSubDestination(route: String) {
     navigate(route) { launchSingleTop = true }
 }
 
+/** 当前栈顶路由；[AppRoot] 用它判断「是不是停在一级入口」，页面自己不读路由 */
+@Composable
+fun NavHostController.currentRoute(): String? {
+    val entry by currentBackStackEntryAsState()
+    return entry?.destination?.route
+}
+
 /** 当前所处的一级入口；在子页时为 null（底栏据此隐藏） */
 @Composable
-fun NavHostController.currentTab(): TabDestination? {
-    val entry by currentBackStackEntryAsState()
-    return TabDestination.fromRoute(entry?.destination?.route)
-}
+fun NavHostController.currentTab(): TabDestination? = TabDestination.fromRoute(currentRoute())

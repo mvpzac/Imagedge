@@ -51,6 +51,13 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
 - **传输策略（T3）**：`data/transfer/TransferPolicy.kt` 存尺寸/续传/拍后自动保存偏好，
   在下载页展示；**传输范围不是偏好**——它由相册浏览模式推导，存成偏好会出现
   「prefs 写着整卡、实际连着选片集」的假信息。自动保存走 `AutoSaveLedger` 去重。
+- **传输账目与批次（重构批次 C 第二刀）**：`download_task` 从「只存对象身份」变成「存整笔账」——
+  状态/进度/失败原因/相册 Uri/批次号/是否已看全部落库（v2→v3 只用 `ADD COLUMN`，老行取默认值或 NULL，
+  迁移实测过「装旧包造数据 → 覆盖安装新包」）。**一次提交算一批**（`TransferBatch.kt` 里
+  `batchId = 库里最大值 + 1`，在入队互斥锁内分配），批次摘要与全局任务条都只说「本批」。
+  重启时只有当时未完成的行才重新排队（PTP 整文件重传，没有断点），完成/失败是**账目**不是任务，
+  绝不自动重下。任务行唯一的常规删除时机是用户点「清空」；「清空记录」只清 `download_history`，
+  **一张照片都不删**。规则集中在 `TransferBatch.kt` 的纯函数里（有单测），`DownloadManager` 只做 I/O。
 - **页面骨架与安全区域（重构批次 A）**：`ui/layout/AppScreenFrame` 是安全区域的**唯一所有者**
   （top 只给标题栏，bottom + horizontal 只给内容），`AppPageHeader` 只设最小高度、不自己吃系统边距。
   旧 `AppPage`/`PageHeader` 保留给尚未迁移的页面，但**同一页只能有一套**；
@@ -75,10 +82,16 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
 - **照片页与底部条位（重构批次 C）**：`feature/photos/PhotosScreen` 是照片 Tab 的根，
   不再有「相册中枢」那一层；范围（选片集 ↔ 存储卡）是**业务动作**，走 `BrowseScopeSheet`
   切换并先确认相机通道成功才更新界面状态，传输中禁用切换但面板仍可打开看说明。
-  底部同一时刻只能有一条栏：`navigation/BottomSlot` 是唯一真相，
-  页面进入选择态时 `claim(SelectionBar)`、离页/退出时 `release`，`AppRoot` 只在
-  `Navigation` 时画悬浮胶囊。网格格子（`PhotoGridTile`）**整格一个触点**，
-  勾选标记不注册第二个点击。
+  底部同一时刻只能有一条栏：`navigation/BottomSlot` 是唯一真相，页面进入选择态时
+  `claim(SelectionBar)`、离页/退出时 `release`；根上的 `bottomLayoutOf(页面占位, 传输小条, 是否在一级入口)`
+  是**唯一**决定「这一帧底部画什么」的地方（设计 §8.3：一级入口是「传输小条＋导航」两层，
+  选择态则两条都不画，绝不允许导航+任务条+保存按钮三层叠加）。网格格子（`PhotoGridTile`）
+  **整格一个触点**，勾选标记不注册第二个点击。
+- **全局传输小条（重构批次 C 第二刀）**：`feature/transfer/TransferMiniBar` 由 `AppRoot` 画在
+  导航胶囊上方，内容来自 `data/transfer/TransferMiniBarStore`（纯函数 `miniBarOf` 的包装）。
+  它只在**有活动任务**或**本批有尚未看过的失败**时存在，进传输页即算看过。
+  只在一级入口出现：二级页没有任何东西为它预留高度，浮上去就是压住最后一行。
+  它的高度与胶囊一起经 `LocalNavClearance` 实测下发，不是常量。
 - **引导呈现与业务解耦**：`ui/guidance/`（`GuideCard`/`ContextHint`/`HelpSheet`）只呈现内容，
   不查权限、不连相机、不决定是否出现；出现与否由 `data/guidance/GuidanceStore` 按
   `guideId + version + 机型` 判定，且「已看过」与「任务成功过」是两条独立记录。

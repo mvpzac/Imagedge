@@ -48,12 +48,17 @@ object AppModule {
     @Singleton
     fun provideLutProcessor(): LutProcessor = GpuLutProcessor()
 
-    /** 下载任务数据库（队列 + 传输记录持久化） */
+    /**
+     * 下载任务数据库（队列 + 传输记录持久化）。
+     *
+     * 只登记迁移、绝不 `fallbackToDestructiveMigration()`：这张表存的正是「重启后还要能看见并
+     * 重试的未完成传输」，清库重建恰好把本次要保住的东西抹掉，而且它连着系统相册里的文件。
+     */
     @Provides
     @Singleton
     fun provideDownloadDatabase(@ApplicationContext context: Context): DownloadDatabase =
         Room.databaseBuilder(context, DownloadDatabase::class.java, "download.db")
-            .addMigrations(DownloadDatabase.MIGRATION_1_2)
+            .addMigrations(DownloadDatabase.MIGRATION_1_2, DownloadDatabase.MIGRATION_2_3)
             .build()
 
     /** 下载任务 DAO */

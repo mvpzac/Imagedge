@@ -171,6 +171,7 @@
 | 文本输入 | `AppTextField` | 裸 `OutlinedTextField` |
 | 强调容器（一屏最多一处） | `GlassCard` | 裸 `Card` |
 | 普通入口行 / 设置行 | `ActionRow` / `SettingsRow`（不透明表面） | 给每个入口套玻璃 |
+| 底部传输状态条 | `feature/transfer/TransferMiniBar`，由 `AppRoot` 按 `bottomLayoutOf` 统一调度 | 页面自己 `align(Bottom)` 贴一条，与导航/保存条互相盖 |
 | 一级页的任务入口 | `ActionRow`（同级同表面，禁用必须带原因）；页面私有组件（如 `CameraStatusCard`）留在 `feature/<页>/` | 为设计文档里的名字（`TaskEntry`）再建一个同义包装 |
 | 分组标题 | `GroupTitle` | 手拼 Row + Text |
 | 引导卡 / 情境提示 / 步骤面板 | `ui/guidance/`：`GuideCard` / `ContextHint` / `HelpSheet` | 页内自拼说明块 |
@@ -249,7 +250,7 @@
 | 基础组件 | `AppPage`（页面骨架）、`AppSection`（区块）、`AppChip` / `AppChipRow`（选项）、`AppSlider`（参数）、`AppTextField`（输入）、`AppSwitch` / `AppSwitchRow`（开关）、`AppIconButton`（图标按钮）、`AppLink`（行内动作）、`AppDivider` |
 | `PageHeader` 返回钮 | 36dp 触控 → **48dp 触控**（视觉仍 36dp） |
 | 页面迁移 | **`feature/` 下裸 M3 控件全部清零**（46 → 0）：编辑调节、边框水印、LIVE 三拼、编辑中枢、下载页、设置页、首页、遥控页、视频转 Live、导出设置面板、相册页、看图页、扫码页 |
-| 页面骨架 | 5 个工具页统一走 `AppPage`（边距 16dp + 滚动 + 导航栏避让）；批次 A 新增 `AppScreenFrame`（设置页已迁），批次 B 把悬浮导航的底部让位量解决掉（`LocalNavClearance` 实测下发）；其余 Tab 页与沉浸页的骨架迁移仍单独排期 |
+| 页面骨架 | 5 个工具页统一走 `AppPage`（边距 16dp + 滚动 + 导航栏避让）；批次 A 新增 `AppScreenFrame`（设置页已迁），批次 B 把悬浮导航的底部让位量解决掉（`LocalNavClearance` 实测下发），批次 C 传输页迁到 `AppScreenFrame` + `AppPageHeader`（记录行/任务行的动作单独占一行，200% 字体下不裁字）；其余 Tab 页与沉浸页的骨架迁移仍单独排期 |
 | 颜色字面量 | `feature/` 下为零（沉浸层遮罩/手柄统一用 `ViewerBackdrop` / `OnViewer`） |
 | 图标资产 | 新增 `ArrowUp` / `ArrowDown`（三拼重排序需要），补齐 `Lucide` 集合 |
 

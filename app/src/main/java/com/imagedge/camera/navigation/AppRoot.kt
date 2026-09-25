@@ -7,6 +7,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -28,7 +29,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.rememberNavController
+import com.imagedge.camera.data.transfer.TransferMiniBarStore
+import com.imagedge.camera.feature.transfer.TransferMiniBar
 import com.imagedge.camera.ui.feedback.SnackbarController
+import com.imagedge.camera.ui.theme.Spacing
 import com.imagedge.camera.ui.glass.GlassBackdropLayer
 import com.imagedge.camera.ui.glass.LocalGlassBackdrop
 import com.imagedge.camera.ui.glass.LocalGlassLevel
@@ -57,14 +61,23 @@ import kotlinx.coroutines.delay
 @Composable
 fun AppRoot(
     snackbarController: SnackbarController,
-    bottomSlot: BottomSlotHost
+    bottomSlot: BottomSlotHost,
+    transferMiniBar: TransferMiniBarStore
 ) {
     val navController = rememberNavController()
-    val currentTab = navController.currentTab()
-    // 底部条位互斥：页面占位时（选择态 / 传输小条）悬浮导航让位，
+    // 路由只在这里读一次：底栏要不要画、是不是停在一级入口，都问的是同一件事
+    val route = navController.currentRoute()
+    val currentTab = TabDestination.fromRoute(route)
+    // 底部条位互斥：页面占位时（选择态）悬浮导航与任务条一起让位，
     // 否则三条各自贴底只会互相盖住（设计 §4.3 禁止三层叠加）
     val slotOwner by bottomSlot.owner.collectAsStateWithLifecycle()
-    val showBottomBar = currentTab != null && slotOwner == BottomSlotOwner.Navigation
+    val miniBar by transferMiniBar.bar.collectAsStateWithLifecycle(initialValue = null)
+    val bottomLayout = bottomLayoutOf(
+        pageOwner = slotOwner,
+        miniBar = miniBar,
+        onTabPage = currentTab != null
+    )
+    val showBottomBar = bottomLayout.showNav
 
     // 全局轻提示：任意页面 show() 一条消息，这里统一以顶部滑入弹窗呈现
     var bannerMessage by remember { mutableStateOf<String?>(null) }
@@ -90,8 +103,13 @@ fun AppRoot(
     // 子页没有底栏，没人消费就不必采集整个 NavHost：省掉最重页面上一次全屏离屏渲染
     val captureNavBackdrop = captureBackdrop && showBottomBar
 
-    // 导航胶囊实测高度换算出的底部留白，Tab 页自己吃（见 LocalNavClearance）
+    // 导航胶囊 + 传输小条实测高度换算出的底部留白，Tab 页自己吃（见 LocalNavClearance）
     var navClearance by remember { mutableStateOf(NavClearanceFallback) }
+    var miniBarClearance by remember { mutableStateOf(0.dp) }
+    val bottomClearance = if (!showBottomBar) 0.dp else {
+        // 两条同时贴底：任务条画在胶囊上方，页面要一次让出「胶囊 + 任务条 + 各自的边距」
+        navClearance + if (bottomLayout.showMiniBar) miniBarClearance else 0.dp
+    }
 
     CompositionLocalProvider(LocalGlassLevel provides glassLevel) {
         Box(modifier = Modifier.fillMaxSize()) {
@@ -110,7 +128,7 @@ fun AppRoot(
             ) {
                 CompositionLocalProvider(
                     LocalGlassBackdrop provides if (captureBackdrop) pageBackdrop else null,
-                    LocalNavClearance provides if (showBottomBar) navClearance else 0.dp
+                    LocalNavClearance provides bottomClearance
                 ) {
                     AppNavHost(
                         navController = navController,
@@ -121,17 +139,31 @@ fun AppRoot(
                 }
             }
 
-            // 悬浮玻璃导航栏：叠在外层 Box 底部（**不**放进 Scaffold bottomBar），
-            // 这样页面内容才能真正延伸到导航栏下方
+            // 底部这一摞：任务条在上、导航胶囊在下，一起贴在屏幕底边。
+            // 刻意**不**放进 Scaffold bottomBar——页面内容要能延伸到导航栏下方，
+            // 滚动时从胶囊底下滑过，玻璃才有东西可折射（代价就是要自己量让位高度）。
             if (showBottomBar) {
-                FloatingNavBar(
-                    backdrop = if (captureNavBackdrop) navBackdrop else null,
-                    glassLevel = glassLevel,
-                    selected = currentTab,
-                    onSelect = { navController.selectTab(it) },
-                    onClearanceChanged = { navClearance = it },
-                    modifier = Modifier.align(Alignment.BottomCenter)
-                )
+                Column(modifier = Modifier.align(Alignment.BottomCenter)) {
+                    // 传输小条只在一级入口出现，且选择态整摞都不画（bottomLayoutOf 已裁决）。
+                    // 它不进 navBackdrop 的采集层：那条背景是「页面内容」，
+                    // 把它自己采进去就是自己折射自己（已知坑 2 的递归）。
+                    val bar = miniBar
+                    if (bottomLayout.showMiniBar && bar != null) {
+                        TransferMiniBar(
+                            content = bar,
+                            onOpen = { navController.openSubDestination(Route.TRANSFER) },
+                            onClearanceChanged = { miniBarClearance = it },
+                            modifier = Modifier.padding(bottom = Spacing.M)
+                        )
+                    }
+                    FloatingNavBar(
+                        backdrop = if (captureNavBackdrop) navBackdrop else null,
+                        glassLevel = glassLevel,
+                        selected = currentTab,
+                        onSelect = { navController.selectTab(it) },
+                        onClearanceChanged = { navClearance = it }
+                    )
+                }
             }
             TopBanner(
                 message = bannerMessage,

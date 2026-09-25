@@ -185,6 +185,30 @@ com.imagedge.camera/
     底部条位同理：`BottomSlotHost` 只有一个持有者，谁占着底部是一处的决定，
     不是三条各自 `align(Bottom)` 互相盖。
 
+31. **「完成即删行」和「重启后还能看见并重试未完成项」不能同时成立**（批次 C 第二刀）：
+    v2 的 `download()` 在 finally 里删 Room 行，所以进程一没，失败原因与相册 Uri 全部丢失，
+    未完成项也被一律读成「排队中」。现在任务行带着状态/进度/原因/Uri/批次/是否已看一起落库，
+    **唯一**能删掉它的常规动作是用户点「清空」。三处连带改动，漏一个就会静默丢数据：
+    ① 结局写入跑在 `NonCancellable + queueMutationMutex` 里——下载协程是被取消才走到 finally，
+    那里任何普通挂起（拿锁、写库）都会立刻抛出，结局就永远进不了库；
+    ② 系统 dataSync 时限那条路径改成**写失败态**而不是删行，并用 `systemStoppedIds` 让 finally 让位
+    （否则它会把原因改写成协程取消的英文异常）；
+    ③ 用户取消仍然删行且**不写传输记录**——「我按了取消」不能变成「相机传坏了」。
+    这一条在重构中丢过一次（history 少了 `if (!cancelled)`），是灌 20 000 条队列才暴露的。
+32. **Room 加 NOT NULL 列时，DEFAULT 字面量必须与 `@ColumnInfo(defaultValue)` 逐字一致**（批次 C）：
+    `ALTER TABLE ... ADD COLUMN state TEXT NOT NULL DEFAULT 'QUEUED'` 要配
+    `@ColumnInfo(defaultValue = "'QUEUED'")`——字符串默认值带那一对外层单引号，
+    因为 Room 比的是 sqlite_master 里的原文。写错的表现是老用户**启动即崩**，而
+    `exportSchema = false` 不会替你拦住它（它只是不导出 JSON）。
+    两个自查动作：改完看 `app/build/generated/ksp/debug/**/DownloadDatabase_Impl.kt` 里
+    Room 自己生成的 CREATE TABLE，与迁移 SQL 逐字对一遍；再用「装改动前的 APK → run-as 造 v2 数据
+    → 覆盖安装新 APK」实测老库读不读得出来，别只测新装。
+33. **`ids.forEach { cancel(it) }` 在大队列上就是 ANR**（批次 C）：`cancel` 每次都要整表
+    `filterNot` 一遍，n 个待取消是 n² 次全表拷贝。任务行现在会跨重启累积（完成/失败不再被删），
+    整卡选片一次就是几千条，实测 15 000 条时主线程直接被系统判无响应。
+    批量操作必须一次算好 id 集合、只重写一次列表。这类「规模」问题单测与 lint 都抓不到，
+    只有往 debug 库里灌数据才现形。
+
 ## 怎么把界面跑起来（无真机也能验 UI 与存储）
 
 ```bash
