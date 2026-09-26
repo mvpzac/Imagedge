@@ -84,6 +84,9 @@ fun LiveTriptychScreen(
         title = "LIVE 图三拼",
         state = EditorFrameState(
             hasSubject = state.slots.isNotEmpty(),
+            // 选好的三张素材与裁切就是「没存盘的改动」；导出完成后产物已经落盘，离开不必再问
+            hasEdits = state.slots.isNotEmpty() &&
+                state.phase != LiveTriptychViewModel.Phase.DONE,
             busy = when {
                 state.exporting -> EditorBusy.Exporting
                 state.parsing || state.previewLoading -> EditorBusy.Preparing

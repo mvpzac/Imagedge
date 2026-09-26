@@ -771,11 +771,17 @@ private fun DetailLine(label: String, value: String) {
 }
 
 /** 状态文案 */
+@Composable
 private fun stateLabel(task: DownloadTask): String = when (task.state) {
-    DownloadState.QUEUED -> "等待中"
-    DownloadState.DOWNLOADING -> "${task.progress}%"
-    DownloadState.DONE -> "完成"
-    DownloadState.FAILED -> "失败"
+    DownloadState.QUEUED -> stringResource(R.string.download_state_queued)
+    DownloadState.DOWNLOADING -> if (task.sizeBytes > 0) {
+        stringResource(R.string.download_state_downloading, task.progress)
+    } else {
+        // 与上方进度条同一口径：算不出来的数字就不写
+        stringResource(R.string.download_state_downloading_unknown)
+    }
+    DownloadState.DONE -> stringResource(R.string.download_state_done)
+    DownloadState.FAILED -> stringResource(R.string.download_state_failed)
     DownloadState.NOT_DOWNLOADED -> ""
 }
 

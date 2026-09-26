@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -49,6 +50,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
@@ -130,6 +132,7 @@ fun PhotoEditScreen(
                     else -> EditorBusy.None
                 },
                 canReset = state.hasEdits,
+                hasEdits = state.hasEdits,
                 saveVisible = state.hasImage,
                 result = state.message,
                 resultOk = state.saved
@@ -201,64 +204,77 @@ private fun PreviewArea(
         else -> state.filtered ?: state.original
     }
     val aspect = image?.let { it.width.toFloat() / it.height } ?: (4f / 3f)
+    // 竖图按宽度铺满会高过整屏，调色/裁剪/旋转三个 Tab 被推到屏幕外——
+    // 实测 1080×2400 上预览占掉 290..1992，工具落在 2251，首页完全看不见它们。
+    // 看不到有哪个工具，等于没有工具。
+    // 高度上限必须落在**预览块自己**身上，并且保持照片比例：裁剪框是按这个 Box 的像素
+    // 换算的，让照片在固定高度里 letterbox，裁剪就会偏。
+    val previewHeight = with(LocalConfiguration.current) {
+        (screenHeightDp * PREVIEW_HEIGHT_FRACTION).dp
+    }
 
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(aspect)
-            .clip(RoundedCornerShape(Radius.Card))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            // 长按对比原图（裁剪分区不启用：那一屏看的是未裁剪底图）
-            .pointerInput(state.hasImage, state.tab) {
-                detectTapGestures(
-                    onPress = {
-                        if (!state.hasImage || state.tab == EditTab.CROP) {
-                            return@detectTapGestures
-                        }
-                        viewModel.setComparing(true)
-                        tryAwaitRelease()
-                        viewModel.setComparing(false)
-                    }
-                )
-            },
+        modifier = Modifier.fillMaxWidth(),
         contentAlignment = Alignment.Center
     ) {
         if (image != null) {
-            Image(
-                bitmap = image.asImageBitmap(),
-                contentDescription = stringResource(R.string.edit_title),
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit
-            )
-            if (state.tab == EditTab.CROP) {
-                CropOverlay(
-                    rect = state.crop,
-                    normTargetAspect = state.cropAspect.ratio?.let { it / state.cropBaseAspect },
-                    onRectChange = viewModel::setCropRect
+            Box(
+                modifier = Modifier
+                    .heightIn(max = previewHeight)
+                    .aspectRatio(aspect, matchHeightConstraintsFirst = true)
+                    .clip(RoundedCornerShape(Radius.Card))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    // 长按对比原图（裁剪分区不启用：那一屏看的是未裁剪底图）
+                    .pointerInput(state.hasImage, state.tab) {
+                        detectTapGestures(
+                            onPress = {
+                                if (!state.hasImage || state.tab == EditTab.CROP) {
+                                    return@detectTapGestures
+                                }
+                                viewModel.setComparing(true)
+                                tryAwaitRelease()
+                                viewModel.setComparing(false)
+                            }
+                        )
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    bitmap = image.asImageBitmap(),
+                    contentDescription = stringResource(R.string.edit_title),
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit
+                )
+                if (state.tab == EditTab.CROP) {
+                    CropOverlay(
+                        rect = state.crop,
+                        normTargetAspect = state.cropAspect.ratio?.let { it / state.cropBaseAspect },
+                        onRectChange = viewModel::setCropRect
+                    )
+                }
+                if (state.processing) {
+                    CircularProgressIndicator(Modifier.padding(8.dp))
+                }
+                // 状态角标
+                val badge = when {
+                    state.tab == EditTab.CROP -> stringResource(R.string.edit_crop_hint)
+                    state.comparing -> stringResource(R.string.edit_compare_original)
+                    else -> stringResource(R.string.edit_compare_hint)
+                }
+                Text(
+                    text = badge,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(8.dp)
+                        .background(
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                            RoundedCornerShape(Radius.Tag)
+                        )
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
                 )
             }
-            if (state.processing) {
-                CircularProgressIndicator(Modifier.padding(8.dp))
-            }
-            // 状态角标
-            val badge = when {
-                state.tab == EditTab.CROP -> stringResource(R.string.edit_crop_hint)
-                state.comparing -> stringResource(R.string.edit_compare_original)
-                else -> stringResource(R.string.edit_compare_hint)
-            }
-            Text(
-                text = badge,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(8.dp)
-                    .background(
-                        MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-                        RoundedCornerShape(Radius.Tag)
-                    )
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            )
         } else {
             EmptyState(
                 title = stringResource(R.string.edit_pick_hint),
@@ -711,3 +727,6 @@ private fun LutHelpOverlay(onDismiss: () -> Unit) {
         }
     }
 }
+
+/** 预览最多占掉屏幕高度的这个比例，剩下的留给工具区与主按钮 */
+private const val PREVIEW_HEIGHT_FRACTION = 0.42f

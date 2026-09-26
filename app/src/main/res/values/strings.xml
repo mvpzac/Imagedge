@@ -53,9 +53,11 @@
     <string name="home_guide_body">相机端不打开「智能手机连接」，手机扫码只会一直等待。</string>
     <string name="home_guide_dismiss">知道了</string>
 
-    <!-- 连接帮助面板的三个步骤（用户主动打开，不自动出现） -->
-    <string name="home_guide_step1">相机进入「智能手机连接」，屏幕出现二维码</string>
-    <string name="home_guide_step2">点「扫码连接」，手机自动配网</string>
+    <!-- 连接帮助面板的三个步骤（用户主动打开，不自动出现）。
+         步骤 2 原来写「点『扫码连接』」——那个按钮在批次 B/D 已删，指引指向了一个不存在的入口；
+         菜单名也不写成全机型统一：机型叫法不同，伪造一条路径等于让新手对著找不到的菜单怀疑自己 -->
+    <string name="home_guide_step1">在相机菜单里打开「智能手机连接」，屏幕出现二维码（叫法随机型不同，找不到就在相机菜单里搜「智能手机」）</string>
+    <string name="home_guide_step2">回到手机点「连接相机」，按向导扫码自动配网</string>
     <string name="home_guide_step3">相机端勾选照片，即可浏览与下载</string>
 
     <!-- 相册 -->
@@ -256,6 +258,13 @@
     <string name="download_title">传输</string>
     <string name="download_clear">清空</string>
     <string name="download_cancel">取消任务</string>
+    <!-- 任务状态标签。大小未知时**不打百分比**：progress 只在 total>0 时算得出来，
+         在这种任务上写「0%」就是说谎，而同一行上方的进度条已经改用不定长指示了 -->
+    <string name="download_state_queued">等待中</string>
+    <string name="download_state_downloading">传输中 %1$d%%</string>
+    <string name="download_state_downloading_unknown">传输中（大小未知）</string>
+    <string name="download_state_done">已保存</string>
+    <string name="download_state_failed">失败</string>
     <string name="download_cancel_all">全部取消</string>
     <string name="download_empty">没有进行中的任务</string>
     <string name="download_empty_desc">在「照片」里点「选择」，勾选后点「保存到手机」，任务会出现在这里</string>
@@ -397,6 +406,10 @@
     <string name="editor_reset_confirm_title">放弃这次调整？</string>
     <string name="editor_reset_confirm_body">回到原图的初始状态。已经保存到相册的副本不会被改动。</string>
     <string name="editor_keep_editing">继续编辑</string>
+    <!-- 离开编辑器：只有真的改过东西才问（设计 §2「有未保存改动才确认，普通查看不确认」） -->
+    <string name="editor_leave_title">还没保存，确定离开？</string>
+    <string name="editor_leave_body">这次的改动还没有存成副本，离开后会丢失。已经保存到相册的副本不会被改动。</string>
+    <string name="editor_leave_discard">放弃修改并离开</string>
     <string name="editor_compare_original">对比原图</string>
     <string name="editor_show_result">显示调整结果</string>
 

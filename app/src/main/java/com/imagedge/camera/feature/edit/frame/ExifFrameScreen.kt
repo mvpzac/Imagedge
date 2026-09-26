@@ -71,6 +71,7 @@ fun ExifFrameScreen(
                 else -> EditorBusy.None
             },
             canReset = state.hasEdits,
+            hasEdits = state.hasEdits,
             // 还没选图时不摆主按钮：一个灰掉的「保存副本」只会让人先想它为什么是灰的
             saveVisible = state.sourceUri != null,
             result = state.message,

@@ -100,6 +100,8 @@ fun VideoToLivePhotoScreen(
         title = "视频转 LIVE 图",
         state = EditorFrameState(
             hasSubject = state.session != null,
+            // 会话还在 = 片段/封面/声音的选择还没导出；结果页 session 已空，不必再问
+            hasEdits = state.session != null,
             busy = if (state.processing) EditorBusy.Exporting else EditorBusy.None,
             saveVisible = state.session != null,
             result = state.message,

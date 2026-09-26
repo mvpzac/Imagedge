@@ -1,5 +1,6 @@
 package com.imagedge.camera.ui.layout
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -50,6 +51,12 @@ data class EditorFrameState(
      * 用户要先弄清它为什么是灰的，而它本来就不该出现在那儿。
      */
     val saveVisible: Boolean = true,
+    /**
+     * 有没有**还没存成副本的改动**。非空时离开这一屏要先问一句（设计 §2）：
+     * 与 [canReset] 分开是必要的——三拼的「改动」是选好的三张素材，而它没有「重置」这一档。
+     * 没改过就别问：每次返回都弹一个框，用户学会的是随手点掉，那时它保护不了任何东西。
+     */
+    val hasEdits: Boolean = false,
     val result: String? = null,
     val resultOk: Boolean = true
 ) {
@@ -64,7 +71,10 @@ data class EditorFrameState(
  *    PTP 写入都不能中途丢下半成品），所以返回键只说明「仍在生成，请稍候」并留在原页；
  *    给一个不起作用的「取消」按钮，用户会以为产物已经废了。
  * 2. **重置是丢成果的决定**，所以过确认对话框（UI 规范 §5：会丢失成果的决定要确认）。
- * 3. 结果说明常驻在内容上方，成功与失败同一条位置；失败不清空编辑参数
+ * 3. **带着没存盘的改动离开要先问一句**（设计 §2）：左上角返回、系统返回键、返回手势
+ *    三条路径走同一个判断；没改过就不问——每次都弹一个框，用户学会的是随手点掉，
+ *    那时它什么都保护不了。
+ * 4. 结果说明常驻在内容上方，成功与失败同一条位置；失败不清空编辑参数
  *    （四个编辑器的 ViewModel 本来就都保留参数，这里保证界面真的把它说出来）。
  *
  * @param content 预览 + 工具区。滚动与页面内边距由骨架负责，编辑器不再自己拼
@@ -85,16 +95,36 @@ fun EditorFrame(
     content: @Composable ColumnScope.() -> Unit
 ) {
     var confirmReset by remember { mutableStateOf(false) }
+    var confirmLeave by remember { mutableStateOf(false) }
+
+    // 三条系统返回的处理，条件互斥，所以同帧只会有一条生效。
+    // 系统返回键/手势必须和左上角那颗返回按钮走同一判断，否则「两条路径行为不一致」
+    // 会以另一种形式复现：按钮挡住的东西，手势直接绕过去
+    BackHandler(enabled = state.exporting) {
+        // 导出期间不离开，也不假装取消（见 KDoc 第 1 条）
+    }
+    BackHandler(enabled = !state.exporting && state.hasEdits && !confirmLeave) {
+        confirmLeave = true
+    }
+    BackHandler(enabled = confirmLeave) {
+        confirmLeave = false
+    }
+
+    /** 离开这一屏：改过东西先问，没改过直接走；导出期间不离开（见 KDoc 第 1 条） */
+    fun requestLeave() {
+        when {
+            state.exporting -> Unit
+            state.hasEdits -> confirmLeave = true
+            else -> onBack()
+        }
+    }
 
     AppScreenFrame(
         modifier = modifier,
         topBar = {
             AppPageHeader(
                 title = title,
-                onBack = {
-                    // 导出中不离开：见 KDoc 第 1 条
-                    if (!state.exporting) onBack()
-                },
+                onBack = ::requestLeave,
                 actions = {
                     if (onReset != null) {
                         AppLink(
@@ -141,6 +171,29 @@ fun EditorFrame(
                 )
             }
         }
+    }
+
+    if (confirmLeave) {
+        AlertDialog(
+            onDismissRequest = { confirmLeave = false },
+            title = { Text(stringResource(R.string.editor_leave_title)) },
+            text = { Text(stringResource(R.string.editor_leave_body)) },
+            confirmButton = {
+                AppLink(
+                    text = stringResource(R.string.editor_leave_discard),
+                    onClick = {
+                        confirmLeave = false
+                        onBack()
+                    }
+                )
+            },
+            dismissButton = {
+                AppLink(
+                    text = stringResource(R.string.editor_keep_editing),
+                    onClick = { confirmLeave = false }
+                )
+            }
+        )
     }
 
     if (confirmReset && onReset != null) {
