@@ -481,6 +481,20 @@ class PhotosViewModel @Inject constructor(
     /** 筛选切换反馈（筛选为 UI 局部状态，由 UI 调用） */
     fun onFilterChanged() = haptics.tick()
 
+    /**
+     * 全选 / 取消全选**当前筛选出来的这一批**（设计 §4.3「全选当前列表」）。
+     *
+     * 传进来的是筛选后的列表，不是整个相册：筛成 RAW 之后点「全选」却把 JPEG 也勾上，
+     * 用户看到的就不是他按下的那件事。键与 [toggleSelect] 同为 channelKey。
+     */
+    fun setManySelected(items: List<MediaItem>, selected: Boolean) {
+        val keys = items.mapTo(HashSet()) { it.channelKey }
+        _selected.update { current ->
+            if (selected) current - keys else current + keys
+        }
+        haptics.tick()
+    }
+
     /** 清空选中 */
     fun clearSelection() {
         _selected.value = emptySet()

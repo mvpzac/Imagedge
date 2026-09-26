@@ -78,6 +78,7 @@ fun SettingsScreen(
 
     LaunchedEffect(Unit) { viewModel.refreshLuts() }
 
+    var guidesReopened by rememberSaveable { mutableStateOf(false) }
     var exportTarget by rememberSaveable { mutableStateOf<String?>(null) }
     // 待删除的 LUT（先确认再删，避免误触丢失用户自己导入的滤镜）
     var deleteTarget by rememberSaveable { mutableStateOf<String?>(null) }
@@ -230,6 +231,24 @@ fun SettingsScreen(
                     icon = Lucide.ShieldCheck,
                     onClick = onOpenPermissions
                 )
+                // 关过的引导要能召回：新手常常是在不该关的时候点了「知道了」，
+                // 之后就没有第二条路把说明找回来（新手手册 §5）
+                ActionRow(
+                    title = stringResource(R.string.settings_guides_entry),
+                    description = stringResource(R.string.settings_guides_entry_desc),
+                    icon = Lucide.CircleQuestionMark,
+                    onClick = {
+                        viewModel.reopenGuides()
+                        guidesReopened = true
+                    }
+                )
+                if (guidesReopened) {
+                    Text(
+                        text = stringResource(R.string.settings_guides_reopened),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             // ── ⑤ 关于 ──

@@ -16,14 +16,13 @@ import javax.inject.Singleton
  */
 
 /**
- * 引导记录。
+ * 引导记录：**只记「看过/已关闭」这一件事**。
  *
- * 两条独立的事实，刻意分开存：
- * - **看过/已关闭**：用户点过「知道了」。这只影响指导卡还显不显示；
- * - **任务成功过**：这条路径真的走通过一次。
+ * 手册原本还要分开存「这条路径做成过一次」。这里刻意不存第二份：
+ * 「有没有成功存下照片」是传输历史表里已经存在的事实（`download_history` 非空即成立），
+ * 在偏好设置里再记一个布尔就是第二个真相源——两边一旦不同步，界面就会在用户已经
+ * 传成过几十张之后继续给他看「第一次怎么传」。本轮重构删掉的就是这类重复状态。
  *
- * 把它们合成一个布尔就会出错：点「知道了」不等于已完成（新手常常是看懂了字面、
- * 仍然不知道在哪个设备上操作），反过来任务成功过也不代表该文案不需要再看。
  * 键里带 `guideId + version + 可选机型`：文案改版或换了机型，旧的「已看过」不该继续压制提示。
  *
  * 忙碌、权限被拒、连接错误**不读这里**——那些状态该不该显示由业务条件自己决定。
@@ -35,22 +34,17 @@ class GuidanceStore @Inject constructor(
 
     private val prefs = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
-    /** 这条引导现在该不该出现（未被用户关闭、且该任务尚未成功过一次） */
-    fun shouldShow(guideId: String, model: String? = null): Boolean = !anySet(guideId, model, SET_DISMISSED)
+    /** 这条引导现在该不该出现（未被用户关闭） */
+    fun shouldShow(guideId: String, model: String? = null): Boolean =
+        !keyOf(guideId, model).let { it in prefs.getStringSet(SET_DISMISSED, emptySet()).orEmpty() }
 
-    /** 用户主动关闭/确认已知晓。不影响「成功过」记录 */
+    /** 用户主动关闭/确认已知晓 */
     fun markDismissed(guideId: String, model: String? = null) = put(guideId, model, SET_DISMISSED)
-
-    /** 该任务确实走通过一次（由业务成功事件调用，不是由看了引导调用） */
-    fun markTaskSucceeded(guideId: String, model: String? = null) = put(guideId, model, SET_SUCCEEDED)
-
-    fun hasSucceeded(guideId: String, model: String? = null): Boolean = anySet(guideId, model, SET_SUCCEEDED)
 
     /**
      * 设置里的「使用帮助」重新打开引导。
      *
-     * 只清「已关闭」，**不清「成功过」**：重看教程不该把已经做成的事实抹掉，
-     * 否则老用户会重新看到一堆他早就会的操作提示。
+     * 新手常常是在不该关的时候点了「知道了」，之后就没有第二条路把说明找回来。
      */
     fun reopenGuides() {
         prefs.edit { remove(SET_DISMISSED) }
@@ -63,11 +57,6 @@ class GuidanceStore @Inject constructor(
         prefs.edit { putStringSet(set, current) }
     }
 
-    private fun anySet(guideId: String, model: String?, vararg sets: String): Boolean {
-        val key = keyOf(guideId, model)
-        return sets.any { set -> key in prefs.getStringSet(set, emptySet()).orEmpty() }
-    }
-
     /** 机型参与键值：同一份引导在 ZV-E10 上关掉，不该在另一台机器上也消失 */
     private fun keyOf(guideId: String, model: String?): String = "$guideId@${model ?: "_"}"
 
@@ -75,6 +64,5 @@ class GuidanceStore @Inject constructor(
         /** 与其他应用设置同一个文件（主题、下载目录等键也在这里） */
         const val PREFERENCES = "settings"
         const val SET_DISMISSED = "guide_dismissed"
-        const val SET_SUCCEEDED = "guide_succeeded"
     }
 }

@@ -84,6 +84,8 @@
     <string name="photos_select_action">选择</string>
     <string name="photos_transfer_action">传输</string>
     <string name="photos_cancel_selection">取消选择</string>
+    <string name="photos_select_all">全选</string>
+    <string name="photos_deselect_all">取消全选</string>
     <string name="photos_saving">正在加入队列…</string>
     <string name="photos_pick_first">请选择照片</string>
     <string name="photos_tile_toggle_hint">选择这张</string>
@@ -124,6 +126,8 @@
     <string name="ble_connected_prefix">蓝牙遥控已连接：</string>
     <string name="ble_disconnect_btn">断开蓝牙</string>
     <string name="ble_connecting_prefix">正在连接蓝牙遥控：</string>
+    <!-- 共用确认框的取消键（ui/components/ConfirmDialog） -->
+    <string name="action_cancel">取消</string>
     <string name="viewer_back">返回</string>
     <string name="viewer_download">下载</string>
     <string name="viewer_loading">加载原图…</string>
@@ -158,6 +162,9 @@
     <string name="settings_download_hint">照片保存至所选目录（默认 DCIM/Imagedge，系统相册可见）；RAW/JPG/视频均支持</string>
     <string name="settings_section_about">关于</string>
     <string name="settings_permission_entry_desc">查看本应用使用的全部权限及用途</string>
+    <string name="settings_guides_entry">使用帮助</string>
+    <string name="settings_guides_entry_desc">重新打开已经关掉的连接与传图引导</string>
+    <string name="settings_guides_reopened">已重新打开引导，回到相机与照片页就能看到。</string>
 
     <!-- 权限使用说明（诚实披露 + 按需申请） -->
     <string name="permission_title">权限使用说明</string>
@@ -257,6 +264,14 @@
     <!-- 下载队列 -->
     <string name="download_title">传输</string>
     <string name="download_clear">清空</string>
+    <!-- 三个会丢东西的动作各说各的实际影响：「清空」这个词本身分不出会不会碰到照片 -->
+    <string name="transfer_confirm_cancel_all_title">取消全部进行中的任务？</string>
+    <string name="transfer_confirm_cancel_all_body">排队与正在下载的项会停下；已经存进相册的文件不受影响。</string>
+    <string name="transfer_confirm_clear_title">清空这份列表？</string>
+    <string name="transfer_confirm_clear_body">只把已完成的条目从列表里去掉，相册里的照片一张都不删。</string>
+    <string name="transfer_confirm_history_title">清空传输记录？</string>
+    <string name="transfer_confirm_history_body">记录会全部删除，相册里的照片与视频不受影响；要再传得重新选择。</string>
+    <string name="transfer_confirm_go">继续</string>
     <string name="download_cancel">取消任务</string>
     <!-- 任务状态标签。大小未知时**不打百分比**：progress 只在 total>0 时算得出来，
          在这种任务上写「0%」就是说谎，而同一行上方的进度条已经改用不定长指示了 -->
@@ -544,6 +559,8 @@
     <string name="profile_recent_empty">还没有连接记录</string>
     <string name="profile_recent_meta">%1$s · %2$s · %3$s</string>
     <string name="profile_clear_recent">清空</string>
+    <string name="profile_clear_recent_title">清空连过的相机？</string>
+    <string name="profile_clear_recent_body">只去掉这一列快捷入口，已存的相机档案与参数预设都不受影响。</string>
     <string name="profile_delete_profile_title">删除档案</string>
     <string name="profile_delete_profile_body">将删除 %1$s 的能力快照与它名下的 %2$d 份预设，此操作不可撤销</string>
     <string name="profile_delete_preset_title">删除预设</string>

@@ -13,6 +13,7 @@ import com.imagedge.camera.data.model.ConnectionState
 import com.imagedge.camera.ui.feedback.Haptics
 import com.imagedge.camera.ui.theme.ThemeController
 import com.imagedge.camera.ui.theme.ThemeMode
+import com.imagedge.camera.data.guidance.GuidanceStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,12 +37,23 @@ class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val userLutStore: UserLutStore,
     val themeController: ThemeController,
-    private val haptics: Haptics
+    private val haptics: Haptics,
+    private val guidanceStore: GuidanceStore
 ) : ViewModel() {
 
     // ── LUT 文件管理 ──
     private val _userLuts = MutableStateFlow<List<String>>(emptyList())
     val userLuts: StateFlow<List<String>> = _userLuts.asStateFlow()
+
+    /**
+     * 重新打开新手引导（新手手册 §5：设置里的「使用帮助」要能召回已关掉的指导）。
+     *
+     * 这里不自己发通知也不写文案——界面负责措辞，这里只负责那一次存储动作。
+     */
+    fun reopenGuides() {
+        guidanceStore.reopenGuides()
+        haptics.tick()
+    }
 
     private val _lutMessage = MutableStateFlow<String?>(null)
     val lutMessage: StateFlow<String?> = _lutMessage.asStateFlow()

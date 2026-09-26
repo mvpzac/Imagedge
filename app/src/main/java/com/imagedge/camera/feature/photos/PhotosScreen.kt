@@ -134,6 +134,8 @@ fun PhotosScreen(
     }
 
     val connected = connectionState == ChannelConnectionState.CONNECTED
+    // 头部与网格共用同一份筛选结果（「全选当前列表」说的就是这一份）
+    val filtered = remember(items, filter) { items.filter { it.matches(filter) } }
     val scopeEnum = TransferScope.forBrowseMode(scope == BrowseMode.FULL_CARD)
     val scopeLabel = stringResource(
         if (scopeEnum == TransferScope.WHOLE_CARD) R.string.photos_scope_full_card
@@ -151,6 +153,16 @@ fun PhotosScreen(
                 large = true,
                 actions = {
                     if (selectionMode) {
+                        // 全选当前**筛选出来的**这一批，而不是整个相册
+                        val allShownSelected = filtered.isNotEmpty() &&
+                            filtered.all { it.channelKey in selected }
+                        AppLink(
+                            text = stringResource(
+                                if (allShownSelected) R.string.photos_deselect_all
+                                else R.string.photos_select_all
+                            ),
+                            onClick = { viewModel.setManySelected(filtered, !allShownSelected) }
+                        )
                         AppLink(
                             text = stringResource(R.string.photos_cancel_selection),
                             onClick = {
@@ -258,7 +270,6 @@ fun PhotosScreen(
                 )
             }
 
-            val filtered = remember(items, filter) { items.filter { it.matches(filter) } }
             val grouped = remember(filtered) { groupByDate(filtered) }
 
             when {

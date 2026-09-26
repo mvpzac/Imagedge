@@ -5,6 +5,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,6 +60,7 @@ import com.imagedge.camera.feature.edit.photo.PhotoEditScreen
 import com.imagedge.camera.feature.share.ExportSettingsSheet
 import com.imagedge.camera.feature.share.ShareViewModel
 import com.imagedge.camera.ui.components.AppChipRow
+import com.imagedge.camera.ui.components.ConfirmDialog
 import com.imagedge.camera.ui.components.AppIconButton
 import com.imagedge.camera.ui.components.AppLink
 import com.imagedge.camera.ui.components.EmptyState
@@ -124,6 +126,9 @@ fun TransferScreen(
     var showShareSheet by remember { mutableStateOf(false) }
     // 编辑：已完成的任务直接进编辑调节
     var editTarget by remember { mutableStateOf<Uri?>(null) }
+    // 三个会丢东西的动作都先过确认，且各自说清实际影响（UI 规范 §5 / 新手手册 §6）：
+    // 「清空」这个词本身分不出会不会碰到照片，用户不该靠猜
+    var pendingConfirm by remember { mutableStateOf<PendingConfirm?>(null) }
 
     val hasFinished = tasks.any { it.state == DownloadState.DONE || it.state == DownloadState.FAILED }
     // 有进行中（排队/下载中）任务时提供「全部取消」：断链时不必逐个取消或杀进程
@@ -143,13 +148,13 @@ fun TransferScreen(
                         if (hasActive) {
                             AppLink(
                                 text = stringResource(R.string.download_cancel_all),
-                                onClick = { viewModel.cancelAllActive() }
+                                onClick = { pendingConfirm = PendingConfirm.CancelAll }
                             )
                         }
                         if (hasFinished) {
                             AppLink(
                                 text = stringResource(R.string.download_clear),
-                                onClick = { viewModel.clearFinished() }
+                                onClick = { pendingConfirm = PendingConfirm.ClearFinished }
                             )
                         }
                     } else {
@@ -157,7 +162,8 @@ fun TransferScreen(
                             AppLink(
                                 text = stringResource(R.string.download_history_clear),
                                 // 只清这本账，一张照片都不动（用户删的是记录，不是原片）
-                                onClick = { viewModel.clearHistory() }
+                                // ——但这句话得让用户先看到，而不是事后自己推断
+                                onClick = { pendingConfirm = PendingConfirm.ClearHistory }
                             )
                         }
                     }
@@ -286,6 +292,42 @@ fun TransferScreen(
             onBack = { editTarget = null }
         )
     }
+
+    pendingConfirm?.let { which ->
+        ConfirmDialog(
+            title = stringResource(which.titleRes),
+            body = stringResource(which.bodyRes),
+            confirmLabel = stringResource(R.string.transfer_confirm_go),
+            onDismiss = { pendingConfirm = null },
+            onConfirm = {
+                pendingConfirm = null
+                when (which) {
+                    PendingConfirm.CancelAll -> viewModel.cancelAllActive()
+                    PendingConfirm.ClearFinished -> viewModel.clearFinished()
+                    PendingConfirm.ClearHistory -> viewModel.clearHistory()
+                }
+            }
+        )
+    }
+}
+
+/** 传输页上三个「按下就会少掉一些东西」的动作 */
+private enum class PendingConfirm(
+    @StringRes val titleRes: Int,
+    @StringRes val bodyRes: Int
+) {
+    CancelAll(
+        R.string.transfer_confirm_cancel_all_title,
+        R.string.transfer_confirm_cancel_all_body
+    ),
+    ClearFinished(
+        R.string.transfer_confirm_clear_title,
+        R.string.transfer_confirm_clear_body
+    ),
+    ClearHistory(
+        R.string.transfer_confirm_history_title,
+        R.string.transfer_confirm_history_body
+    )
 }
 
 /**

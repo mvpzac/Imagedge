@@ -46,6 +46,7 @@ import com.imagedge.camera.feature.capture.label
 import com.imagedge.camera.ui.components.AppButton
 import com.imagedge.camera.ui.components.AppButtonType
 import com.imagedge.camera.ui.components.AppLink
+import com.imagedge.camera.ui.components.ConfirmDialog
 import com.imagedge.camera.ui.components.AppPage
 import com.imagedge.camera.ui.components.AppSection
 import com.imagedge.camera.ui.components.AppTextField
@@ -641,11 +642,27 @@ private fun modeLabel(mode: Int): String = when (mode) {
 
 @Composable
 private fun RecentSection(recents: List<RecentConnection>, onClear: () -> Unit) {
+    var confirmClear by remember { mutableStateOf(false) }
+    if (confirmClear) {
+        ConfirmDialog(
+            title = stringResource(R.string.profile_clear_recent_title),
+            body = stringResource(R.string.profile_clear_recent_body),
+            confirmLabel = stringResource(R.string.transfer_confirm_go),
+            onDismiss = { confirmClear = false },
+            onConfirm = {
+                confirmClear = false
+                onClear()
+            }
+        )
+    }
     AppSection(
         title = stringResource(R.string.profile_section_recent),
         trailing = {
             if (recents.isNotEmpty()) {
-                AppLink(text = stringResource(R.string.profile_clear_recent), onClick = onClear)
+                AppLink(
+                    text = stringResource(R.string.profile_clear_recent),
+                    onClick = { confirmClear = true }
+                )
             }
         }
     ) {
@@ -723,28 +740,6 @@ private fun NameDialog(
     )
 }
 
-@Composable
-private fun ConfirmDialog(
-    title: String,
-    body: String,
-    confirmLabel: String,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        modifier = Modifier.glassDialog(),
-        containerColor = glassDialogContainerColor(),
-        title = { Text(title) },
-        text = { Text(body, style = MaterialTheme.typography.bodyMedium) },
-        confirmButton = {
-            AppLink(text = confirmLabel, onClick = onConfirm, color = MaterialTheme.colorScheme.error)
-        },
-        dismissButton = {
-            AppLink(text = stringResource(R.string.profile_cancel), onClick = onDismiss)
-        }
-    )
-}
 
 /**
  * 应用结果报告。
