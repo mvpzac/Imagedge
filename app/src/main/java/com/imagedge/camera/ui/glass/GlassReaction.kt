@@ -13,6 +13,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import com.imagedge.camera.ui.theme.Motion
+import com.imagedge.camera.ui.theme.orSnap
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -59,6 +62,8 @@ fun Modifier.glassReactive(
         if (pressed) highlight.press(pressPoint) else highlight.release()
     }
 
+    val reducedMotion = Motion.animationsDisabled(LocalContext.current)
+
     // 回弹：pressed 由 true 转 false 时，把拖动位移弹回原位
     LaunchedEffect(pressed) {
         if (!pressed) {
@@ -68,7 +73,8 @@ fun Modifier.glassReactive(
                     initialValue = from,
                     targetValue = Offset.Zero,
                     typeConverter = Offset.VectorConverter,
-                    animationSpec = spring(dampingRatio = 0.45f, stiffness = 500f),
+                    animationSpec = spring<Offset>(dampingRatio = 0.45f, stiffness = 500f)
+                        .orSnap(reducedMotion),
                     initialVelocity = Offset.Zero
                 ) { value, _ ->
                     dragPx = value
@@ -79,7 +85,7 @@ fun Modifier.glassReactive(
 
     val pressScale by animateFloatAsState(
         targetValue = if (pressed) PressScale else 1f,
-        animationSpec = spring(dampingRatio = 0.5f, stiffness = 800f),
+        animationSpec = spring<Float>(dampingRatio = 0.5f, stiffness = 800f).orSnap(reducedMotion),
         label = "glassPress"
     )
 

@@ -26,6 +26,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -47,6 +48,7 @@ import com.imagedge.camera.ui.glass.glassPill
 import com.imagedge.camera.ui.glass.glassReactive
 import com.imagedge.camera.ui.glass.warrantsBackdropCapture
 import com.imagedge.camera.ui.theme.Motion
+import com.imagedge.camera.ui.theme.orSnap
 import com.imagedge.camera.ui.theme.PillShape
 import com.imagedge.camera.ui.theme.UiSize
 import com.kyant.backdrop.backdrops.LayerBackdrop
@@ -122,12 +124,14 @@ fun FloatingNavBar(
                     }
                 )
         ) {
+            // 系统要求移除动画时，指示条与磁吸都直接到位（Compose 不自己读那个开关）
+            val reducedMotion = Motion.animationsDisabled(LocalContext.current)
             val itemWidth = maxWidth / destinations.size
             val selectedIndex = destinations.indexOfFirst { it == selected }.coerceAtLeast(0)
 
             val indicatorOffset by animateDpAsState(
                 targetValue = itemWidth * selectedIndex,
-                animationSpec = Motion.springSoftDp,
+                animationSpec = Motion.springSoftDp.orSnap(reducedMotion),
                 label = "navIndicator"
             )
 
@@ -142,7 +146,7 @@ fun FloatingNavBar(
                 if (selected != null && from != -1 && from != selectedIndex) {
                     val direction = if (selectedIndex > from) 1 else -1
                     magneticKick.snapTo((direction * 5).dp)
-                    magneticKick.animateTo(0.dp, Motion.springSnappyDp)
+                    magneticKick.animateTo(0.dp, Motion.springSnappyDp.orSnap(reducedMotion))
                 }
             }
 

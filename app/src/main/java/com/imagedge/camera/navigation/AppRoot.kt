@@ -1,6 +1,9 @@
 package com.imagedge.camera.navigation
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.snap
+import androidx.compose.ui.platform.LocalContext
+import com.imagedge.camera.ui.theme.Motion
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -176,10 +179,14 @@ fun AppRoot(
 /** 顶部滑入弹窗（替代底部 Snackbar）：圆角卡片 + 从顶部滑入/滑出 */
 @Composable
 private fun TopBanner(message: String?, modifier: Modifier = Modifier) {
+    // 系统要求移除动画时不滑入滑出，只做有无显示（位移是这一条的主要「动画」）
+    val reducedMotion = Motion.animationsDisabled(LocalContext.current)
     AnimatedVisibility(
         visible = message != null,
-        enter = slideInVertically { -it } + fadeIn(),
-        exit = slideOutVertically { -it } + fadeOut(),
+        enter = if (reducedMotion) fadeIn(animationSpec = snap())
+                else slideInVertically { -it } + fadeIn(),
+        exit = if (reducedMotion) fadeOut(animationSpec = snap())
+               else slideOutVertically { -it } + fadeOut(),
         modifier = modifier
     ) {
         message?.let { msg ->

@@ -10,6 +10,30 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Added / 新增
 
+**批次 Q（系统「移除动画」终于有人听 — 新手手册 §7）**
+
+- `Motion.animationsDisabled(context)` 读 `Settings.Global.ANIMATOR_DURATION_SCALE`。
+  **为什么必须自己读**：Compose 不听这个开关。在 `androidx.compose.animation` 1.7.6 的
+  `classes.jar` 里搜 `animator_duration_scale`，整个动画库里**零命中**；唯一读它的是
+  `androidx.compose.ui` 里的 `WindowRecomposer`（管重组时机，不管动画时长）。
+  View 体系会自动跳过，`animate*AsState` / `Animatable` 照跑不误——所以以前用户把动画
+  调到 0，这个 App 的导航滑条、玻璃按压、骨架屏呼吸全都还在动
+- 四个动效点接上：导航指示条弹簧与磁吸回弹（`orSnap`）、玻璃按压缩放与释放回弹、
+  骨架屏呼吸（要求移除动画时直接给固定透明度，不再挂一个无限循环补间）、
+  顶部横幅的滑入滑出（改成 `fadeIn(snap())`）
+- `orSnap` 写成**顶层扩展**而不是 `Motion` 的成员扩展：成员扩展要把 dispatch receiver
+  拉进作用域才能解析，调用点会莫名其妙编译不过——第一版就踩在这里
+- §7 的「取景上的文字要用遮罩」**查过，不需要改**：查看器的顶栏、返回钮、标记与底栏
+  四条分别有 `ViewerBackdrop` 0.6/0.35/0.5/0.6 的遮罩，监看工作台的工具条也有；
+  遥控页的嵌入取景那块只在**没有画面**时显示提示文字，底下本来就是深色底。
+  没有文字压在实时帧上，就不为这条硬加一层遮罩
+
+实测（AVD）：`animator_duration_scale=0.0` 下冷启动、连切三个 Tab，界面正常渲染、
+指示条停在选中的「相机」上、crash buffer 干净（第一张截图整屏黑是 screencap 抢在
+合成之前抓的，重抓即正常——不是渲染问题）；恢复 1.0 后同样正常。
+187 单测（+2 条纯函数降级判定）、`uiSpecCheck`、`lintDebug`、`assembleDebug` 全绿。
+**未验证**：逐帧确认动画真的没补间（静态截图证明不了时间轴），以及 TalkBack 下的完整走查。
+
 **批次 P（第一条成功路径的四处缺口 + 一个飘着的偏好键 — 新手手册 §3）**
 
 - 新增 `data/transfer/DownloadLocation.kt`：**同一个偏好键 `"download_tree_uri"` 此前被四处硬写**

@@ -15,6 +15,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.platform.LocalContext
+import com.imagedge.camera.ui.theme.Motion
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -36,6 +38,9 @@ import com.imagedge.camera.ui.theme.Radius
 /** 骨架屏呼吸动画（1.5s 循环，只动 opacity） */
 @Composable
 private fun skeletonAlpha(): Float {
+    // 呼吸动画是「还在加载」的提示，不是内容；系统要求移除动画时给一个固定透明度，
+    // 无限循环的补间对这部分用户没有任何价值
+    if (Motion.animationsDisabled(LocalContext.current)) return 0.5f
     val transition = rememberInfiniteTransition(label = "skeleton")
     val alpha by transition.animateFloat(
         initialValue = 0.32f,
