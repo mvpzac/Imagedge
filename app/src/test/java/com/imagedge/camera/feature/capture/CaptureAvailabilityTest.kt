@@ -1,6 +1,7 @@
 package com.imagedge.camera.feature.capture
 
 import com.imagedge.camera.data.ble.BleCameraStatus
+import com.imagedge.camera.data.model.CapabilityState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -21,7 +22,7 @@ class CaptureAvailabilityTest {
         paused: Boolean = false,
         hasFrame: Boolean = true,
         ble: Boolean = false,
-        ptpCapture: Boolean = false,
+        ptpCapture: CapabilityState = CapabilityState.UNSUPPORTED,
         stale: Boolean = true,
         busy: Boolean = false,
         autoSave: Boolean = false
@@ -30,7 +31,7 @@ class CaptureAvailabilityTest {
         viewfinderPaused = paused,
         hasFrame = hasFrame,
         bleConnected = ble,
-        ptpCaptureAvailable = ptpCapture,
+        ptpCapture = ptpCapture,
         capabilitiesStale = stale,
         busy = busy,
         autoSaveEnabled = autoSave
@@ -42,7 +43,10 @@ class CaptureAvailabilityTest {
     fun `shutter is ready over either path, not only over bluetooth`() {
         // 只显示「BLE 已连接/未连接」时，用户看不出 PTP 遥控其实可用
         assertEquals(Availability.Ready, availability(ble = true, stale = true).shutter.state)
-        assertEquals(Availability.Ready, availability(ptpCapture = true, stale = false).shutter.state)
+        assertEquals(
+            Availability.Ready,
+            availability(ptpCapture = CapabilityState.WRITABLE, stale = false).shutter.state
+        )
     }
 
     @Test
@@ -62,9 +66,19 @@ class CaptureAvailabilityTest {
 
         assertEquals(Availability.NotNow, line.state)
         assertTrue(
-            "读了且不支持，就该说是相机在当前模式下没上报这项",
-            line.note!!.contains("没有上报")
+            "通道结构性没有，就明说没有，不要含糊成「当前模式下没上报」",
+            line.note!!.contains("不具备")
         )
+    }
+
+    @Test
+    fun `an unverified function mode is unknown, not unsupported`() {
+        // 整卡模式下的 InitiateCapture 没有实测记录（camera-capability-matrix §5）。
+        // 以前通道恒报 true，界面就把未验证说成了可下发；反过来报不支持又会把用户推去重连
+        val line = availability(ptpCapture = CapabilityState.UNKNOWN, stale = false).shutter
+
+        assertEquals(Availability.Unknown, line.state)
+        assertTrue("要说清是「没实测」", line.note!!.contains("没有实测记录"))
     }
 
     @Test

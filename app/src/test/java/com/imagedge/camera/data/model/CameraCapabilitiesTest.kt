@@ -2,6 +2,7 @@ package com.imagedge.camera.data.model
 
 import com.imagedge.camera.data.remote.CameraChannel
 import com.imagedge.camera.data.remote.ChannelType
+import com.imagedge.camera.data.model.CapabilityState
 import com.imagedge.camera.data.remote.toTransport
 import com.imagedge.camera.ptp.DeviceProperty
 import com.imagedge.camera.ptp.SonyDevicePropCode
@@ -50,8 +51,8 @@ class CameraCapabilitiesTest {
     private fun capabilities(
         identity: CameraIdentity = ptpIdentity,
         props: Map<Int, DeviceProperty>? = null,
-        supportsCapture: Boolean = true
-    ) = CameraCapabilities.fromDescriptors(identity, props, supportsCapture)
+        captureSupport: CapabilityState = CapabilityState.WRITABLE
+    ) = CameraCapabilities.fromDescriptors(identity, props, captureSupport)
 
     /** 属性类能力（CAPTURE 由通道声明决定，不走 0x9209 描述符） */
     private val devicePropCapabilities = CameraCapability.entries.filter { it != CameraCapability.CAPTURE }
@@ -302,7 +303,7 @@ class CameraCapabilitiesTest {
         val caps = capabilities(
             identity = CameraIdentity("Sony Camera", "", CameraTransport.UPNP, CameraIdentity.MODE_UNKNOWN),
             props = null,
-            supportsCapture = false
+            captureSupport = CapabilityState.UNSUPPORTED
         )
 
         assertFalse(caps.stale)
@@ -318,11 +319,11 @@ class CameraCapabilitiesTest {
 
     @Test
     fun `disabled capabilities never reach the channel`() {
-        val channel = FakeChannel(ChannelType.UPNP, "Sony Camera", "", supportsCapture = false)
+        val channel = FakeChannel(ChannelType.UPNP, "Sony Camera", "", captureSupport = CapabilityState.UNSUPPORTED)
         val caps = capabilities(
             identity = channel.identity(),
             props = null,
-            supportsCapture = channel.supportsCapture
+            captureSupport = channel.captureSupport
         )
 
         CameraCapability.entries.forEach { capability ->
@@ -333,9 +334,9 @@ class CameraCapabilitiesTest {
 
     @Test
     fun `unknown snapshot sends nothing even though the channel supports capture`() {
-        val channel = FakeChannel(ChannelType.PTP_IP, "ZV-E10", "2.03", supportsCapture = true)
+        val channel = FakeChannel(ChannelType.PTP_IP, "ZV-E10", "2.03", captureSupport = CapabilityState.WRITABLE)
         // 0x9209 读取失败：全部属性未知
-        val caps = capabilities(identity = channel.identity(), props = null, supportsCapture = true)
+        val caps = capabilities(identity = channel.identity(), props = null, captureSupport = CapabilityState.WRITABLE)
 
         devicePropCapabilities.forEach { capability ->
             assertFalse(dispatch(channel, caps, capability, 200L))
@@ -345,7 +346,7 @@ class CameraCapabilitiesTest {
 
     @Test
     fun `writable capability sends the code and width reported by the camera`() {
-        val channel = FakeChannel(ChannelType.PTP_IP, "ZV-E10", "2.03", supportsCapture = true)
+        val channel = FakeChannel(ChannelType.PTP_IP, "ZV-E10", "2.03", captureSupport = CapabilityState.WRITABLE)
         val caps = capabilities(
             identity = channel.identity(),
             props = mapOf(
@@ -358,7 +359,7 @@ class CameraCapabilitiesTest {
                     range = ValueRange(0xF448L, 0x0BB8L, 1000L)
                 )
             ),
-            supportsCapture = true
+            captureSupport = CapabilityState.WRITABLE
         )
 
         assertTrue(dispatch(channel, caps, CameraCapability.ISO, 200L))
@@ -377,7 +378,7 @@ class CameraCapabilitiesTest {
 
     @Test
     fun `a value the camera no longer reports is rejected without sending`() {
-        val channel = FakeChannel(ChannelType.PTP_IP, "ZV-E10", "2.03", supportsCapture = true)
+        val channel = FakeChannel(ChannelType.PTP_IP, "ZV-E10", "2.03", captureSupport = CapabilityState.WRITABLE)
         // 套头 SELP1650 是 f/3.5-5.6；f/1.8 只在另一支镜头那轮上报里出现过
         val kitLens = capabilities(
             identity = channel.identity(),
@@ -388,7 +389,7 @@ class CameraCapabilitiesTest {
                     supported = listOf(350L, 400L, 450L, 500L, 560L)
                 )
             ),
-            supportsCapture = true
+            captureSupport = CapabilityState.WRITABLE
         )
 
         assertTrue(kitLens.canWrite(CameraCapability.F_NUMBER))
@@ -510,7 +511,7 @@ class CameraCapabilitiesTest {
         override val channelType: ChannelType,
         override val deviceModel: String,
         override val deviceFirmware: String,
-        override val supportsCapture: Boolean
+        override val captureSupport: CapabilityState
     ) : CameraChannel {
 
         /** 收到的写属性命令：Triple(属性码, 值, 值宽度) */

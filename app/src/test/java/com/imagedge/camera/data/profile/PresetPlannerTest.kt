@@ -89,7 +89,7 @@ class PresetPlannerTest {
                 range = ValueRange(0xF448L, 0x0BB8L, 1000L)   // -3000 / +3000 / 1000
             )
         ),
-        supportsCapture = true
+        captureSupport = CapabilityState.WRITABLE
     )
 
     private fun preset(
@@ -207,7 +207,7 @@ class PresetPlannerTest {
                 propCode.getValue(CameraCapability.F_NUMBER) to
                     readOnly(CameraCapability.F_NUMBER, typeUInt16, value = 350L, supported = listOf(350L))
             ),
-            supportsCapture = true
+            captureSupport = CapabilityState.WRITABLE
         )
         assertEquals(CapabilityState.READ_ONLY, caps.stateOf(CameraCapability.F_NUMBER))
 

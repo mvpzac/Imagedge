@@ -10,6 +10,30 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Added / 新增
 
+**批次 N1（能力证据边界：整卡模式的遥控拍摄不再被说成可用）**
+
+对照 `Imagedge-Sony功能差距与AI执行方案` 的 T0 验收（「不得出现任何新的未经验证的硬编码可写参数」）
+自查，发现两处界面在说没做过的事：
+
+- `PtpChannel.supportsCapture` 恒为 `true`，**不看 `functionMode`**。它经 `CameraRepository` →
+  `CameraCapabilities.fromDescriptors` 变成 CAPTURE = `WRITABLE`（证据 `CHANNEL_DECLARED`），
+  而 `canWrite` 又故意让这类声明不受探测失败影响——于是整卡（ContentsTransfer）模式下
+  快门和录像按钮都显示可用，而 `docs/camera-capability-matrix.md` §4 那一行明标**未验证**。
+  现在通道声明改为三态 `captureSupport`：模式 0 = `WRITABLE`（实测）、模式 1 = `UNKNOWN`
+  （没实测过，**不等于不支持**）、UPnP = `UNSUPPORTED`（实测）。
+  遥控页对应新增一条判定：`UNKNOWN` 说「当前模式下遥控拍摄没有实测记录，先别当成不支持」，
+  而不是涂红（已知坑 14：把未知说成不支持，用户唯一的动作就是重连，而重连会让句柄全失效）
+- 「立即拍摄」的 `enabled = !busy && (captureAvailable || isConnected)` 里那个 `|| isConnected`
+  绕开了能力判定：通道结构性不支持时按钮照样可点（命令确实被仓库挡下，但界面已经撒了谎）。删掉
+- `ControlState` 同时保留 `captureAvailable`（能不能按）与 `captureSupport`（为什么不能按）：
+  只留布尔就会再次把「没实测」显示成「不支持」
+- 新增 1 条判定单测（未实测模式 → Unknown 且文案说「没有实测记录」），并把
+  `CameraCapabilitiesTest` / `CapabilitySnapshotCodecTest` / `PresetPlannerTest` 的假通道改到新签名
+
+实测：184 单测全绿（`--rerun-tasks` 重跑）。**相机侧行为未验证**——没有可连的机器，
+本批改的正是「没验证过就不许声称」这条，所以整卡模式快门现在显示为未知而非可用；
+真机连上后需要确认的是模式 0 仍判为可拍、模式 1 判为未知。
+
 **批次 L（设计 §8.3 / §8.7 收尾：inset 只有一个所有者，工作台拆成 Route + Screen）**
 
 - `AppPage` 改成 `AppScreenFrame` 的**薄封装**。它原来自己拼 `Scaffold + PageHeader`，

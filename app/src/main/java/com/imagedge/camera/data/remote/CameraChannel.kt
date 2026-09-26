@@ -1,6 +1,7 @@
 package com.imagedge.camera.data.remote
 
 import com.imagedge.camera.data.model.CameraTransport
+import com.imagedge.camera.data.model.CapabilityState
 import com.imagedge.camera.data.model.MediaItem
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,13 +54,18 @@ interface CameraChannel {
         get() = ""
 
     /**
-     * 通道是否支持遥控拍摄。
+     * 当前通道 + 当前功能模式下，遥控拍摄处于哪一态。
      *
      * 能力差异不靠「抛异常再由调用方捕获」表达，而是由通道显式声明，
      * 让能力模型能在下发命令之前就判定可用性。
+     *
+     * **为什么不是 Boolean**：`false` 同时装得下两件不同的事——「这条通道结构性没有」
+     * 与「这个模式我们没实测过」。前者可以明确说不支持，后者只能说未知；
+     * 把未知说成不支持，用户的下一步就是重连，而重连会让相机端句柄全部失效
+     * （docs/HANDOFF.md 已知坑 14）。所以这里返回三态。
      */
-    val supportsCapture: Boolean
-        get() = false
+    val captureSupport: CapabilityState
+        get() = CapabilityState.UNSUPPORTED
 
     /** 连接状态流（PTP 通道由保活/事务自愈维护；默认实现恒为 DISCONNECTED） */
     val connectionState: StateFlow<ChannelConnectionState>

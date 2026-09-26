@@ -90,6 +90,13 @@ data class ControlState(
     /** PTP 遥控拍摄是否可用（BLE 快门是另一条独立通路，不由此项决定） */
     val captureAvailable: Boolean = false,
     /**
+     * 遥控拍摄的能力态（WRITABLE / UNKNOWN / UNSUPPORTED）。
+     *
+     * 与 [captureAvailable] 并存是故意的：前者说**能不能按**，后者说**为什么不能按**。
+     * 只留一个布尔就会把「这个模式没实测过」显示成「这台相机不支持」。
+     */
+    val captureSupport: CapabilityState = CapabilityState.UNKNOWN,
+    /**
      * 当前拍摄任务（T3）。null = 从未拍过或已清空。
      *
      * 界面据此显示倒计时、阶段与「已确认/仅已发送」的区别——
@@ -936,6 +943,7 @@ class CameraControlViewModel @Inject constructor(
                 identity = snapshot.identity,
                 capabilitiesStale = capabilities.stale,
                 captureAvailable = capabilities.canWrite(CameraCapability.CAPTURE),
+                captureSupport = capabilities.stateOf(CameraCapability.CAPTURE),
                 params = PARAMETERS.associateWith { capability ->
                     paramOf(capabilities, capability, snapshot.settings)
                 }

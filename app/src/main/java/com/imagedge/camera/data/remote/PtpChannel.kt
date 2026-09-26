@@ -1,6 +1,7 @@
 package com.imagedge.camera.data.remote
 
 import com.imagedge.camera.core.common.AppLog
+import com.imagedge.camera.data.model.CapabilityState
 import com.imagedge.camera.data.model.MediaItem
 import com.imagedge.camera.ptp.PhotoType
 import com.imagedge.camera.ptp.PtpIpClient
@@ -152,8 +153,17 @@ class PtpChannel @Inject constructor() : CameraChannel {
     override var deviceFirmware: String = ""
         private set
 
-    /** PTP InitiateCapture 在「电脑遥控」模式实测可用（见 docs/sony-protocol-notes.md） */
-    override val supportsCapture: Boolean = true
+    /**
+     * 遥控拍摄按**当前功能模式**判定，不写死。
+     *
+     * 模式 0（电脑遥控 / 选片集）下 InitiateCapture 实测可用（docs/sony-protocol-notes.md）；
+     * 模式 1（整卡 ContentsTransfer）下它**没有实测记录**
+     * （docs/camera-capability-matrix.md §5 明标未验证）。以前这里恒为 true，
+     * 等于把未验证写成「可下发」——正是 T0 验收禁止的那类硬编码。
+     * 未知不等于不支持，所以返回 UNKNOWN 而不是 UNSUPPORTED。
+     */
+    override val captureSupport: CapabilityState
+        get() = if (functionMode == 0) CapabilityState.WRITABLE else CapabilityState.UNKNOWN
 
     override suspend fun connect(host: String) = withContext(Dispatchers.IO) {
         connectInternal(host, functionMode)

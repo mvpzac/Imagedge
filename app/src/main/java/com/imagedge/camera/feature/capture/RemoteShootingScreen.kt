@@ -181,7 +181,7 @@ fun RemoteShootingScreen(
         viewfinderPaused = state.viewfinderPaused,
         hasFrame = frame != null,
         bleConnected = bleConnected,
-        ptpCaptureAvailable = state.captureAvailable,
+        ptpCapture = state.captureSupport,
         capabilitiesStale = state.capabilitiesStale,
         busy = state.busy,
         autoSaveEnabled = policy.autoSaveAfterCapture
@@ -595,8 +595,10 @@ private fun CaptureWorkflowSection(viewModel: CameraControlViewModel, state: Con
             AppButton(
                 text = stringResource(R.string.control_capture_now),
                 onClick = { viewModel.captureNow(countdownMs) },
-                // 忙时不提供第二个快门入口：排队会让间隔慢下来时攒出一串待发命令
-                enabled = !state.busy && (state.captureAvailable || state.isConnected),
+                // 忙时不提供第二个快门入口：排队会让间隔慢下来时攒出一串待发命令。
+                // 原来这里写着 `|| state.isConnected`——连上就给按，等于绕开能力判定：
+                // 通道结构性不支持时按钮照样能点（命令被仓库挡下，但界面已经撒了谎）
+                enabled = !state.busy && state.captureAvailable,
                 type = AppButtonType.SECONDARY,
                 fullWidth = false
             )

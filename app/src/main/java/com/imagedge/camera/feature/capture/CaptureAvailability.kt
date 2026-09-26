@@ -1,6 +1,7 @@
 package com.imagedge.camera.feature.capture
 
 import com.imagedge.camera.data.ble.BleCameraStatus
+import com.imagedge.camera.data.model.CapabilityState
 
 /**
  * <pre>
@@ -46,7 +47,7 @@ fun captureAvailabilityOf(
     viewfinderPaused: Boolean,
     hasFrame: Boolean,
     bleConnected: Boolean,
-    ptpCaptureAvailable: Boolean,
+    ptpCapture: CapabilityState,
     capabilitiesStale: Boolean,
     busy: Boolean,
     autoSaveEnabled: Boolean
@@ -61,10 +62,14 @@ fun captureAvailabilityOf(
         !connected -> AvailabilityLine(Availability.NotNow, "连接相机后才能遥控拍摄")
         busy -> AvailabilityLine(Availability.NotNow, "上一次拍摄还没结束，忙时不接新快门")
         bleConnected -> AvailabilityLine(Availability.Ready, "走蓝牙快门")
-        ptpCaptureAvailable -> AvailabilityLine(Availability.Ready, "走相机传输通道的遥控拍摄")
-        // 能力还没读回来：说未知，不能说这台相机不支持
+        ptpCapture == CapabilityState.WRITABLE ->
+            AvailabilityLine(Availability.Ready, "走相机传输通道的遥控拍摄")
+        // 这个模式没实测过 ≠ 这台相机不支持：说未知，别把用户推去重连（已知坑 14）
+        ptpCapture == CapabilityState.UNKNOWN ->
+            AvailabilityLine(Availability.Unknown, "当前模式下遥控拍摄没有实测记录，先别当成不支持")
+        // 能力还没读回来：同样说未知，不能说这台相机不支持
         capabilitiesStale -> AvailabilityLine(Availability.Unknown, "还没读到这轮相机的能力，先别当成不支持")
-        else -> AvailabilityLine(Availability.NotNow, "这台相机在当前模式下没有上报遥控拍摄")
+        else -> AvailabilityLine(Availability.NotNow, "这台相机的传输通道不具备遥控拍摄")
     },
     autoSave = when {
         !autoSaveEnabled -> AvailabilityLine(Availability.NotNow, "未开启：拍摄后不会自动存入相册")

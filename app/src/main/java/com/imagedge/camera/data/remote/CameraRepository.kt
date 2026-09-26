@@ -248,7 +248,7 @@ class CameraRepository @Inject constructor(
         _capabilities.value = CameraCapabilities.fromDescriptors(
             identity = identity,
             props = null,
-            supportsCapture = channel.supportsCapture
+            captureSupport = channel.captureSupport
         )
     }
 
@@ -464,7 +464,7 @@ class CameraRepository @Inject constructor(
         val capabilities = CameraCapabilities.fromDescriptors(
             identity = identity,
             props = props,
-            supportsCapture = channel.supportsCapture
+            captureSupport = channel.captureSupport
         )
         _capabilities.value = capabilities
         logCapabilitySnapshot(capabilities)

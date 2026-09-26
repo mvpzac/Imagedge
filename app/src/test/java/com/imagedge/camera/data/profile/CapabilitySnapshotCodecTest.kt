@@ -64,7 +64,7 @@ class CapabilitySnapshotCodecTest {
                 range = ValueRange(0xF448L, 0x0BB8L, 333L)
             )
         ),
-        supportsCapture = true
+        captureSupport = CapabilityState.WRITABLE
     )
 
     @Test

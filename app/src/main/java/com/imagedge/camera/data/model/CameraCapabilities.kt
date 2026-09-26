@@ -44,7 +44,7 @@ enum class CapabilityEvidence {
     /** 传输通道结构性具备/不具备（如 UPnP 无 DeviceProp、无遥控拍摄） */
     TRANSPORT,
 
-    /** 通道接口自我声明（[com.imagedge.camera.data.remote.CameraChannel.supportsCapture]） */
+    /** 通道接口自我声明（[com.imagedge.camera.data.remote.CameraChannel.captureSupport]） */
     CHANNEL_DECLARED
 }
 
@@ -321,25 +321,31 @@ data class CameraCapabilities(
          *
          * @param props 0x9209 解析结果。**null 表示读取失败（超时/断线/未连接）**，此时属性类
          *              能力一律为 [CapabilityState.UNKNOWN] 且 [stale] 为 true
-         * @param supportsCapture 当前通道是否声明支持遥控拍摄
+         * @param captureSupport 当前通道在当前功能模式下的遥控拍摄态。
+         *   通道只会给三种答案：实测可下发 / 结构性没有 / 这个模式没实测过
          */
         fun fromDescriptors(
             identity: CameraIdentity,
             props: Map<Int, DeviceProperty>?,
-            supportsCapture: Boolean
+            captureSupport: CapabilityState
         ): CameraCapabilities {
             val items = mutableMapOf<CameraCapability, CapabilityDetail>()
-            items[CameraCapability.CAPTURE] = if (supportsCapture) {
-                CapabilityDetail(
+            items[CameraCapability.CAPTURE] = when (captureSupport) {
+                CapabilityState.WRITABLE -> CapabilityDetail(
                     state = CapabilityState.WRITABLE,
                     evidence = CapabilityEvidence.CHANNEL_DECLARED,
-                    note = "通道声明支持遥控拍摄"
+                    note = "通道在当前模式下实测支持遥控拍摄"
                 )
-            } else {
-                CapabilityDetail(
+                CapabilityState.UNKNOWN -> CapabilityDetail(
+                    // 未实测就说未实测：证据是 NONE，界面据此说「先别当成不支持」
+                    state = CapabilityState.UNKNOWN,
+                    evidence = CapabilityEvidence.NONE,
+                    note = "当前模式下遥控拍摄没有实测记录"
+                )
+                else -> CapabilityDetail(
                     state = CapabilityState.UNSUPPORTED,
                     evidence = CapabilityEvidence.TRANSPORT,
-                    note = "当前传输通道未声明遥控拍摄能力"
+                    note = "当前传输通道不具备遥控拍摄"
                 )
             }
 
