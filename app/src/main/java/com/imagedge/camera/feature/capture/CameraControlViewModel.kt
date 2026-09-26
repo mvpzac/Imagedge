@@ -15,6 +15,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 import androidx.lifecycle.viewModelScope
 import com.imagedge.camera.data.ble.BleShutterState
 import com.imagedge.camera.data.ble.SonyBleShutter
+import com.imagedge.camera.image.ExposureAnalysis
+import com.imagedge.camera.image.ExposureStats
+import com.imagedge.camera.image.FrameGate
 import com.imagedge.camera.data.capture.CaptureJob
 import com.imagedge.camera.data.capture.CaptureMachine
 import com.imagedge.camera.data.capture.CapturePhase
@@ -710,6 +713,51 @@ class CameraControlViewModel @Inject constructor(
     /** 「取景截图」的数据源。不预先复制位图：解码出的帧此后只读 */
     val currentFrame: Bitmap? get() = _frame.value
 
+    // ── 曝光辅助（T2）───────────────────────────────────────────────
+
+    /**
+     * 直方图与斑马纹的统计，null = 没开或还没有可分析的画面。
+     *
+     * 三条约束照差距文档 T2 原样落地：**停用时零分析**（gate 关掉就一次都不算）、
+     * **最多 5Hz**（20fps 的帧每 4 帧最多取 1 帧）、**不留队列**
+     * （就在采集协程里同步算，算不过来的帧直接被 throttleLatest 丢掉）。
+     * 像素缓冲按帧尺寸复用，不每帧新建——960×640 的 IntArray 是 2.4MB，
+     * 每秒分配 5 次就是给 GC 打工。
+     */
+    private val _exposureStats = MutableStateFlow<ExposureStats?>(null)
+    val exposureStats: StateFlow<ExposureStats?> = _exposureStats.asStateFlow()
+
+    private val exposureGate = FrameGate { System.currentTimeMillis() }
+    private var analysisPixels: IntArray? = null
+    private var analysisWidth = 0
+    private var analysisHeight = 0
+
+    fun setExposureAids(on: Boolean) {
+        exposureGate.enabled = on
+        if (!on) _exposureStats.value = null
+    }
+
+    /** 关掉辅助时别把上一轮的读数留在屏幕上——它会看起来像实时数据 */
+    private fun analyseExposure(frame: Bitmap) {
+        if (!exposureGate.admit()) return
+        val width = frame.width
+        val height = frame.height
+        val buffer = analysisPixels
+        val pixels = if (buffer != null && analysisWidth == width && analysisHeight == height) {
+            buffer
+        } else {
+            IntArray(width * height).also {
+                analysisPixels = it; analysisWidth = width; analysisHeight = height
+            }
+        }
+        frame.getPixels(pixels, 0, width, 0, 0, width, height)
+        val stride = ExposureAnalysis.sampleStride(width, height)
+        _exposureStats.value = ExposureStats(
+            histogram = ExposureAnalysis.histogram(pixels, width, height, stride),
+            highlightRatio = ExposureAnalysis.highlightRatio(pixels, width, height, stride)
+        )
+    }
+
     private var viewfinderVisible = false
     private var viewfinderPaused = false
     private var viewfinderJob: Job? = null
@@ -746,7 +794,12 @@ class CameraControlViewModel @Inject constructor(
                         .collect { jpeg ->
                             // 解码内联在 collect 里：形成天然背压，不会堆出无界队列
                             decodeScaled(jpeg, LIVEVIEW_TARGET_WIDTH, LIVEVIEW_TARGET_HEIGHT)
-                                ?.let { _frame.value = it }
+                                ?.let { frame ->
+                                    _frame.value = frame
+                                    // 采集已经在 Dispatchers.Default 上，分析就地做：
+                                    // 再 launch 一次只是多一个调度点，还可能堆出并发分析
+                                    analyseExposure(frame)
+                                }
                         }
                 } catch (e: Exception) {
                     // 流异常只停止取景，不崩，也不清空当前帧——定格比黑屏有用

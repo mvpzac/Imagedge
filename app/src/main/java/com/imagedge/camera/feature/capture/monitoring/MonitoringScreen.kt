@@ -26,6 +26,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -256,6 +257,8 @@ private fun Toolbar(
     onResetView: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var aidsOn by rememberSaveable { mutableStateOf(false) }
+    val stats by viewModel.exposureStats.collectAsStateWithLifecycle()
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -296,6 +299,36 @@ private fun Toolbar(
             tint = OnViewer,
             modifier = Modifier.background(scrim, PillShape)
         )
+        // 曝光辅助（T2）：直方图与斑马纹。开着才有分析——停用时一次都不算
+        AppIconButton(
+            icon = Lucide.Aperture,
+            contentDescription = stringResource(R.string.monitoring_exposure_aids),
+            onClick = {
+                val next = !aidsOn
+                aidsOn = next
+                viewModel.setExposureAids(next)
+            },
+            tint = if (aidsOn) MaterialTheme.colorScheme.primary else OnViewer,
+            modifier = Modifier.background(scrim, PillShape)
+        )
+        if (aidsOn) {
+            // 读数只是显示辅助：预览的色域/伽马未知，所以不写「EV」也不写「准确」
+            Text(
+                text = stats?.let {
+                    stringResource(
+                        R.string.monitoring_exposure_readout,
+                        it.highlightRatio * 100f,
+                        it.meanLuma
+                    )
+                } ?: stringResource(R.string.monitoring_exposure_no_data),
+                style = MaterialTheme.typography.labelSmall,
+                color = OnViewer.copy(alpha = 0.85f),
+                modifier = Modifier
+                    .weight(1f)
+                    .background(scrim, PillShape)
+                    .padding(horizontal = Spacing.S, vertical = Spacing.XS)
+            )
+        }
 
         Column(
             modifier = Modifier.weight(1f),

@@ -356,6 +356,10 @@
     <string name="monitoring_exit">退出监看工作台</string>
     <string name="monitoring_mirror">镜像画面</string>
     <string name="monitoring_rotate">旋转画面</string>
+    <string name="monitoring_exposure_aids">曝光辅助（直方图与高光提示）</string>
+    <!-- 只是显示辅助：预览色域/伽马未知，所以不写 EV、不写「准确」 -->
+    <string name="monitoring_exposure_readout">高光 %1$.1f%% · 平均亮度 %2$.0f</string>
+    <string name="monitoring_exposure_no_data">还没有可分析的画面</string>
     <string name="monitoring_pause">暂停取景</string>
     <string name="monitoring_resume">继续取景</string>
     <string name="monitoring_snapshot">取景截图</string>
