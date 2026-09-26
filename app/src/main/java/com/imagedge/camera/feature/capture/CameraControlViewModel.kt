@@ -557,12 +557,21 @@ class CameraControlViewModel @Inject constructor(
             val fresh = autoSaveLedger.claimAll(newItems.map { item -> item.thumbKey })
             if (fresh.isNotEmpty()) {
                 downloadManager.enqueueAll(newItems.filter { it.thumbKey in fresh.toSet() })
-                _state.update { it.copy(message = "已自动保存 ${fresh.size} 张到下载队列") }
+                // 入队 ≠ 落盘。这里说「已保存」就是抢在事实前面报喜（新手手册 §4：
+                // 确认照片落盘后才说「已保存到手机」），存没存成要到传输页看那一条的结果
+                _state.update { it.copy(message = "已加入下载队列 ${fresh.size} 张，存进相册后会在传输页显示") }
             } else {
-                _state.update { it.copy(message = "这些照片此前已自动保存，未重复落盘") }
+                _state.update { it.copy(message = "这些照片此前已加入过下载，未重复保存") }
             }
         } else {
-            _state.update { it.copy(message = "已拍摄 ${newItems.size} 张（自动保存未开启）") }
+            // 手册 §4 要的是下一步，不是一个状态括号：照片在相机上，怎么进手机得说清。
+            // 也绝不能写成「已保存」——一张都还没落到手机里
+            _state.update {
+                it.copy(
+                    message = "已拍摄 ${newItems.size} 张，还在相机上；" +
+                        "自动保存没开，请在相机「发送到智能手机」里选片后保存到手机"
+                )
+            }
         }
         job = CaptureMachine.onFileSeen(job ?: before).job
         publishCapture()

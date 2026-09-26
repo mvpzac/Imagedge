@@ -1,5 +1,7 @@
 package com.imagedge.camera.feature.capture
 
+import androidx.annotation.StringRes
+import com.imagedge.camera.R
 import com.imagedge.camera.data.ble.BleCameraStatus
 import com.imagedge.camera.data.model.CapabilityState
 
@@ -7,8 +9,8 @@ import com.imagedge.camera.data.model.CapabilityState
  * <pre>
  *     author : Imagedge Team
  *     time   : 2026-09-25
- *     desc   : 遥控页的三件可用性（批次 E）：画面、快门、拍后保存分别判定
- *     version: 1.0
+ *     desc   : 遥控页的三件可用性（批次 E/O）：画面、快门、拍后保存分别判定，措辞在 strings.xml
+ *     version: 1.1
  * </pre>
  */
 
@@ -21,10 +23,16 @@ import com.imagedge.camera.data.model.CapabilityState
  */
 enum class Availability { Ready, NotNow, Unknown }
 
-/** 一行可用性。[note] 是「为什么」和「怎么办」，不是重复 [label] */
+/**
+ * 一行可用性。[noteRes] 说「为什么」和「怎么办」，不是重复状态本身。
+ *
+ * 存字符串资源 id 而不是成品句子（新手手册 §6：措辞归 `strings.xml`）：
+ * 判定是纯函数、跑在 JVM 单测里，拿不到 `Context`。上一版把 13 句中文直接写在这里，
+ * 等于让判定逻辑顺手 owns 了文案——改一句话要动业务代码，改版与翻译也没有落点。
+ */
 data class AvailabilityLine(
     val state: Availability,
-    val note: String?
+    @param:StringRes val noteRes: Int?
 )
 
 /** 遥控页的三件能力。设计 §4.6：分别显示，不能只摆 BLE/Wi-Fi 两个技术词 */
@@ -41,6 +49,10 @@ data class CaptureAvailability(
  * PTP 的 CAPTURE 能力、拍后保存是用户偏好加会话状态。原来页面上只有
  * 「蓝牙已连接 / 未连接」两行技术状态，用户读完仍然不知道**能不能拍**：
  * BLE 没连但 PTP 支持遥控时快门其实能用，BLE 连上了但相机没回能力时快门其实未知。
+ *
+ * 快门那一行还要看画面的脸色（新手手册 §4）：取景停了而快门照样能用时，明说
+ * 「看不到实时画面也能拍」。不说，用户读到「取景已暂停」就以为整屏都停了，
+ * 于是去重连——而那正是最不该发生的动作。
  */
 fun captureAvailabilityOf(
     connected: Boolean,
@@ -51,32 +63,41 @@ fun captureAvailabilityOf(
     capabilitiesStale: Boolean,
     busy: Boolean,
     autoSaveEnabled: Boolean
-): CaptureAvailability = CaptureAvailability(
-    viewfinder = when {
-        !connected -> AvailabilityLine(Availability.NotNow, "相机没连上，没有画面可取")
-        viewfinderPaused -> AvailabilityLine(Availability.NotNow, "取景已暂停（回前台或继续取景即恢复）")
+): CaptureAvailability {
+    val viewfinder = when {
+        !connected -> AvailabilityLine(Availability.NotNow, R.string.capture_note_view_off)
+        viewfinderPaused -> AvailabilityLine(Availability.NotNow, R.string.capture_note_view_paused)
         hasFrame -> AvailabilityLine(Availability.Ready, null)
-        else -> AvailabilityLine(Availability.Unknown, "已连接，还没收到这一轮的第一帧")
-    },
-    shutter = when {
-        !connected -> AvailabilityLine(Availability.NotNow, "连接相机后才能遥控拍摄")
-        busy -> AvailabilityLine(Availability.NotNow, "上一次拍摄还没结束，忙时不接新快门")
-        bleConnected -> AvailabilityLine(Availability.Ready, "走蓝牙快门")
+        else -> AvailabilityLine(Availability.Unknown, R.string.capture_note_view_no_frame)
+    }
+    val shutter = when {
+        !connected -> AvailabilityLine(Availability.NotNow, R.string.capture_note_shutter_off)
+        busy -> AvailabilityLine(Availability.NotNow, R.string.capture_note_shutter_busy)
+        bleConnected -> AvailabilityLine(Availability.Ready, R.string.capture_note_shutter_ble)
         ptpCapture == CapabilityState.WRITABLE ->
-            AvailabilityLine(Availability.Ready, "走相机传输通道的遥控拍摄")
+            AvailabilityLine(Availability.Ready, R.string.capture_note_shutter_ptp)
         // 这个模式没实测过 ≠ 这台相机不支持：说未知，别把用户推去重连（已知坑 14）
         ptpCapture == CapabilityState.UNKNOWN ->
-            AvailabilityLine(Availability.Unknown, "当前模式下遥控拍摄没有实测记录，先别当成不支持")
+            AvailabilityLine(Availability.Unknown, R.string.capture_note_shutter_unverified)
         // 能力还没读回来：同样说未知，不能说这台相机不支持
-        capabilitiesStale -> AvailabilityLine(Availability.Unknown, "还没读到这轮相机的能力，先别当成不支持")
-        else -> AvailabilityLine(Availability.NotNow, "这台相机的传输通道不具备遥控拍摄")
-    },
-    autoSave = when {
-        !autoSaveEnabled -> AvailabilityLine(Availability.NotNow, "未开启：拍摄后不会自动存入相册")
-        !connected -> AvailabilityLine(Availability.NotNow, "没连上相机，拍后的文件取不回来")
-        else -> AvailabilityLine(Availability.Ready, "拍完自动存入相册（重复的只存一次）")
+        capabilitiesStale ->
+            AvailabilityLine(Availability.Unknown, R.string.capture_note_shutter_stale)
+        else -> AvailabilityLine(Availability.NotNow, R.string.capture_note_shutter_unsupported)
     }
-)
+    return CaptureAvailability(
+        viewfinder = viewfinder,
+        shutter = if (shutter.state == Availability.Ready && viewfinder.state != Availability.Ready) {
+            shutter.copy(noteRes = R.string.capture_note_shutter_blind)
+        } else {
+            shutter
+        },
+        autoSave = when {
+            !autoSaveEnabled -> AvailabilityLine(Availability.NotNow, R.string.capture_note_autosave_off)
+            !connected -> AvailabilityLine(Availability.NotNow, R.string.capture_note_autosave_offline)
+            else -> AvailabilityLine(Availability.Ready, R.string.capture_note_autosave_on)
+        }
+    )
+}
 
 /**
  * 录像按钮该显示什么。

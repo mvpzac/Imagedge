@@ -83,7 +83,7 @@ private fun LineRow(name: String, line: AvailabilityLine) {
             color = MaterialTheme.colorScheme.onSurface
         )
         Text(
-            text = line.note ?: stringResource(
+            text = line.noteRes?.let { stringResource(it) } ?: stringResource(
                 when (line.state) {
                     Availability.Ready -> R.string.control_avail_ready
                     Availability.NotNow -> R.string.control_avail_not_now

@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.annotation.StringRes
 import com.imagedge.camera.R
 import com.imagedge.camera.data.model.CameraCapability
 import com.imagedge.camera.data.model.CapabilityState
@@ -38,14 +39,30 @@ import com.imagedge.camera.ui.theme.Spacing
  * </pre>
  */
 
-/** 参数区展示顺序与标题（能力项 → 标题字符串资源） */
+/**
+ * 一行参数的展示信息：能力项、标题、以及**一句白话解释**。
+ *
+ * 解释常驻（新手手册 §4）：这一屏不该要求用户先懂「EV」「F 值」才敢动。
+ * 它不是错误提示，所以不可调时也照样说——用户更需要在那时候知道这项是干什么的。
+ */
+private data class ParamRow(
+    val capability: CameraCapability,
+    @param:StringRes val labelRes: Int,
+    @param:StringRes val explainRes: Int
+)
+
+/** 参数区展示顺序 */
 private val PARAM_ROWS = listOf(
-    CameraCapability.EXPOSURE_PROGRAM_MODE to R.string.control_shoot_mode,
-    CameraCapability.ISO to R.string.control_iso,
-    CameraCapability.F_NUMBER to R.string.control_fnumber,
-    CameraCapability.SHUTTER_SPEED to R.string.control_shutter,
-    CameraCapability.WHITE_BALANCE to R.string.control_wb,
-    CameraCapability.EXPOSURE_BIAS to R.string.control_eb
+    ParamRow(
+        CameraCapability.EXPOSURE_PROGRAM_MODE,
+        R.string.control_shoot_mode,
+        R.string.control_explain_shoot_mode
+    ),
+    ParamRow(CameraCapability.ISO, R.string.control_iso, R.string.control_explain_iso),
+    ParamRow(CameraCapability.F_NUMBER, R.string.control_fnumber, R.string.control_explain_fnumber),
+    ParamRow(CameraCapability.SHUTTER_SPEED, R.string.control_shutter, R.string.control_explain_shutter),
+    ParamRow(CameraCapability.WHITE_BALANCE, R.string.control_wb, R.string.control_explain_wb),
+    ParamRow(CameraCapability.EXPOSURE_BIAS, R.string.control_eb, R.string.control_explain_eb)
 )
 
 /**
@@ -77,12 +94,13 @@ fun CaptureSettingsSheet(
             verticalArrangement = Arrangement.spacedBy(Spacing.M)
         ) {
             GroupTitle(stringResource(R.string.control_params_sheet))
-            PARAM_ROWS.forEach { (capability, labelRes) ->
+            PARAM_ROWS.forEach { row ->
                 CapabilityParamRow(
-                    label = stringResource(labelRes),
-                    param = params[capability],
+                    label = stringResource(row.labelRes),
+                    explanation = stringResource(row.explainRes),
+                    param = params[row.capability],
                     stale = stale,
-                    onSelect = { raw -> onSelect(capability, raw) }
+                    onSelect = { raw -> onSelect(row.capability, raw) }
                 )
             }
         }
@@ -98,6 +116,7 @@ fun CaptureSettingsSheet(
 @Composable
 private fun CapabilityParamRow(
     label: String,
+    explanation: String,
     param: ParamUiState?,
     stale: Boolean,
     onSelect: (Long) -> Unit
@@ -146,6 +165,12 @@ private fun CapabilityParamRow(
                 )
             }
         }
+        Text(
+            text = explanation,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp)
+        )
         if (!editable) {
             Text(
                 text = stringResource(blockReasonOf(param, stale)),

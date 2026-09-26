@@ -435,7 +435,30 @@
     <string name="control_avail_not_now">现在不行</string>
     <string name="control_avail_unknown">未知</string>
     <string name="control_record_state_unknown">相机还没回报录像状态，按下以后以相机回报为准</string>
-    <string name="control_record_start">开始录像</string>
+
+    <!-- 三件能力的说明（判定在 CaptureAvailability，措辞在这里：新手手册 §6） -->
+    <string name="capture_note_view_off">相机没连上，没有画面可取</string>
+    <string name="capture_note_view_paused">取景已暂停（回前台或继续取景即恢复）</string>
+    <string name="capture_note_view_no_frame">已连接，还没收到这一轮的第一帧</string>
+    <string name="capture_note_shutter_off">连接相机后才能遥控拍摄</string>
+    <string name="capture_note_shutter_busy">上一次拍摄还没结束，忙时不接新快门</string>
+    <string name="capture_note_shutter_ble">走蓝牙快门</string>
+    <string name="capture_note_shutter_ptp">走相机传输通道的遥控拍摄</string>
+    <string name="capture_note_shutter_unverified">当前模式下遥控拍摄没有实测记录，先别当成不支持</string>
+    <string name="capture_note_shutter_stale">还没读到这轮相机的能力，先别当成不支持</string>
+    <string name="capture_note_shutter_unsupported">这台相机的传输通道不具备遥控拍摄</string>
+    <!-- 取景停了但快门照样能用：不写这一句，用户会以为整屏都停了，于是去重连 -->
+    <string name="capture_note_shutter_blind">看不到实时画面，仍可拍摄</string>
+    <string name="capture_note_autosave_off">未开启：拍摄后不会自动存入相册</string>
+    <string name="capture_note_autosave_offline">没连上相机，拍后的文件取不回来</string>
+    <string name="capture_note_autosave_on">拍完自动存入相册（重复的只存一次）</string>
+    <!-- 参数旁的一句话解释（新手手册 §4：不要让用户先懂摄影术语才敢动） -->
+    <string name="control_explain_shoot_mode">决定谁定光圈和快门：程序自动、光圈优先、快门优先或手动</string>
+    <string name="control_explain_iso">感光度：数字越大越亮，也越容易出噪点</string>
+    <string name="control_explain_fnumber">光圈：数字越小进光越多、背景越虚</string>
+    <string name="control_explain_shutter">快门速度：越长越亮，运动的物体会拖影</string>
+    <string name="control_explain_wb">白平衡：让白色在暖光/冷光下仍然是白的</string>
+    <string name="control_explain_eb">曝光补偿：在相机定的基础上让画面更亮或更暗</string>    <string name="control_record_start">开始录像</string>
     <string name="control_record_stop">停止录像</string>
     <string name="control_params_action">调整参数</string>
     <string name="control_params_sheet">拍摄参数</string>

@@ -1,11 +1,10 @@
 package com.imagedge.camera.feature.capture
 
 import com.imagedge.camera.data.ble.BleCameraStatus
+import com.imagedge.camera.R
 import com.imagedge.camera.data.model.CapabilityState
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -57,7 +56,8 @@ class CaptureAvailabilityTest {
         val line = availability(stale = true).shutter
 
         assertEquals(Availability.Unknown, line.state)
-        assertNotNull("未知还要说明为什么未知", line.note)
+        // 断言资源 id 而不是句子：判定负责「是哪件事」，措辞归 strings.xml
+        assertEquals(R.string.capture_note_shutter_stale, line.noteRes)
     }
 
     @Test
@@ -65,10 +65,8 @@ class CaptureAvailabilityTest {
         val line = availability(stale = false).shutter
 
         assertEquals(Availability.NotNow, line.state)
-        assertTrue(
-            "通道结构性没有，就明说没有，不要含糊成「当前模式下没上报」",
-            line.note!!.contains("不具备")
-        )
+        // 通道结构性没有，就说「不具备」，不能含糊成「当前模式下没上报」
+        assertEquals(R.string.capture_note_shutter_unsupported, line.noteRes)
     }
 
     @Test
@@ -78,7 +76,7 @@ class CaptureAvailabilityTest {
         val line = availability(ptpCapture = CapabilityState.UNKNOWN, stale = false).shutter
 
         assertEquals(Availability.Unknown, line.state)
-        assertTrue("要说清是「没实测」", line.note!!.contains("没有实测记录"))
+        assertEquals(R.string.capture_note_shutter_unverified, line.noteRes)
     }
 
     @Test
@@ -95,7 +93,22 @@ class CaptureAvailabilityTest {
         val line = availability(paused = true).viewfinder
 
         assertEquals(Availability.NotNow, line.state)
-        assertTrue(line.note!!.contains("暂停"))
+        assertEquals(R.string.capture_note_view_paused, line.noteRes)
+    }
+
+    @Test
+    fun `a working shutter behind a dead viewfinder says you can still shoot`() {
+        // 新手手册 §4：取景停了而快门还能用时必须明说，
+        // 否则用户读到「取景已暂停」就以为整屏都停了，于是去重连
+        val blind = availability(paused = true, ble = true).shutter
+
+        assertEquals(Availability.Ready, blind.state)
+        assertEquals(R.string.capture_note_shutter_blind, blind.noteRes)
+        // 快门正常工作时不撒这个谎：画面就是画面，快门就是快门
+        assertEquals(
+            R.string.capture_note_shutter_ble,
+            availability(paused = false, ble = true).shutter.noteRes
+        )
     }
 
     @Test
@@ -111,7 +124,8 @@ class CaptureAvailabilityTest {
         val line = availability(autoSave = false).autoSave
 
         assertEquals(Availability.NotNow, line.state)
-        assertTrue("没开启要说成用户的选择", line.note!!.startsWith("未开启"))
+        // 没开启是用户的选择，不是故障
+        assertEquals(R.string.capture_note_autosave_off, line.noteRes)
     }
 
     @Test
