@@ -1,8 +1,11 @@
 package com.imagedge.camera.ui.components
 
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,10 +30,13 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -300,10 +306,20 @@ fun AppSwitch(
 }
 
 /**
- * 行内文字动作（替代裸 `TextButton`）。
+ * 紧凑动作按钮（替代裸 `TextButton`）。
  *
- * 用于卡片尾部、状态条右侧这类「不该出现实心按钮」的位置；
- * 触摸目标同样撑到 48dp，避免因为视觉小而点不中。
+ * 用于卡片尾部、状态条右侧这类「不该出现实心大按钮」的位置；触摸目标撑到 48dp。
+ *
+ * **为什么它必须有自己的容器**：以前这里只有一行主色文字，而本应用的 `primary`
+ * 是近黑（浅色主题）/近白（深色主题），与正文只差一个字重——用户读到的是「标签」
+ * 而不是「可以按的东西」，按压反馈要等手指落下才出现。现在静止态就有一层由 [color]
+ * 派生的淡色片 + 8dp 栅格上的 12dp 圆角，与 [AppButton] 同族但更轻。
+ *
+ * 容器**从 [color] 取色而不是从 `surfaceVariant` 取色**：这样深色画面上的浮层
+ * （监看、大图、成片回看）传 `OnViewer` 时会自动得到一层提亮底，浅色卡片里传默认
+ * 主色时得到淡灰底，确认框的 `error` 得到淡红底——不需要为这三种场景做三个组件。
+ * 按设计语言「不加描边」的既有口径，层级只靠浓淡与字色表达；浓度刻意压在
+ * `AppButton(PRIMARY)` 之下，免得行内动作跟「一屏一个主操作」抢焦点。
  */
 @Composable
 fun AppLink(
@@ -313,12 +329,31 @@ fun AppLink(
     enabled: Boolean = true,
     color: Color = MaterialTheme.colorScheme.primary
 ) {
+    val shape = RoundedCornerShape(Radius.Control)
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    // 这层色片是「压暗」还是「提亮」底色，取决于底是深还是浅：深色底上 10% 的近白
+    // 等于没有，要提到 22% 才看得出是一块按钮。两个信号缺一不可——
+    // surface 覆盖深色主题，[color] 覆盖浅色主题里压在纯黑画面上的浮层（OnViewer）。
+    val liftOnDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f || color.luminance() > 0.5f
+    val containerAlpha = when {
+        !enabled -> 0.05f
+        liftOnDark -> if (pressed) 0.30f else 0.22f
+        else -> if (pressed) 0.17f else 0.10f
+    }
     Box(
         modifier = modifier
             .defaultMinSize(minHeight = 48.dp)
-            .clip(RoundedCornerShape(Radius.Tag))
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(horizontal = Spacing.S, vertical = Spacing.XS),
+            .clip(shape)
+            .background(color.copy(alpha = containerAlpha), shape)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                enabled = enabled,
+                role = Role.Button,
+                onClick = onClick
+            )
+            .padding(horizontal = Spacing.M),
         contentAlignment = Alignment.Center
     ) {
         Text(

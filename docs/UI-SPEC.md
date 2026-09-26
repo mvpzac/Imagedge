@@ -165,7 +165,7 @@
 | 需求 | 用 | 不要用 |
 |---|---|---|
 | 主/次/文字动作 | `AppButton(PRIMARY / SECONDARY / GHOST)` | 裸 `Button` / `TextButton` |
-| 行内文字动作（表格、卡片尾部） | `AppLink` | 裸 `TextButton` |
+| 比按钮轻、但仍是「能按」的动作（卡片尾部、区块标题右侧、页头） | `AppLink`（自带色块容器） | 裸 `TextButton`、手拼 `Text + clickable` |
 | 开/关 | `AppSwitchRow`（内部 `GlassSwitch`） | 裸 `Switch` |
 | 互斥选项 ≤ 4 个 | `AppChipRow` + `AppChip` | 裸 `FilterChip` / `AssistChip` |
 | 互斥选项 > 4 个或比例类 | `AppChipRow(scrollable = true)` | 横向自绘 |
@@ -196,6 +196,16 @@
   （已知坑：会渲染成黑色实心块）；
 - 玻璃参数集中在 `ui/glass/GlassSurface.kt` 的 `GlassSpec`；
 - 新增可点击玻璃组件用 `Modifier.glassReactive(onClick)`，不要直接 `clickable`（缺按压反馈）。
+
+### 6.3 可点击的东西必须在静止态就看得出可点击
+
+- **按压反馈不算 affordance**：用户不会去按他以为是标签的东西。每种动作都要有静止容器——
+  `AppButton` 实心/色块、`AppIconButton` 半透明圆底、`AppLink` 一层由内容色派生的淡色片
+  （浅色底 10%、深色底/深色浮层 22%，按下 17% / 30%，禁用 5%）。
+- `AppLink` 的浓度**必须压在 `AppButton(PRIMARY)` 之下**：行内动作抢过主操作就是违反 §2 原则 2。
+  确认框里 `error` 与「取消」并排时两者等重、只靠色相区分，破坏性那枚不许更淡。
+- 不加描边（黑线会把极简版面切碎，理由见 `AppButton` 玻璃路径注释）；层级只靠浓淡、尺寸、字色。
+- 深色与浅色都要量：`OnViewer` 这类浅色内容色压在纯黑监看画面上时，10% 的近白等于没有。
 
 ---
 
@@ -233,6 +243,7 @@
 - [ ] 组件来自第 6 节决策表，没有裸 M3 控件（除例外清单）
 - [ ] 异步操作有加载/成功/失败三态，失败信息含原因与下一步
 - [ ] 触控目标 ≥ 48dp；图标按钮有 contentDescription
+- [ ] 每个动作在静止态就有容器（`AppLink` 没退化成一行文字），禁用态一眼可辨（§6.3）
 - [ ] 深色与浅色主题都过一遍（语义色对比度、玻璃降级路径）；**深色下正文要真量一次**
       （批次 A 的黑字缺陷肉眼在浅色下完全正常，截图取像素才发现）
 - [ ] 玻璃参数未新增散值（统一在 `GlassSpec`）
@@ -249,7 +260,7 @@
 | 项 | 结果 |
 |---|---|
 | 设计系统 token | 5 组（颜色/字阶/圆角/间距/动效）在本规范定稿，作为唯一来源 |
-| 基础组件 | `AppPage`（页面骨架）、`AppSection`（区块）、`AppChip` / `AppChipRow`（选项）、`AppSlider`（参数）、`AppTextField`（输入）、`AppSwitch` / `AppSwitchRow`（开关）、`AppIconButton`（图标按钮）、`AppLink`（行内动作）、`AppDivider` |
+| 基础组件 | `AppPage`（页面骨架）、`AppSection`（区块）、`AppChip` / `AppChipRow`（选项）、`AppSlider`（参数）、`AppTextField`（输入）、`AppSwitch` / `AppSwitchRow`（开关）、`AppIconButton`（图标按钮）、`AppLink`（紧凑动作，带色块容器）、`AppDivider` |
 | `PageHeader` 返回钮 | 36dp 触控 → **48dp 触控**（视觉仍 36dp） |
 | 页面迁移 | **`feature/` 下裸 M3 控件全部清零**（46 → 0）：编辑调节、边框水印、LIVE 三拼、编辑中枢、下载页、设置页、首页、遥控页、视频转 Live、导出设置面板、相册页、看图页、扫码页 |
 | 页面骨架 | 5 个工具页统一走 `AppPage`（边距 16dp + 滚动 + 导航栏避让）；批次 A 新增 `AppScreenFrame`（设置页已迁），批次 B 把悬浮导航的底部让位量解决掉（`LocalNavClearance` 实测下发），批次 C 传输页迁到 `AppScreenFrame` + `AppPageHeader`（记录行/任务行的动作单独占一行，200% 字体下不裁字）；其余 Tab 页与沉浸页的骨架迁移仍单独排期 |
