@@ -107,6 +107,7 @@ fun PhotosScreen(
     val reconnecting by viewModel.reconnecting.collectAsStateWithLifecycle()
     val transferActive by viewModel.hasActiveDownload.collectAsStateWithLifecycle()
     val savedKeys by viewModel.savedKeys.collectAsStateWithLifecycle()
+    val cardEmptyConfirmed by viewModel.cardEmptyConfirmed.collectAsStateWithLifecycle()
     val submitting by viewModel.submitting.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     val requestNotificationPermission =
@@ -191,6 +192,7 @@ fun PhotosScreen(
                 SelectionActionBar(
                     selectedCount = selected.size,
                     submitting = submitting,
+                    saveLocation = viewModel.saveLocation,
                     onSave = {
                         requestNotificationPermission()
                         viewModel.downloadSelected()
@@ -301,6 +303,15 @@ fun PhotosScreen(
                     ),
                     onAction = { viewModel.loadMedia() },
                     modifier = Modifier.padding(Spacing.L)
+                )
+                // 整卡确认过是空的：说「卡里没有照片」，不要把两种范围的解释混在一句里
+                connected && items.isEmpty() && cardEmptyConfirmed -> EmptyState(
+                    title = stringResource(R.string.photos_card_empty_title),
+                    desc = stringResource(R.string.photos_card_empty_desc),
+                    icon = Lucide.HardDrive,
+                    actionLabel = stringResource(R.string.photos_refresh_action),
+                    onAction = { viewModel.loadMedia() },
+                    modifier = Modifier.fillMaxSize()
                 )
                 connected && items.isEmpty() -> EmptyState(
                     title = stringResource(R.string.album_empty_title),

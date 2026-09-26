@@ -14,6 +14,7 @@ import com.imagedge.camera.ui.feedback.Haptics
 import com.imagedge.camera.ui.theme.ThemeController
 import com.imagedge.camera.ui.theme.ThemeMode
 import com.imagedge.camera.data.guidance.GuidanceStore
+import com.imagedge.camera.data.transfer.DownloadLocation
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -116,10 +117,12 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-
-    /** 自定义下载目录（SAF tree uri；null = 默认 DCIM/Imagedge） */
-    val downloadTreeUri: String? get() = prefs.getString(KEY_DOWNLOAD_TREE, null)
+    /**
+     * 自定义下载目录（SAF tree uri；null = 默认 DCIM/Imagedge）。
+     * 键与措辞归 `DownloadLocation`——写盘的相机仓库和照片编辑器读的是同一个地方，
+     * 这里再存一份键就会漂（四处硬写同一个字符串就是上一版的样子）。
+     */
+    val downloadTreeUri: String? get() = DownloadLocation.treeUri(context)
 
     fun onDirPicked(uri: Uri) {
         runCatching {
@@ -129,29 +132,17 @@ class SettingsViewModel @Inject constructor(
                     android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
         }
-        prefs.edit { putString(KEY_DOWNLOAD_TREE, uri.toString()) }
-        _downloadDirLabel.value = describeDir(uri.toString())
+        DownloadLocation.setTreeUri(context, uri)
+        _downloadDirLabel.value = DownloadLocation.label(context)
     }
 
     fun restoreDefaultDir() {
-        prefs.edit { remove(KEY_DOWNLOAD_TREE) }
-        _downloadDirLabel.value = DEFAULT_LABEL
+        DownloadLocation.clearTreeUri(context)
+        _downloadDirLabel.value = DownloadLocation.label(context)
     }
 
-    private val _downloadDirLabel = MutableStateFlow(describeDir(downloadTreeUri))
+    private val _downloadDirLabel = MutableStateFlow(DownloadLocation.label(context))
     val downloadDirLabel: StateFlow<String> = _downloadDirLabel.asStateFlow()
-
-    private fun describeDir(uriStr: String?): String {
-        if (uriStr == null) return DEFAULT_LABEL
-        return runCatching {
-            "已选择：" + android.provider.DocumentsContract.getTreeDocumentId(uriStr.toUri())
-        }.getOrDefault("已选择自定义目录")
-    }
-
-    companion object {
-        private const val KEY_DOWNLOAD_TREE = "download_tree_uri"
-        private const val DEFAULT_LABEL = "默认：DCIM/Imagedge（系统相册）"
-    }
 
     val themeMode: StateFlow<ThemeMode> = themeController.mode
 

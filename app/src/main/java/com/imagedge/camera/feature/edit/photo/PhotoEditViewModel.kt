@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
+import com.imagedge.camera.data.transfer.DownloadLocation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.imagedge.camera.core.common.AppLog
@@ -963,8 +964,7 @@ class PhotoEditViewModel @Inject constructor(
      */
     private fun commitToGallery(temp: File, name: String): String {
         val resolver = context.contentResolver
-        val treeUriStr = context.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
-            .getString("download_tree_uri", null)
+        val treeUriStr = DownloadLocation.treeUri(context)
         val dateTaken = runCatching {
             ExifInterface(temp.absolutePath).getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
         }.getOrNull()

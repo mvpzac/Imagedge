@@ -368,7 +368,11 @@ private fun TransferQueueList(
     ) {
         summary?.let {
             item(key = "batch-summary") {
-                BatchSummaryCard(summary = it, onRetryUnfinished = onRetryUnfinished)
+                BatchSummaryCard(
+                    summary = it,
+                    onRetryUnfinished = onRetryUnfinished,
+                    onKeepChoosing = onGoAlbum
+                )
             }
         }
         item(key = "policy") {
@@ -428,7 +432,11 @@ private fun TransferHistoryList(
  * 摘要只是文字事实，抢注意力没有意义（UI 规范 §3.2）。
  */
 @Composable
-private fun BatchSummaryCard(summary: TransferBatchSummary, onRetryUnfinished: () -> Unit) {
+private fun BatchSummaryCard(
+    summary: TransferBatchSummary,
+    onRetryUnfinished: () -> Unit,
+    onKeepChoosing: () -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -456,6 +464,12 @@ private fun BatchSummaryCard(summary: TransferBatchSummary, onRetryUnfinished: (
                 onClick = onRetryUnfinished
             )
         }
+        // 这批传完了也要有一条往前走的路（新手手册 §3：结果页要说下一步）：
+        // 回到照片页继续选，而不是让用户自己想去哪个 Tab
+        AppLink(
+            text = stringResource(R.string.transfer_keep_choosing),
+            onClick = onKeepChoosing
+        )
     }
 }
 

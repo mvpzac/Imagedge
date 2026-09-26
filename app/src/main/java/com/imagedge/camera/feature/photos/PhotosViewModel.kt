@@ -1,5 +1,6 @@
 package com.imagedge.camera.feature.photos
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.lifecycle.ViewModel
@@ -9,9 +10,11 @@ import com.imagedge.camera.data.model.DownloadState
 import com.imagedge.camera.data.model.MediaItem
 import com.imagedge.camera.data.model.MediaSessionCache
 import com.imagedge.camera.data.remote.CameraRepository
+import com.imagedge.camera.data.transfer.DownloadLocation
 import com.imagedge.camera.data.transfer.DownloadManager
 import com.imagedge.camera.ui.feedback.Haptics
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -64,14 +67,27 @@ class PhotosViewModel @Inject constructor(
     private val repository: CameraRepository,
     private val downloadManager: DownloadManager,
     private val sessionCache: MediaSessionCache,
-    private val haptics: Haptics
+    private val haptics: Haptics,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
+
+    /**
+     * 照片会存到哪儿（新手手册 §3：不能为了短文案省去保存位置）。
+     *
+     * 说在**按下之前**，而不是设置页里等用户自己去找：第一次保存的人不知道
+     * 「保存到手机」会落到哪个目录，也就不知道去哪儿确认它成功了。
+     */
+    val saveLocation: String get() = DownloadLocation.label(context)
 
     private val _items = MutableStateFlow<List<MediaItem>>(emptyList())
     val items: StateFlow<List<MediaItem>> = _items.asStateFlow()
 
     private val _loading = MutableStateFlow(false)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
+
+    /** 整卡枚举成功且结果为空（区别于「没读到」）。见 [loadMedia] 的说明 */
+    private val _cardEmptyConfirmed = MutableStateFlow(false)
+    val cardEmptyConfirmed: StateFlow<Boolean> = _cardEmptyConfirmed.asStateFlow()
 
     private val _notice = MutableStateFlow<PhotosNotice?>(null)
     val notice: StateFlow<PhotosNotice?> = _notice.asStateFlow()
@@ -261,6 +277,11 @@ class PhotosViewModel @Inject constructor(
                     }
                     // 空整卡兜底：什么都没回调到时也结束骨架屏，走到空态
                     if (acc.isEmpty()) _loading.value = false
+                    // 只有「枚举成功且一张都没有」才敢说是空的。读失败、超时、被中断
+                    // 都走 catch，不会置这个标记——把「没读到」讲成「卡里没有照片」
+                    // 是手册 §3 专门点名的另一种谎
+                    _cardEmptyConfirmed.value =
+                        acc.isEmpty() && _browseMode.value == BrowseMode.FULL_CARD
                 }
             } catch (e: Exception) {
                 AppLog.e("album", "加载媒体失败：${e::class.simpleName}: ${e.message}")

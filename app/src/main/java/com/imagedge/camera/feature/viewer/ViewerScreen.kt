@@ -368,7 +368,12 @@ private fun ViewerTopBar(
         // 还是已经落进相册的副本（设计 §4.4）
         Text(
             text = stringResource(
-                if (saved) R.string.viewer_marker_saved else R.string.viewer_marker_preview
+                when {
+                    saved -> R.string.viewer_marker_saved
+                    // RAW 显示的是内嵌 JPEG（解码整片要另说），不标出来就是拿预览冒充原片
+                    item.photoType == PhotoType.RAW -> R.string.viewer_marker_raw
+                    else -> R.string.viewer_marker_preview
+                }
             ),
             style = MaterialTheme.typography.labelSmall,
             color = OnViewer.copy(alpha = 0.8f),

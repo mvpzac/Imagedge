@@ -15,6 +15,7 @@ import com.imagedge.camera.data.model.CameraCapability
 import com.imagedge.camera.data.model.CameraIdentity
 import com.imagedge.camera.data.model.CameraSettings
 import com.imagedge.camera.data.model.CameraTransport
+import com.imagedge.camera.data.transfer.DownloadLocation
 import com.imagedge.camera.data.model.MediaItem
 import com.imagedge.camera.data.model.PropertyWriteDecision
 import com.imagedge.camera.data.remote.wifi.CameraWifiManager
@@ -521,8 +522,7 @@ class CameraRepository @Inject constructor(
         val mimeType = inferMimeType(displayName)
 
         // 用户在设置页选择了自定义目录（SAF）：写入该目录（默认路径见下方 MediaStore 分支）
-        val treeUriStr = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-            .getString("download_tree_uri", null)
+        val treeUriStr = DownloadLocation.treeUri(context)
         if (treeUriStr != null) {
             val treeUri = treeUriStr.toUri()
             // SAF 树目录：createDocument 建文件（重名自动追加 " (1)"）
@@ -625,8 +625,7 @@ class CameraRepository @Inject constructor(
         val displayName = sanitizeDisplayName(item.filename)
         val mimeType = inferMimeType(displayName)
         val resolver = context.contentResolver
-        val treeUriStr = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-            .getString("download_tree_uri", null)
+        val treeUriStr = DownloadLocation.treeUri(context)
         if (treeUriStr != null) {
             val treeUri = treeUriStr.toUri()
             val dirId = DocumentsContract.getTreeDocumentId(treeUri)

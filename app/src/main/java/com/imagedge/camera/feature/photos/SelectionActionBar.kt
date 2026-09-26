@@ -48,6 +48,8 @@ import com.imagedge.camera.ui.theme.UiSize
 fun SelectionActionBar(
     selectedCount: Int,
     submitting: Boolean,
+    /** 会存到哪儿（手册 §3：按下之前就要说，别让人事后去找文件在哪） */
+    saveLocation: String,
     onSave: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier
@@ -102,13 +104,13 @@ fun SelectionActionBar(
                     // 没选东西时不是「点了没反应」，而是把原因写在按钮下面
                     enabled = selectedCount > 0 && !submitting
                 )
-                if (selectedCount == 0) {
-                    Text(
-                        text = stringResource(R.string.photos_pick_first),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                // 按下之前就说清东西会落到哪儿；没选东西时先说为什么按不动
+                Text(
+                    text = if (selectedCount == 0) stringResource(R.string.photos_pick_first)
+                    else stringResource(R.string.photos_save_to, saveLocation),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }

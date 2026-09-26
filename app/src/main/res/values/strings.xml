@@ -88,6 +88,7 @@
     <string name="photos_deselect_all">取消全选</string>
     <string name="photos_saving">正在加入队列…</string>
     <string name="photos_pick_first">请选择照片</string>
+    <string name="photos_save_to">保存到 %1$s</string>
     <string name="photos_tile_toggle_hint">选择这张</string>
     <string name="photos_tile_open_hint">查看大图</string>
     <string name="photos_tile_saved">已保存到手机</string>
@@ -111,6 +112,8 @@
     </plurals>
     <string name="album_empty_hint">等待相机内容…\n请保持相机处于「智能手机连接」页面；「相机已选照片」还需在相机「发送到智能手机」里勾选，「存储卡」则直接列出卡内全部照片</string>
     <string name="album_empty_title">还没有照片</string>
+    <string name="photos_card_empty_title">存储卡里没有照片</string>
+    <string name="photos_card_empty_desc">已经完整读过这张卡，上面没有可列出的照片或视频。</string>
     <string name="album_error_title">加载失败</string>
     <string name="album_retry">重试</string>
     <string name="album_filter_all">全部</string>
@@ -272,6 +275,7 @@
     <string name="transfer_confirm_history_title">清空传输记录？</string>
     <string name="transfer_confirm_history_body">记录会全部删除，相册里的照片与视频不受影响；要再传得重新选择。</string>
     <string name="transfer_confirm_go">继续</string>
+    <string name="transfer_keep_choosing">继续选照片</string>
     <string name="download_cancel">取消任务</string>
     <!-- 任务状态标签。大小未知时**不打百分比**：progress 只在 total>0 时算得出来，
          在这种任务上写「0%」就是说谎，而同一行上方的进度条已经改用不定长指示了 -->
@@ -467,6 +471,7 @@
     <string name="viewer_page">第 %1$d / %2$d 张</string>
     <string name="viewer_marker_saved">已保存到手机</string>
     <string name="viewer_marker_preview">相机预览</string>
+    <string name="viewer_marker_raw">RAW 内嵌预览（非原片解码）</string>
     <string name="viewer_stale">相机内容已更新，请返回重新选择</string>
     <string name="viewer_need_save">编辑与分享要用相册里的原图，先把它保存到手机</string>
     <string name="viewer_preparing">正在保存到手机…%1$d%</string>
