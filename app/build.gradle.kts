@@ -31,9 +31,9 @@ android {
         applicationId = "com.imagedge.camera"
         minSdk = 29
         targetSdk = 37
-        // 0.2.0-alpha06：安全与稳定性修复、传输链路加固、玻璃效果性能优化
-        versionCode = 1015
-        versionName = "0.2.0-alpha06"
+        // 0.2.0-alpha07：页面与项目结构重构（批次 C→R）、两份规范逐条对账后的诚实性修复
+        versionCode = 1016
+        versionName = "0.2.0-alpha07"
 
         // 仅支持 64 位设备（项目决策 2026-08-29）：排除 32 位 ABI
         ndk {

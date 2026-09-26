@@ -16,7 +16,7 @@ plugins {
 
 allprojects {
     group = "com.imagedge.camera"
-    version = "0.2.0-alpha06"
+    version = "0.2.0-alpha07"
 
     // SBOM records shipped runtime graphs only. Scanning every resolvable AGP/KSP tool
     // configuration is noisy, slow and describes the build machine rather than the application.
