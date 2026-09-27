@@ -209,7 +209,7 @@ class CameraControlViewModel @Inject constructor(
     val cameraStatus = bleShutter.cameraStatus
 
     /** 已认知的相册内容指纹集合，用于「拍摄后增量拉取」差异对比 */
-    private val lastKnownThumbKeys = mutableSetOf<String>()
+    private val lastKnownContentKeys = mutableSetOf<String>()
 
     /**
      * 当前拍摄任务。
@@ -232,7 +232,7 @@ class CameraControlViewModel @Inject constructor(
     /**
      * 相册基线是否已就绪（P1-14）。
      *
-     * [init] 里的 captureEvents 收集在 ViewModel 创建时就开始，而 [lastKnownThumbKeys]
+     * [init] 里的 captureEvents 收集在 ViewModel 创建时就开始，而 [lastKnownContentKeys]
      * 要等 [connect] 中 `listMedia()`（可达 10~30s）返回后才填充。这个窗口期内若收到
      * CaptureComplete，差集 = 整张相册 → `enqueueAll(全部)`，整卡模式下就是几千个任务
      * 瞬间入队（下载风暴 + UI 卡死）。基线未就绪时直接跳过自动拉回。
@@ -552,10 +552,10 @@ class CameraControlViewModel @Inject constructor(
         if (settleMs > 0L) delay(settleMs)
         val before = job ?: return
         val items = runCatching { cameraRepository.listMedia() }.getOrNull()
-        val newItems = items?.filter { it.thumbKey !in lastKnownThumbKeys }.orEmpty()
+        val newItems = items?.filter { it.contentKey !in lastKnownContentKeys }.orEmpty()
         items?.let {
-            lastKnownThumbKeys.clear()
-            lastKnownThumbKeys.addAll(it.map { item -> item.thumbKey })
+            lastKnownContentKeys.clear()
+            lastKnownContentKeys.addAll(it.map { item -> item.contentKey })
         }
         if (newItems.isEmpty()) {
             job = CaptureMachine.onNoFile(before).job
@@ -569,9 +569,9 @@ class CameraControlViewModel @Inject constructor(
         // 只有用户主动开了自动保存才入队；且必须过账本，重复事件不重复落盘
         val policy = transferStore.policy.value
         if (policy.autoSaveAfterCapture) {
-            val fresh = autoSaveLedger.claimAll(newItems.map { item -> item.thumbKey })
+            val fresh = autoSaveLedger.claimAll(newItems.map { it.contentKey })
             if (fresh.isNotEmpty()) {
-                downloadManager.enqueueAll(newItems.filter { it.thumbKey in fresh.toSet() })
+                downloadManager.enqueueAll(newItems.filter { it.contentKey in fresh.toSet() })
                 // 入队 ≠ 落盘。这里说「已保存」就是抢在事实前面报喜（新手手册 §4：
                 // 确认照片落盘后才说「已保存到手机」），存没存成要到传输页看那一条的结果
                 _state.update { it.copy(message = "已加入下载队列 ${fresh.size} 张，存进相册后会在传输页显示") }
@@ -893,8 +893,8 @@ class CameraControlViewModel @Inject constructor(
             )
             // 基线相册内容（供拍摄后增量拉取）+ 探测参数能力并回显
             runCatching { cameraRepository.listMedia() }.getOrNull()?.let { items ->
-                lastKnownThumbKeys.clear()
-                lastKnownThumbKeys.addAll(items.map { it.thumbKey })
+                lastKnownContentKeys.clear()
+                lastKnownContentKeys.addAll(items.map { it.contentKey })
                 // P1-14：基线就绪后才允许「拍摄后自动拉回」，否则首个 CaptureComplete
                 // 会把整张相册当成新照片灌进下载队列
                 baselineReady = true
@@ -1077,12 +1077,12 @@ class CameraControlViewModel @Inject constructor(
             return
         }
         val items = runCatching { cameraRepository.listMedia() }.getOrNull() ?: return
-        val newItems = items.filter { it.thumbKey !in lastKnownThumbKeys }
-        lastKnownThumbKeys.clear()
-        lastKnownThumbKeys.addAll(items.map { it.thumbKey })
+        val newItems = items.filter { it.contentKey !in lastKnownContentKeys }
+        lastKnownContentKeys.clear()
+        lastKnownContentKeys.addAll(items.map { it.contentKey })
         if (newItems.isEmpty()) return
-        val fresh = autoSaveLedger.claimAll(newItems.map { it.thumbKey }).toSet()
-        val pending = newItems.filter { it.thumbKey in fresh }
+        val fresh = autoSaveLedger.claimAll(newItems.map { it.contentKey }).toSet()
+        val pending = newItems.filter { it.contentKey in fresh }
         if (pending.isEmpty()) {
             AppLog.d("control", "收到 ${newItems.size} 个新对象，但都已自动保存过，未重复落盘")
             return

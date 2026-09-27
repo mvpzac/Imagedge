@@ -97,6 +97,8 @@ internal object VideoTrimmer {
                 // 直接去音频转码，保证出片
                 val builder = Transformer.Builder(context)
                     .setVideoMimeType(MimeTypes.VIDEO_H264)
+                    // 只重编码被裁掉的那几段，原始编码数据直接接回去
+                    .experimentalSetTrimOptimizationEnabled(true)
                 if (audioOn) builder.setAudioMimeType(MimeTypes.AUDIO_AAC)
                 val transformer = builder
                     .addListener(object : Transformer.Listener {
@@ -133,18 +135,20 @@ internal object VideoTrimmer {
                     )
                     .build()
 
-                // 效果链：先裁剪（可选）再缩放；三拼传入统一目标尺寸保证各段规格一致
+                // 效果链：**只在真的需要缩放时才挂**。
+                // 效果链非空即等于关掉 Media3 的透传，源片本来就在 1080p 以内时，
+                // 一个视觉上空操作的 Presentation 仍会逼出一次完整解码→重编码→重封装
+                // （耗电、热降频、二次画质损失）。三拼传入统一目标尺寸时必须挂，
+                // 那是为了让各段规格一致，不在讨论范围。
                 val videoEffects = buildList {
                     if (cropLTRB != null && cropLTRB.size == 4) {
                         add(androidx.media3.effect.Crop(cropLTRB[0], cropLTRB[1], cropLTRB[2], cropLTRB[3]))
                     }
-                    add(
-                        if (targetW > 0 && targetH > 0) {
-                            Presentation.createForWidthAndHeight(targetW, targetH, Presentation.LAYOUT_SCALE_TO_FIT)
-                        } else {
-                            Presentation.createForShortSide(TARGET_SHORT_SIDE)
-                        }
-                    )
+                    if (targetW > 0 && targetH > 0) {
+                        add(Presentation.createForWidthAndHeight(targetW, targetH, Presentation.LAYOUT_SCALE_TO_FIT))
+                    } else if (sourceExceedsShortSide(context, safeUri, TARGET_SHORT_SIDE)) {
+                        add(Presentation.createForShortSide(TARGET_SHORT_SIDE))
+                    }
                 }
                 val editedItem = EditedMediaItem.Builder(mediaItem)
                     .setRemoveAudio(!audioOn)
@@ -165,4 +169,23 @@ internal object VideoTrimmer {
             }
         }
     }
+
+    /**
+     * 源片短边是否超过 [cap]。
+     *
+     * 读不到尺寸时返回 true：宁可多挂一次 Presentation（回到今天的全量转码），
+     * 也不要因为一次探测失败就放行一个比 1080p 更大的产物。
+     */
+    private fun sourceExceedsShortSide(
+        context: android.content.Context,
+        uri: android.net.Uri,
+        cap: Int,
+    ): Boolean = runCatching {
+        android.media.MediaMetadataRetriever().use { retriever ->
+            retriever.setDataSource(context, uri)
+            val w = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
+            val h = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
+            if (w == null || h == null) true else minOf(w, h) > cap
+        }
+    }.getOrDefault(true)
 }

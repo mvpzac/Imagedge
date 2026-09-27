@@ -41,7 +41,21 @@ data class MediaItem(
     /**
      * 缩略图/内容缓存 key：相机会复用 handle（同一 handle 指向不同照片），
      * 叠加大小与文件名，保证内容变化时 UI 缓存正确失效。
+     *
+     * **仅限会话内使用**：句柄每次重新枚举都会重排，同一张照片重连后
+     * thumbKey 就变了。跨会话的去重要用 [contentKey]。
      */
     val thumbKey: String
         get() = "$channelKey|$sizeBytes|$filename"
+
+    /**
+     * 与句柄无关的内容指纹，供**跨会话**去重（自动保存账本）使用。
+     *
+     * 拿 thumbKey 去重等于：每次重连相机，账本都认不出拍过的照片，
+     * 于是整张卡被自动再拉一遍。文件名 + 大小 + 拍摄时间三者在同一台相机上
+     * 对同一张照片是稳定的；拍摄时间缺失（被编辑/压缩过的图）时仍靠前两者区分，
+     * 不会退化成「所有无名日期的图共用一个键」。
+     */
+    val contentKey: String
+        get() = "$filename|$sizeBytes|${captureDate?.time ?: 0L}"
 }

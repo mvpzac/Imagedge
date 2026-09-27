@@ -216,6 +216,54 @@ class CameraRepository @Inject constructor(
         }
     }
 
+    /** 目录里是否已存在同名文档（SAF 临时名 + 改名的前提，见 [downloadToGallery]） */
+    private fun childNamed(
+        resolver: android.content.ContentResolver,
+        dirUri: android.net.Uri,
+        displayName: String,
+    ): Boolean {
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(
+            dirUri,
+            DocumentsContract.getTreeDocumentId(dirUri)
+        )
+        return runCatching {
+            resolver.query(
+                children,
+                arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+                "${DocumentsContract.Document.COLUMN_DISPLAY_NAME} = ?",
+                arrayOf(displayName),
+                null
+            )?.use { it.count > 0 } ?: false
+        }.getOrDefault(false)
+    }
+
+    /** 直接以最终名建文件并写入；重名时由 provider 自动追加 " (1)" */
+    private suspend fun createAndDownloadSaf(
+        resolver: android.content.ContentResolver,
+        dirUri: android.net.Uri,
+        mimeType: String,
+        displayName: String,
+        channel: com.imagedge.camera.data.remote.CameraChannel,
+        item: MediaItem,
+        onProgress: (Long, Long) -> Unit,
+    ): Uri {
+        val fileUri = DocumentsContract.createDocument(resolver, dirUri, mimeType, displayName)
+            ?: throw IllegalStateException("无法在所选目录创建文件（权限或路径无效）")
+        val output: OutputStream = resolver.openOutputStream(fileUri)
+            ?: run {
+                runCatching { DocumentsContract.deleteDocument(resolver, fileUri) }
+                throw IllegalStateException("无法打开输出流")
+            }
+        try {
+            output.use { stream -> downloadVerified(channel, item, stream, onProgress) }
+        } catch (e: Exception) {
+            runCatching { DocumentsContract.deleteDocument(resolver, fileUri) }
+                .onFailure { AppLog.w("camera", "删除半成品文件失败：$fileUri：${it.message}") }
+            throw e
+        }
+        return fileUri
+    }
+
     /**
      * 放弃一次被取消的连接尝试：拆通道 + 解绑进程网络。
      *
@@ -552,29 +600,39 @@ class CameraRepository @Inject constructor(
         val treeUriStr = DownloadLocation.treeUri(context)
         if (treeUriStr != null) {
             val treeUri = treeUriStr.toUri()
-            // SAF 树目录：createDocument 建文件（重名自动追加 " (1)"）
+            // SAF 树目录
             val dirId = DocumentsContract.getTreeDocumentId(treeUri)
             val dirUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, dirId)
-            val fileUri = DocumentsContract.createDocument(resolver, dirUri, mimeType, displayName)
+
+            // 目标名已被占用时**必须走旧路径**：createDocument 会自动追加 " (1)"，
+            // 而 renameDocument 在不同 provider 上对重名的行为不统一，
+            // 赌它不会覆盖用户已有的文件是不负责任的。
+            if (childNamed(resolver, dirUri, displayName)) {
+                return@withContext createAndDownloadSaf(resolver, dirUri, mimeType, displayName, channel, item, onProgress)
+            }
+
+            // 同目录临时名 + 写完改名（Syncthing AtomicWriter 的做法）：
+            // 否则整个下载过程里用户的最终文件名一直被一个残缺文件占着。
+            val partName = ".$displayName.imagedge-part"
+            val partUri = DocumentsContract.createDocument(resolver, dirUri, mimeType, partName)
                 ?: throw IllegalStateException("无法在所选目录创建文件（权限或路径无效）")
-            val output: OutputStream = resolver.openOutputStream(fileUri)
-                ?: run {
-                    // 建好了文档却打不开流：必须先删掉，否则留下一个 0 字节废文件
-                    runCatching { DocumentsContract.deleteDocument(resolver, fileUri) }
-                    throw IllegalStateException("无法打开输出流")
-                }
-            // 下载失败（超时 / 相机断链 / 被保活 forceClose）时必须删除半成品：
-            // 否则相册里会留下一堆打不开的 0 字节文件，且永不清理、越积越多（P1-5）
             try {
-                output.use { stream ->
-                    downloadVerified(channel, item, stream, onProgress)
+                val stream: OutputStream = resolver.openOutputStream(partUri)
+                    ?: throw IllegalStateException("无法打开输出流")
+                stream.use { downloadVerified(channel, item, it, onProgress) }
+                val renamed = DocumentsContract.renameDocument(resolver, partUri, displayName)
+                if (renamed == null) {
+                    // provider 不支持改名：退回到「就地把临时名留着」也不如让调用方
+                    // 拿到一个用户认不出的名字。删除并报错，由上层如实报失败。
+                    runCatching { DocumentsContract.deleteDocument(resolver, partUri) }
+                    throw IllegalStateException("所选目录不支持重命名，无法写入最终文件名")
                 }
+                return@withContext renamed
             } catch (e: Exception) {
-                runCatching { DocumentsContract.deleteDocument(resolver, fileUri) }
-                    .onFailure { AppLog.w("camera", "删除半成品文件失败：$fileUri：${it.message}") }
+                runCatching { DocumentsContract.deleteDocument(resolver, partUri) }
+                    .onFailure { AppLog.w("camera", "删除半成品文件失败：$partUri：${it.message}") }
                 throw e
             }
-            return@withContext fileUri
         }
         val collection = if (mimeType.startsWith("video")) {
             MediaStore.Video.Media.EXTERNAL_CONTENT_URI
