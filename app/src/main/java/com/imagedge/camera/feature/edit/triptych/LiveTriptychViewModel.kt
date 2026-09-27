@@ -52,11 +52,37 @@ class LiveTriptychViewModel @Inject constructor(
         BOTTOM("底"),
     }
 
-    /** 统一长宽比（全局作用于三张；目标分辨率 = 三段转码归一的统一规格） */
-    enum class Aspect(val label: String, val ratio: Float, val targetW: Int, val targetH: Int) {
-        R16_9("16:9", 16f / 9f, 1920, 1080),
-        R1_1("1:1", 1f, 1080, 1080),
-        R4_5("4:5", 4f / 5f, 1080, 1350),
+    /**
+     * 三拼的画布档位（全局作用于三张；targetW/targetH 就是三段转码归一的统一规格）。
+     *
+     * **档位名与 targetW/targetH 说的都是「每一格」，不是成品**：三格纵向堆叠
+     * （见 [buildTriptychBitmap] 的 `cellH * slots.size`），成品比例由档位**加上格数**决定。
+     * 用户挑比例时想的是成品，所以界面必须把两者一起标出来（见 [label]）——
+     * 「每格 16:9」堆起来是 16:27，**并不是** 9:16；要发 Story/Reels 得挑 27:16 那一格。
+     */
+    enum class Aspect(val ratio: Float, val targetW: Int, val targetH: Int) {
+        R16_9(16f / 9f, 1920, 1080),
+        R1_1(1f, 1080, 1080),
+        R4_5(4f / 5f, 1080, 1350),
+
+        /** 三格堆出 1080×1920——唯一一张不用二次裁切就能直接发 Story/Reels 的档位 */
+        R27_16(27f / 16f, 1080, 640);
+
+        /**
+         * 档位标签：同时给出**每格**与**成品**的比例。
+         *
+         * 只标每格比例会误导：看到「16:9」的用户会以为那是竖屏故事档，
+         * 而它三格堆叠后其实是 16:27；反过来看到「27:16」也没人想得到那是 1080×1920。
+         * 两个都写，用户不用心算。
+         */
+        fun label(cells: Int): String {
+            fun reduce(w: Int, h: Int): String {
+                fun gcd(a: Int, b: Int): Int = if (b == 0) a else gcd(b, a % b)
+                val g = gcd(w, h).coerceAtLeast(1)
+                return "${w / g}:${h / g}"
+            }
+            return "每格 ${reduce(targetW, targetH)} → 整体 ${reduce(targetW, targetH * cells)}"
+        }
     }
 
     /** 封面候选帧（时间戳 + 缩略图，供点选重选封面） */

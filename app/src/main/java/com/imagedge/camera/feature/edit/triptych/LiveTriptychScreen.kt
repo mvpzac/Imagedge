@@ -175,8 +175,11 @@ private fun EditStage(
         AppChipRow(
             items = LiveTriptychViewModel.Aspect.entries.toList(),
             selected = state.aspect,
-            label = { it.label },
-            onSelect = { viewModel.setAspect(it) }
+            // 三格固定：标签要连成品比例一起标，否则用户只能自己算纵向堆叠的结果。
+            // 标签变长了就必须改横向滚动：四个长文案挤在一行等宽分栏里会各自截断
+            label = { it.label(3) },
+            onSelect = { viewModel.setAspect(it) },
+            scrollable = true
         )
     }
 
