@@ -25,14 +25,18 @@ object CubeLutParser {
      */
     fun parse(content: String): CubeLut? {
         var size = -1
+        var domainMin: FloatArray? = null
+        var domainMax: FloatArray? = null
         val values = mutableListOf<Float>()
         for (rawLine in content.lineSequence()) {
             val line = rawLine.trim()
             if (line.isEmpty() || line.startsWith("#")) continue
             when {
                 line.startsWith("TITLE", ignoreCase = true) -> Unit
-                line.startsWith("DOMAIN_MIN", ignoreCase = true) -> Unit
-                line.startsWith("DOMAIN_MAX", ignoreCase = true) -> Unit
+                line.startsWith("DOMAIN_MIN", ignoreCase = true) ->
+                    domainMin = parseDomain(line) ?: return null
+                line.startsWith("DOMAIN_MAX", ignoreCase = true) ->
+                    domainMax = parseDomain(line) ?: return null
                 line.startsWith("LUT_1D_SIZE", ignoreCase = true) -> return null // 1D 不支持
                 line.startsWith("LUT_3D_SIZE", ignoreCase = true) -> {
                     size = line.split(Regex("\\s+")).lastOrNull()?.toIntOrNull() ?: -1
@@ -49,10 +53,28 @@ object CubeLutParser {
                 }
             }
         }
+        // 输入域不是 0..1 就**拒收**。照 0..1 解释会画出错色，而用户没有任何线索；
+        // darktable 同样选择报错。这里也接受按 1D 退化写法只给一个标量的情形。
+        if (!isUnitDomain(domainMin, 0f) || !isUnitDomain(domainMax, 1f)) return null
         if (size <= 0) return null
         val expected = size * size * size * 3
         if (values.size < expected) return null
         return CubeLut(size, values.toFloatArray().copyOf(expected))
+    }
+
+    /** 解析 `DOMAIN_MIN 0 0 0` / `DOMAIN_MAX 1 1 1`；只给一个标量时三通道取同一值。 */
+    private fun parseDomain(line: String): FloatArray? {
+        val nums = line.split(Regex("\\s+")).drop(1).mapNotNull { it.toFloatOrNull() }
+        return when (nums.size) {
+            1 -> floatArrayOf(nums[0], nums[0], nums[0])
+            3 -> floatArrayOf(nums[0], nums[1], nums[2])
+            else -> null
+        }
+    }
+
+    private fun isUnitDomain(domain: FloatArray?, expected: Float): Boolean {
+        val d = domain ?: return true
+        return d.all { kotlin.math.abs(it - expected) < 1e-6f }
     }
 
     /**

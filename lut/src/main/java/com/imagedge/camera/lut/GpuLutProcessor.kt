@@ -169,6 +169,7 @@ class GpuLutProcessor(
         private val uGain: Int
         private val uContrast: Int
         private val uSaturation: Int
+        private val uPivot: Int
         private val uStrength: Int
         private val uLutScale: Int
         private val uLutOffset: Int
@@ -232,6 +233,7 @@ class GpuLutProcessor(
                 uGain = glGetUniform(program, "uGain")
                 uContrast = glGetUniform(program, "uContrast")
                 uSaturation = glGetUniform(program, "uSaturation")
+                uPivot = glGetUniform(program, "uPivot")
                 uStrength = glGetUniform(program, "uStrength")
                 uLutScale = glGetUniform(program, "uLutScale")
                 uLutOffset = glGetUniform(program, "uLutOffset")
@@ -359,6 +361,7 @@ class GpuLutProcessor(
             if (uGain >= 0) GLES30.glUniform3f(uGain, u.gainR, u.gainG, u.gainB)
             uniform1f(uContrast, u.contrast)
             uniform1f(uSaturation, u.saturation)
+            uniform1f(uPivot, SrgbTransfer.CONTRAST_PIVOT)
             uniform1f(uStrength, strength)
             uniform1f(uHasLut, if (lutSize >= 2) 1f else 0f)
             if (lutSize >= 2) {
@@ -573,8 +576,12 @@ class GpuLutProcessor(
             """
 
             /**
-             * 与 [CpuLutProcessor] 相同的处理顺序：逐通道增益 → 对比度 → 饱和度 → LUT → 强度混合。
-             * 权重用 Rec.601（0.299/0.587/0.114），与 CPU 实现一致。
+             * 与 [CpuLutProcessor] 相同的处理顺序：解码到线性光 → 逐通道增益 → 对比度
+             * （绕 uPivot，18% 灰）→ 饱和度（线性光下按 Rec.709 亮度）→ 编码回 sRGB
+             * → LUT → 强度混合。
+             *
+             * 传输函数与常量必须与 [SrgbTransfer] 逐字一致，否则用户从 GPU 回退到 CPU
+             * 时会看到画面突变。
              */
             private const val FRAGMENT_SHADER = """
                 #version 300 es
@@ -588,19 +595,44 @@ class GpuLutProcessor(
                 uniform vec3 uGain;
                 uniform float uContrast;
                 uniform float uSaturation;
+                uniform float uPivot;
                 uniform float uStrength;
                 uniform float uLutScale;
                 uniform float uLutOffset;
                 uniform float uHasLut;
+
+                vec3 srgbToLinear(vec3 c) {
+                    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+                }
+
+                vec3 linearToSrgb(vec3 c) {
+                    vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
+                    return mix(c * 12.92, hi, step(vec3(0.0031308), c));
+                }
+
+                // 三角分布抖动，与 CpuLutProcessor.quantize 同一套做法：
+                // 3D LUT 的产物是平滑渐变，直接写 GL_RGBA8 必然出色带。
+                float hash12(vec2 p) {
+                    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+                    p3 += dot(p3, p3.yzx + 33.33);
+                    return fract((p3.x + p3.y) * p3.z);
+                }
+
                 void main() {
                     vec4 src = texture(uSrc, vUv);
-                    vec3 c = src.rgb * uGain;
-                    c = clamp((c - 0.5) * uContrast + 0.5, 0.0, 1.0);
-                    float luma = dot(c, vec3(0.299, 0.587, 0.114));
-                    c = clamp(mix(vec3(luma), c, uSaturation), 0.0, 1.0);
+                    vec3 lin = srgbToLinear(src.rgb) * uGain;
+                    lin = max((lin - uPivot) * uContrast + uPivot, vec3(0.0));
+                    float luma = dot(lin, vec3(0.2126, 0.7152, 0.0722));
+                    lin = max(mix(vec3(luma), lin, uSaturation), vec3(0.0));
+                    // 回到 sRGB 编码：3D LUT 的输入域定义在这里
+                    vec3 c = clamp(linearToSrgb(lin), 0.0, 1.0);
                     if (uHasLut > 0.5) {
                         vec3 lutRgb = texture(uLut, c * uLutScale + uLutOffset).rgb;
                         c = mix(c, lutRgb, uStrength);
+                    }
+                    if (uHasLut > 0.5 && uStrength > 0.0) {
+                        vec2 fc = gl_FragCoord.xy;
+                        c = clamp(c + vec3(hash12(fc) - hash12(fc + 17.0)) / 255.0, 0.0, 1.0);
                     }
                     fragColor = vec4(c, src.a);
                 }

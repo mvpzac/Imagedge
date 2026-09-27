@@ -62,8 +62,10 @@ class AdjustUniformsTest {
         val src = byteArrayOf(128.toByte(), 128.toByte(), 128.toByte(), 255.toByte())
         val adjust = ColorAdjust(exposure = 50)
         val u = AdjustUniforms.of(adjust)
-        // CPU 查表按四舍五入取整（+0.5 再截断），这里保持同一套取整方式
-        val expected = ((128f / 255f) * u.gainG * 255f + 0.5f).toInt().coerceIn(0, 255)
+        // 增益作用在**线性光**上（见 SrgbTransfer），再编码回 sRGB。
+        // 这条测试的意图是「CPU 用的是那份共享换算」，所以期望值也必须经由同一个增益。
+        val expected = (SrgbTransfer.encode(SrgbTransfer.decode(128) * u.gainG) * 255f + 0.5f)
+            .toInt().coerceIn(0, 255)
         val out = processor.applyAdjustOnly(src, 1, 1, adjust)
         assertEquals(expected, out[1].toInt() and 0xFF)
     }

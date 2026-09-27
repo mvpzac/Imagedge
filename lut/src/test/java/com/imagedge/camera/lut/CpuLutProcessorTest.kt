@@ -74,10 +74,11 @@ class ColorAdjustTest {
     }
 
     @Test
-    fun `contrast zero pivot keeps mid gray unchanged`() = runBlocking {
-        val src = pixels(Triple(128, 128, 128))
-        val out = processor.apply(src, 1, 1, LutProcessor.EMPTY_LUT, 0, 100, ColorAdjust(contrast = 100))
-        assertEquals("中灰是对比度轴心，不应移动", 128, out.pixel(0).first)
+    fun `contrast pivot keeps middle grey unchanged`() = runBlocking {
+        // 对比度的轴心是 18% 灰。18% 在**线性光**里是 0.18，编码回 sRGB 约 118——
+        // 此前轴心错取在编码空间的 0.5（即 128），于是 118 这类真正的中灰被当成暗部推走。
+        val out = processor.apply(pixels(Triple(118, 118, 118)), 1, 1, LutProcessor.EMPTY_LUT, 0, 100, ColorAdjust(contrast = 100))
+        assertEquals("中灰是对比度轴心，不应移动", 118.0, out.pixel(0).first.toDouble(), 2.0)
     }
 
     @Test
