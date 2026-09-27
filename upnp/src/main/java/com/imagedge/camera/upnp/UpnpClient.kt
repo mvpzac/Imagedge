@@ -81,7 +81,21 @@ class UpnpClient(
         .followSslRedirects(false)
         .build()
 
-    private val activeCall = AtomicReference<Call?>(null)
+    /**
+     * 短控制调用（服务描述、SOAP 浏览）占用的槽：允许新调用顶掉旧的。
+     *
+     * 浏览是幂等且廉价的，顶掉上一次是为了别让过期的列表结果后到。
+     */
+    private val activeControlCall = AtomicReference<Call?>(null)
+
+    /**
+     * 下载单独占一个槽：**绝不能被一次浏览顶掉**。
+     *
+     * 以前两者共用一个槽，于是下载途中的一次刷新相册会把下载 cancel 掉，
+     * 表现为「下载失败：长度不符」，并且已经插进 MediaStore 的那一行被删掉——
+     * 用户什么都没做，一张照片就这么没了。
+     */
+    private val activeDownloadCall = AtomicReference<Call?>(null)
 
     private val xmlMediaType = "text/xml; charset=utf-8".toMediaType()
 
@@ -238,7 +252,7 @@ class UpnpClient(
         val fullUrl = resolveUrl(url)
         AppLog.i(TAG, "HTTP 下载：$fullUrl")
         val request = Request.Builder().url(fullUrl).build()
-        execute(request) { response ->
+        executeInto(request, activeDownloadCall) { response ->
             if (!response.isSuccessful) throw IllegalStateException("下载失败：HTTP ${response.code}")
             val body = response.body ?: throw IllegalStateException("空响应")
             val total = body.contentLength()
@@ -259,7 +273,8 @@ class UpnpClient(
 
     /** Interrupt a blocking browse/download before the owning channel is discarded. */
     fun cancelActiveCall() {
-        activeCall.getAndSet(null)?.cancel()
+        activeControlCall.getAndSet(null)?.cancel()
+        activeDownloadCall.getAndSet(null)?.cancel()
     }
 
     // ── SOAP 调用 ────────────────────────────────────────────────────
@@ -540,13 +555,20 @@ class UpnpClient(
         return sink.toString(StandardCharsets.UTF_8.name())
     }
 
-    private fun <T> execute(request: Request, block: (okhttp3.Response) -> T): T {
+    private fun <T> execute(request: Request, block: (okhttp3.Response) -> T): T =
+        executeInto(request, activeControlCall, block)
+
+    private fun <T> executeInto(
+        request: Request,
+        slot: AtomicReference<Call?>,
+        block: (okhttp3.Response) -> T
+    ): T {
         val call = httpClient.newCall(request)
-        activeCall.getAndSet(call)?.cancel()
+        slot.getAndSet(call)?.cancel()
         return try {
             call.execute().use(block)
         } finally {
-            activeCall.compareAndSet(call, null)
+            slot.compareAndSet(call, null)
         }
     }
 }

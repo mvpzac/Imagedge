@@ -31,6 +31,7 @@ import com.imagedge.camera.ui.feedback.Haptics
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -118,6 +119,20 @@ class ExifFrameViewModel @Inject constructor(
     /** EXIF 刚读出来时的字段快照：「重置」回到这里，而不是回到空白 */
     private var baselineFields: List<FrameField> = emptyList()
     private var sourceMotionVideo: File? = null
+    /**
+     * 本次编辑占用的磁盘目录，页面销毁时清掉。
+     *
+     * 登记的是 [MotionPhotoParser] 的**整个会话目录**而不是单个 videoFile：
+     * 目录里还躺着源文件的一份完整拷贝（`source.motion`）与 gain map，
+     * 那才是占空间的大头。约定与 LiveTriptychViewModel 一致：谁创建谁登记。
+     *
+     * 用 CopyOnWriteArrayList：登记发生在 `loadSource` 的 IO 线程，
+     * 遍历发生在主线程的 `onCleared`，普通 ArrayList 会在这种交错下抛
+     * ConcurrentModificationException——而那正是「返回上一页」的时刻。
+     */
+    private val tempFiles = CopyOnWriteArrayList<File>()
+    /** [onCleared] 之后到达的解析结果无处可去，登记时直接就地删掉 */
+    private val cleared = java.util.concurrent.atomic.AtomicBoolean(false)
     /** 从 EXIF Make/Model 检测出的相机品牌（渲染商标图片/字标） */
     private var sourceBrand: BrandMark? = null
     /** assets 内品牌 PNG 的解码缓存（避免导出时重复解码） */
@@ -388,6 +403,16 @@ class ExifFrameViewModel @Inject constructor(
         val motionVideo = runCatching {
             MotionPhotoParser.parse(context, uri).videoFile
         }.getOrNull()
+        // 每次解析登记一份，退出时统一删。不在换图时立刻删：解析器可能按 uri 复用同一个文件，
+        // 先删后用会让下一次导出拿到一个已被删除的路径。
+        // 登记整个解析会话目录（含源文件拷贝与 gain map），不是单个 videoFile
+        motionVideo?.parentFile?.let { dir ->
+            if (cleared.get()) {
+                dir.deleteRecursively()
+            } else {
+                tempFiles += dir
+            }
+        }
         sourceMotionVideo = motionVideo
 
         _state.update {
@@ -950,8 +975,12 @@ class ExifFrameViewModel @Inject constructor(
         }
         viewModelScope.launch {
             _state.update { it.copy(exporting = true, message = null) }
+            // 在任何挂起之前就抓住：导出期间用户点「重新选择照片」会把字段置空，
+            // 抓到之后再读就只剩一份普通照片，实况的那段视频白解了。
+            val motionVideo = sourceMotionVideo
+            var renderedFile: File? = null
             try {
-                val renderedFile = withContext(Dispatchers.IO) {
+                renderedFile = withContext(Dispatchers.IO) {
                     // 用发起时捕获的局部引用：导出期间用户重新选择会置空字段，
                     // 此处再用 sourceBitmap!! 会 NPE
                     val bitmap = renderFrame(src, state.template, state.fields, state)
@@ -960,7 +989,6 @@ class ExifFrameViewModel @Inject constructor(
                         bitmap.recycle()
                     }
                 }
-                val motionVideo = sourceMotionVideo
                 if (motionVideo != null) {
                     // 实况图：画框静态图 + 原视频重新合成（视频内原封面帧时间戳保持不变）。
                     // exifSourceUri = 原图：画框成品同样保留原拍摄信息
@@ -976,7 +1004,6 @@ class ExifFrameViewModel @Inject constructor(
                     saveStill(renderedFile, sourceUri)
                     AppLog.i("exifframe", "画框照片已导出")
                 }
-                renderedFile.delete()
                 _state.update {
                     it.copy(exporting = false, success = true, message = "已保存到相册（DCIM/Imagedge）")
                 }
@@ -985,6 +1012,9 @@ class ExifFrameViewModel @Inject constructor(
                 AppLog.w("exifframe", "导出失败：${e.message}")
                 _state.update { it.copy(exporting = false, message = "导出失败：${e.message}") }
                 haptics.double()
+            } finally {
+                // 失败路径同样要删：只写在成功分支上，导出失败一次就漏一份成品图
+                runCatching { renderedFile?.delete() }
             }
         }
     }
@@ -1057,13 +1087,32 @@ class ExifFrameViewModel @Inject constructor(
             ?.time
     }.getOrNull()
 
-    /** 回初始态（结果页「继续」） */
+    /**
+     * 回初始态（结果页「继续」、重新选择照片）。
+     *
+     * 刻意**不删文件**：导出可能正在读这些视频，而「重新选择照片」在导出期间也是可点的。
+     * 在这里删会把一次「静默的实况图」变成一次「导出失败」。删除只发生在 [onCleared]。
+     */
     fun reset() {
         sourceBitmap = null
         sourceMotionVideo = null
         sourceBrand = null
         pngCache.clear()
         _state.update { ExifFrameState() }
+    }
+
+    /** 删掉本次编辑在 cache 里占下的所有解析会话目录 */
+    private fun cleanup() {
+        tempFiles.forEach { runCatching { it.deleteRecursively() } }
+        tempFiles.clear()
+    }
+
+    override fun onCleared() {
+        // 先立旗标：此刻之后才返回的解析结果会在登记处自己删掉自己，
+        // 否则「解析中离开页面」会把会话目录留在 cache 里。
+        cleared.set(true)
+        cleanup()
+        super.onCleared()
     }
 
     companion object {

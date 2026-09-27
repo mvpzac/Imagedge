@@ -634,9 +634,25 @@ class DownloadManager @Inject constructor(
     /** PTP 与 UPnP 都由仓库转发真实连接状态；断线后不再消费已经失效的下载任务。 */
     private fun isCameraDisconnected(): Boolean = !repository.isConnected
 
+    /**
+     * 改单条任务，**只在真的改动了才重写列表**。
+     *
+     * 进度回调按 [PROGRESS_UPDATE_INTERVAL_MS] 节流后仍有约 6.7Hz/下载，
+     * 而任务行跨重启累积（v3 起完成/失败不再被删），整卡选片一次就是几千条。
+     * `map` 在这种情况下有两个问题：找不到 id 时照样分配一份新列表；
+     * 改出来的对象与原对象相等时，`StateFlow` 的去重要对整份列表做一次结构化
+     * `equals`（1.5 万个元素的深比较）才发现相等，然后照样白算一遍。
+     * 返回同一个实例让这步比较退化成引用相等，两种常见情况（进度没变、
+     * 任务早已完成或被取消）都不再付这个代价。
+     */
     private fun updateTask(id: String, transform: (DownloadTask) -> DownloadTask) {
         _tasks.update { list ->
-            list.map { if (it.id == id) transform(it) else it }
+            val index = list.indexOfFirst { it.id == id }
+            if (index < 0) return@update list
+            val current = list[index]
+            val updated = transform(current)
+            if (updated == current) return@update list
+            list.toMutableList().also { it[index] = updated }
         }
     }
 
