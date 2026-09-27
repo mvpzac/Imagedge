@@ -73,6 +73,20 @@ android {
         }
     }
 
+    sourceSets {
+        getByName("androidTest") {
+            // MigrationTestHelper 从 assets 读导出的 schema；直接指过去，省掉一份拷贝与同步
+            assets.srcDir("$projectDir/schemas")
+        }
+    }
+
+}
+
+ksp {
+    // Room schema 导出目录。**必须提交进版本库**：没有它，MigrationTestHelper 无从构造旧库，
+    // 迁移就只能靠「装旧包造数据 → 覆盖安装」这种手工仪式验证。
+    arg("room.schemaLocation", "$projectDir/schemas")
+    arg("room.generateKotlin", "true")
 }
 
 dependencies {
@@ -137,6 +151,7 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(libs.androidx.room.testing)
     androidTestImplementation(platform(libs.androidx.compose.bom))
 }
 

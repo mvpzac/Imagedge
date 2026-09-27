@@ -1,0 +1,236 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "97d11e2487eec446f978334835a84323",
+    "entities": [
+      {
+        "tableName": "camera_profile",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`profileKey` TEXT NOT NULL, `model` TEXT NOT NULL, `firmware` TEXT NOT NULL, `firstSeenAt` INTEGER NOT NULL, `lastSeenAt` INTEGER NOT NULL, `connectCount` INTEGER NOT NULL, PRIMARY KEY(`profileKey`))",
+        "fields": [
+          {
+            "fieldPath": "profileKey",
+            "columnName": "profileKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "model",
+            "columnName": "model",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "firmware",
+            "columnName": "firmware",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "firstSeenAt",
+            "columnName": "firstSeenAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSeenAt",
+            "columnName": "lastSeenAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "connectCount",
+            "columnName": "connectCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "profileKey"
+          ]
+        }
+      },
+      {
+        "tableName": "capability_snapshot",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`snapshotKey` TEXT NOT NULL, `profileKey` TEXT NOT NULL, `transport` TEXT NOT NULL, `mode` INTEGER NOT NULL, `snapshotJson` TEXT NOT NULL, `probedAt` INTEGER NOT NULL, PRIMARY KEY(`snapshotKey`))",
+        "fields": [
+          {
+            "fieldPath": "snapshotKey",
+            "columnName": "snapshotKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "profileKey",
+            "columnName": "profileKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "transport",
+            "columnName": "transport",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mode",
+            "columnName": "mode",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "snapshotJson",
+            "columnName": "snapshotJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "probedAt",
+            "columnName": "probedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "snapshotKey"
+          ]
+        }
+      },
+      {
+        "tableName": "recent_connection",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `profileKey` TEXT NOT NULL, `model` TEXT NOT NULL, `firmware` TEXT NOT NULL, `transport` TEXT NOT NULL, `mode` INTEGER NOT NULL, `connectedAt` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "profileKey",
+            "columnName": "profileKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "model",
+            "columnName": "model",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "firmware",
+            "columnName": "firmware",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "transport",
+            "columnName": "transport",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mode",
+            "columnName": "mode",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "connectedAt",
+            "columnName": "connectedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "parameter_preset",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `profileKey` TEXT NOT NULL, `name` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "profileKey",
+            "columnName": "profileKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "parameter_preset_item",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`presetId` TEXT NOT NULL, `capability` TEXT NOT NULL, `rawValue` INTEGER NOT NULL, PRIMARY KEY(`presetId`, `capability`))",
+        "fields": [
+          {
+            "fieldPath": "presetId",
+            "columnName": "presetId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "capability",
+            "columnName": "capability",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawValue",
+            "columnName": "rawValue",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "presetId",
+            "capability"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '97d11e2487eec446f978334835a84323')"
+    ]
+  }
+}

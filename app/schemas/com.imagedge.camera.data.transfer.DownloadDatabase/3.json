@@ -1,0 +1,194 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 3,
+    "identityHash": "eabf035c4dc126c32435b2878ed77972",
+    "entities": [
+      {
+        "tableName": "download_task",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `handle` INTEGER NOT NULL, `channelKey` TEXT NOT NULL, `filename` TEXT NOT NULL, `sizeBytes` INTEGER NOT NULL, `photoType` TEXT NOT NULL, `captureDate` INTEGER, `state` TEXT NOT NULL DEFAULT 'QUEUED', `progress` INTEGER NOT NULL DEFAULT 0, `errorMessage` TEXT, `savedUri` TEXT, `batchId` INTEGER NOT NULL DEFAULT 0, `failureViewed` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "handle",
+            "columnName": "handle",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "channelKey",
+            "columnName": "channelKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "filename",
+            "columnName": "filename",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sizeBytes",
+            "columnName": "sizeBytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "photoType",
+            "columnName": "photoType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "captureDate",
+            "columnName": "captureDate",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'QUEUED'"
+          },
+          {
+            "fieldPath": "progress",
+            "columnName": "progress",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "errorMessage",
+            "columnName": "errorMessage",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "savedUri",
+            "columnName": "savedUri",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "batchId",
+            "columnName": "batchId",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "failureViewed",
+            "columnName": "failureViewed",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "download_history",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `filename` TEXT NOT NULL, `savedPath` TEXT NOT NULL, `startTime` INTEGER NOT NULL, `endTime` INTEGER NOT NULL, `cameraModel` TEXT NOT NULL, `sizeBytes` INTEGER NOT NULL, `success` INTEGER NOT NULL, `channelKey` TEXT, `handle` INTEGER, `photoType` TEXT, `captureDate` INTEGER, `savedUri` TEXT, `errorMessage` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "filename",
+            "columnName": "filename",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "savedPath",
+            "columnName": "savedPath",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startTime",
+            "columnName": "startTime",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endTime",
+            "columnName": "endTime",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cameraModel",
+            "columnName": "cameraModel",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sizeBytes",
+            "columnName": "sizeBytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "success",
+            "columnName": "success",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "channelKey",
+            "columnName": "channelKey",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "handle",
+            "columnName": "handle",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "photoType",
+            "columnName": "photoType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "captureDate",
+            "columnName": "captureDate",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "savedUri",
+            "columnName": "savedUri",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "errorMessage",
+            "columnName": "errorMessage",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'eabf035c4dc126c32435b2878ed77972')"
+    ]
+  }
+}

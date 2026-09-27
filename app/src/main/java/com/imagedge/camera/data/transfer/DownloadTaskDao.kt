@@ -91,8 +91,7 @@ interface DownloadHistoryDao {
 
 @Database(
     entities = [DownloadTaskEntity::class, DownloadHistoryEntity::class],
-    version = 3,
-    exportSchema = false
+    version = 3
 )
 abstract class DownloadDatabase : RoomDatabase() {
     abstract fun downloadTaskDao(): DownloadTaskDao

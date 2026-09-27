@@ -198,10 +198,10 @@ interface ParameterPresetDao {
 /**
  * 档案数据库。
  *
- * **独立的 `profile.db`，刻意不挂进 `download.db`**：后者已有 v2 且 `exportSchema = false`，
- * 加表要手写 DDL 去匹配 Room 生成的校验 schema，而本机没有真机可跑一次首开验证——
- * 迁移写错的表现是老用户**启动即崩**。新开一个 v1 库由 Room 首次打开时建表，
+ * **独立的 `profile.db`，刻意不挂进 `download.db`**：新开一个 v1 库由 Room 首次打开时建表，
  * 没有迁移路径就没有迁移可出错，代价只是一次额外的 builder 与第二个 `@Provides`。
+ * 升到 v2 之前请先导出并提交 schema（`app/schemas/`），并补一条 MigrationTestHelper 用例——
+ * 迁移写错的表现是老用户**启动即崩**。
  */
 @Database(
     entities = [
@@ -211,8 +211,7 @@ interface ParameterPresetDao {
         ParameterPresetEntity::class,
         ParameterPresetItemEntity::class
     ],
-    version = 1,
-    exportSchema = false
+    version = 1
 )
 abstract class ProfileDatabase : RoomDatabase() {
     abstract fun cameraProfileDao(): CameraProfileDao
