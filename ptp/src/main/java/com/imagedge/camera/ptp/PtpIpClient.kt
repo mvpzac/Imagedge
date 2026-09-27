@@ -90,7 +90,9 @@ class PtpIpClient(
     private var eventSocket: Socket? = null
     private var commandIn: BufferedInputStream? = null
     private var commandOut: BufferedOutputStream? = null
-    private var eventIn: BufferedInputStream? = null
+    private var eventIn: CountingInputStream? = null
+    /** 事件流已读走的字节数：用来区分「一个包都没开始读」和「读到一半卡住」 */
+    private var eventBytesRead: Long = 0L
     private var eventOut: BufferedOutputStream? = null
 
     private var connectionNumber: Long = 0
@@ -154,7 +156,7 @@ class PtpIpClient(
                 evt.tcpNoDelay = true
                 evt.soTimeout = HANDSHAKE_TIMEOUT_MS
                 eventSocket = evt
-                eventIn = BufferedInputStream(evt.getInputStream())
+                eventIn = CountingInputStream(evt.getInputStream()) { eventBytesRead += it }
                 eventOut = BufferedOutputStream(evt.getOutputStream())
                 AppLog.d(TAG, "事件 socket 已建立")
             }.onFailure { e ->
@@ -602,7 +604,11 @@ class PtpIpClient(
      *
      * 参数布局（ISO 15740）：[ObjectHandle] + [Offset(UINT64): 低32/高32] + [MaxBytes(UINT32)]。
      * Offset 为 64 位，单文件 >4GB 也可通过累加 offset 续传；若单请求需拉取 >4GB，
-     * 可用索尼扩展 SDIO_GET_PARTIAL_LARGE_OBJECT(0x9219) 替代（同布局、MaxBytes 扩为 UINT64）。
+     * 可用索尼扩展 [SonySdioOperationCode.SDIO_GET_PARTIAL_LARGE_OBJECT] 替代
+     * （同布局、MaxBytes 扩为 UINT64）。
+     *
+     * 分块大小应当逐机型调：libgphoto2 用 1 MiB 并注明「EOS R 不喜欢 5MB，但喜欢 1MB」。
+     * 本函数目前把分块大小交给调用方，尚无实测机型背书。
      */
     fun getPartialObject(
         handle: Long,
@@ -678,18 +684,37 @@ class PtpIpClient(
 
     /**
      * 从事件流读取一个事件（阻塞至 EVENT_POLL_TIMEOUT_MS）。
-     * @return 相机推送的事件；超时（无事件）返回 null；ProbeRequest 自动回复后返回 null
+     *
+     * 返回结局而不是裸事件：**「安静」与「错位」必须可区分**。
+     * 读到一半超时时 socket 已从中途开始，此前一律返回 null，
+     * 事件通道会静默坏死到用户重连为止——相册不再刷新，按键不再触发，
+     * 而界面与日志都看不出异常。
+     *
+     * @return [EventReadOutcome.EVENT] 时 [EventRead.last] 才是有效载荷
      */
-    fun readEvent(): Event? {
+    fun readEventOutcome(): EventReadResult {
+        val before = eventBytesRead
         val packet = try {
             readEventPacket()
         } catch (e: java.net.SocketTimeoutException) {
-            return null
+            val consumed = eventBytesRead - before
+            return EventReadResult(
+                classifyEventRead(timedOut = true, bytesConsumed = consumed, malformed = false),
+                null
+            )
+        } catch (e: PtpMalformedPacketException) {
+            return EventReadResult(
+                classifyEventRead(timedOut = false, bytesConsumed = 0L, malformed = true),
+                null
+            )
         }
         return when (packet) {
-            is Event -> packet
-            is ProbeRequest -> { runCatching { sendEventPacket(ProbeResponse()) }; null }
-            else -> null
+            is Event -> EventReadResult(EventReadOutcome.EVENT, packet)
+            is ProbeRequest -> {
+                runCatching { sendEventPacket(ProbeResponse()) }
+                EventReadResult(EventReadOutcome.HANDLED, null)
+            }
+            else -> EventReadResult(EventReadOutcome.HANDLED, null)
         }
     }
 

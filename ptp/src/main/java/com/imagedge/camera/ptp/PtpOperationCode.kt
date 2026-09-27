@@ -41,6 +41,18 @@ object SonySdioOperationCode {
     const val SDIO_GET_ALL_EXT_DEVICE_PROP_INFO = 0x9209 // SDIOGetAllExtDevicePropInfo（一次读全部设备属性描述+当前值）
     const val SDIO_OPEN_SESSION = 0x9210
     const val SDIO_SET_CONTENTS_TRANSFER_MODE = 0x9212
-    const val SDIO_GET_PARTIAL_LARGE_OBJECT = 0x9219
+    /**
+     * SDIOGetPartialLargeObject —— 索尼分块读取扩展，MaxBytes 扩为 UINT64。
+     *
+     * 取值以 libgphoto2 的 `camlibs/ptp2/ptp.h` 为准
+     * （`PTP_OC_SONY_SDIO_GetPartialLargeObject 0x9211`）：该文件的 Sony SDIO 块里
+     * **没有 0x9219**。此前这里写的是 0x9219，于是「ZV-E10 不支持分块」这个结论
+     * 是在一个从未被正确试过的分支上得出的。
+     *
+     * 仍未验证：0x9211 在 ZV-E10 上是否真的可用——需要真机。
+     * 另注意 libgphoto2 逐机型调分块大小（`library.c` 的 1 MiB，"the EOS R does not
+     * like 5MB, but likes 1MB"），照搬单一分块大小同样可能失败。
+     */
+    const val SDIO_GET_PARTIAL_LARGE_OBJECT = 0x9211
     const val SDIO_GET_EXT_DEVICE_PROP = 0x9251        // SDIOGetExtDeviceProp（读单个设备属性）
 }

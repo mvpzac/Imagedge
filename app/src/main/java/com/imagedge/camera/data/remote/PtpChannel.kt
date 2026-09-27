@@ -5,6 +5,7 @@ import com.imagedge.camera.data.model.CapabilityState
 import com.imagedge.camera.data.model.MediaItem
 import com.imagedge.camera.ptp.PhotoType
 import com.imagedge.camera.ptp.PtpIpClient
+import com.imagedge.camera.ptp.PtpIoException
 import com.imagedge.camera.ptp.PtpResponseException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -315,7 +316,14 @@ class PtpChannel @Inject constructor() : CameraChannel {
                             delay(500)
                             continue
                         }
-                        val event = newClient.readEvent() ?: continue
+                        val read = newClient.readEventOutcome()
+                        if (read.outcome.requiresReconnect) {
+                            // 流已错位，继续读只会读到垃圾。退出内层循环，
+                            // 由外层 catch 重开事件流——这是唯一能恢复的路径。
+                            AppLog.w(TAG, "事件流错位，重开事件连接")
+                            throw PtpIoException("事件流已错位，需要重开事件连接")
+                        }
+                        val event = read.last ?: continue
                         handleCameraEvent(newClient, event)
                     }
                 } catch (e: Exception) {
