@@ -32,15 +32,13 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.imagedge.camera.R
-import com.imagedge.camera.share.ExportFormat
 import com.imagedge.camera.share.ExportSize
-import com.imagedge.camera.share.ExifPolicy
 import com.imagedge.camera.share.ShareIntents
 import com.imagedge.camera.ui.theme.Radius
 import androidx.compose.ui.Alignment
 import com.imagedge.camera.ui.components.AppButton
 import com.imagedge.camera.ui.components.AppChipRow
-import com.imagedge.camera.ui.components.AppSlider
+import com.imagedge.camera.ui.components.ExportConfigControls
 import com.imagedge.camera.ui.theme.Spacing
 
 /**
@@ -106,7 +104,8 @@ fun ExportSettingsSheet(
                 style = MaterialTheme.typography.titleMedium
             )
 
-            // 尺寸
+            // 尺寸（格式 / 元数据 / 画质三组由 ExportConfigControls 负责，
+            // 编辑器用的是同一份——两处的导出行为必须一致才谈得上「同一套设置」）
             SettingsSection(stringResource(R.string.share_size)) {
                 AppChipRow(
                     items = ExportSize.entries.toList(),
@@ -116,59 +115,12 @@ fun ExportSettingsSheet(
                 )
             }
 
-            // 格式
-            SettingsSection(stringResource(R.string.share_format)) {
-                AppChipRow(
-                    items = ExportFormat.entries.toList(),
-                    selected = config.format,
-                    label = { it.name },
-                    onSelect = { viewModel.setFormat(it) }
-                )
-                // PNG 无 EXIF 容器，需要明说，避免用户误以为元数据被保留
-                if (!config.format.supportsExif) {
-                    Text(
-                        text = stringResource(R.string.share_png_no_exif),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            // 元数据与隐私
-            SettingsSection(stringResource(R.string.share_privacy)) {
-                AppChipRow(
-                    items = ExifPolicy.entries.toList(),
-                    selected = config.exif,
-                    label = { it.label },
-                    onSelect = { viewModel.setExif(it) },
-                    enabled = { config.format.supportsExif }
-                )
-                val hint = when (config.exif) {
-                    ExifPolicy.STRIP_LOCATION -> stringResource(R.string.share_strip_location_hint)
-                    ExifPolicy.STRIP_ALL -> stringResource(R.string.share_strip_all_hint)
-                    ExifPolicy.KEEP_ALL -> null
-                }
-                if (hint != null) {
-                    Text(
-                        text = hint,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            // 画质（PNG 无损，无质量概念）
-            if (config.format != ExportFormat.PNG) {
-                SettingsSection(label = stringResource(R.string.share_quality)) {
-                    AppSlider(
-                        label = stringResource(R.string.share_quality),
-                        value = config.quality,
-                        onValueChange = { viewModel.setQuality(it) },
-                        range = 60..100,
-                        steps = 7
-                    )
-                }
-            }
+            ExportConfigControls(
+                config = config,
+                onFormatChange = viewModel::setFormat,
+                onQualityChange = viewModel::setQuality,
+                onExifChange = viewModel::setExif
+            )
 
             val message = error
             if (message != null) {

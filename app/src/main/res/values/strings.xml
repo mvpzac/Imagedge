@@ -131,6 +131,8 @@
     <string name="ble_connecting_prefix">正在连接蓝牙遥控：</string>
     <!-- 共用确认框的取消键（ui/components/ConfirmDialog） -->
     <string name="action_cancel">取消</string>
+    <!-- 亮度直方图（ui/components/Histogram）：图表没有文字替身，读屏只能靠这一句 -->
+    <string name="hist_luma">亮度直方图</string>
     <string name="viewer_back">返回</string>
     <string name="viewer_download">下载</string>
     <string name="viewer_loading">加载原图…</string>
@@ -225,8 +227,12 @@
     <!-- 调色与导出（LUT 编辑页）：对比度/饱和度/色温复用「基础调整」的既有文案 -->
     <string name="edit_adjust_title">调整</string>
     <string name="edit_exposure">曝光</string>
-    <string name="edit_compare_hint">长按对比原图</string>
-    <string name="edit_compare_original">原图</string>
+    <string name="edit_highlights">高光</string>
+    <string name="edit_shadows">阴影</string>
+    <string name="edit_tint">色调</string>
+    <string name="edit_compare_hint">长按对比调色前</string>
+    <string name="edit_compare_original">调色前</string>
+    <string name="edit_export_note">保存为全分辨率副本，原图不被改写；文件后缀与 MIME 跟随所选格式</string>
 
     <!-- 编辑调节（几何 + 调色） -->
     <string name="edit_photo_title">编辑调节</string>

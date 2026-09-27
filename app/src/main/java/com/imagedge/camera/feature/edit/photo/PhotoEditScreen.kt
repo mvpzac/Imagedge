@@ -72,8 +72,10 @@ import com.imagedge.camera.ui.layout.EditorFrame
 import com.imagedge.camera.ui.layout.EditorFrameState
 import com.imagedge.camera.ui.layout.EditorBusy
 import com.imagedge.camera.ui.components.AppSection
+import com.imagedge.camera.ui.components.Histogram
 import com.imagedge.camera.ui.components.AppSlider
 import com.imagedge.camera.ui.components.EmptyState
+import com.imagedge.camera.ui.components.ExportConfigControls
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.LucideIcon
 import com.imagedge.camera.ui.glass.GlassCard
@@ -87,12 +89,14 @@ import com.imagedge.camera.ui.components.AppIconButton
 /**
  * 编辑调节 —— 相册的主编辑入口。
  *
- * 三个分区（同一时间只显示一组控件，避免一屏堆满滑条）：
- * - **调色**：基础参数（曝光/对比度/饱和度/色温）+ LUT 滤镜（三类输入曲线分开）+ 强度
+ * 四个分区（同一时间只显示一组控件，避免一屏堆满滑条）：
+ * - **调色**：基础参数按处理顺序排（曝光/色温/色调 → 高光/阴影 → 对比度 → 饱和度）
+ *   + LUT 滤镜（三类输入曲线分开）+ 强度
  * - **裁剪**：比例预设（自由/1:1/4:3/3:2/16:9/9:16）+ 拖动裁剪框（框内拖动整体移动）
  * - **旋转**：左右 90°、水平/垂直翻转、拉直（-45..45，自动裁角）
+ * - **导出**：格式 / 元数据与隐私 / 画质（与分享面板同一组控件）
  *
- * 预览：调色/旋转分区显示最终结果（长按对比原图）；裁剪分区显示未裁剪的底图 + 裁剪框，
+ * 预览：调色/旋转/导出分区显示最终结果（长按对比调色前）；裁剪分区显示未裁剪的底图 + 裁剪框，
  * 保证「框选的画面 = 导出的画面」。
  *
  * @param initialUri 由调用方指定的源图（例如下载页传已下载照片）；null 时用户自行选择
@@ -178,6 +182,8 @@ fun PhotoEditScreen(
                         EditTab.CROP -> CropPanel(state = state, viewModel = viewModel)
 
                         EditTab.ROTATE -> RotatePanel(state = state, viewModel = viewModel)
+
+                        EditTab.EXPORT -> ExportPanel(state = state, viewModel = viewModel)
                     }
 
                 }
@@ -190,7 +196,7 @@ fun PhotoEditScreen(
 }
 
 /**
- * 预览区：调色/旋转分区显示成品（长按对比原图）；裁剪分区显示未裁剪底图 + 裁剪框。
+ * 预览区：调色/旋转/导出分区显示成品（长按对比调色前）；裁剪分区显示未裁剪底图 + 裁剪框。
  */
 @Composable
 private fun PreviewArea(
@@ -200,7 +206,9 @@ private fun PreviewArea(
 ) {
     val image = when {
         state.tab == EditTab.CROP -> state.cropBase ?: state.original
-        state.comparing -> state.original
+        // 对比用 compareBase（构图已定、未调色）而不是裸原图：
+        // 用户旋转过之后，拿裸原图来「对比」是两幅不同构图的画在比，等于没比
+        state.comparing -> state.compareBase ?: state.original
         else -> state.filtered ?: state.original
     }
     val aspect = image?.let { it.width.toFloat() / it.height } ?: (4f / 3f)
@@ -339,6 +347,9 @@ private fun ColorPanel(
             }
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(Spacing.XS)) {
+                // 直方图在滑条之上：调高光/对比度时眼睛要同时在画面和形状之间来回看，
+                // 放到面板底部等于每次都要滚下去确认
+                Histogram(state.histogram)
                 if (state.selectedKey != FILTER_NONE) {
                     AppSlider(
                         label = stringResource(R.string.edit_strength),
@@ -348,10 +359,34 @@ private fun ColorPanel(
                         valueSuffix = "%"
                     )
                 }
+                // 滑条顺序 = 实际处理顺序（见 ColorAdjust 的类注释）：
+                // 曝光与色温/色调是同一次增益，先算；然后才是分区恢复与对比度。
+                // 这三段之间是不可交换的（对比度绕 18% 灰做仿射），界面顺序与实际顺序不一致时，
+                // 用户会看到「同样拉满、先动哪个」给出两张不同的照片，却没有任何地方解释。
                 AppSlider(
                     label = stringResource(R.string.edit_exposure),
                     value = state.adjust.exposure,
                     onValueChange = { viewModel.setAdjust(state.adjust.copy(exposure = it)) }
+                )
+                AppSlider(
+                    label = stringResource(R.string.edit_temperature),
+                    value = state.adjust.temperature,
+                    onValueChange = { viewModel.setAdjust(state.adjust.copy(temperature = it)) }
+                )
+                AppSlider(
+                    label = stringResource(R.string.edit_tint),
+                    value = state.adjust.tint,
+                    onValueChange = { viewModel.setAdjust(state.adjust.copy(tint = it)) }
+                )
+                AppSlider(
+                    label = stringResource(R.string.edit_highlights),
+                    value = state.adjust.highlights,
+                    onValueChange = { viewModel.setAdjust(state.adjust.copy(highlights = it)) }
+                )
+                AppSlider(
+                    label = stringResource(R.string.edit_shadows),
+                    value = state.adjust.shadows,
+                    onValueChange = { viewModel.setAdjust(state.adjust.copy(shadows = it)) }
                 )
                 AppSlider(
                     label = stringResource(R.string.edit_contrast),
@@ -362,11 +397,6 @@ private fun ColorPanel(
                     label = stringResource(R.string.edit_saturation),
                     value = state.adjust.saturation,
                     onValueChange = { viewModel.setAdjust(state.adjust.copy(saturation = it)) }
-                )
-                AppSlider(
-                    label = stringResource(R.string.edit_temperature),
-                    value = state.adjust.temperature,
-                    onValueChange = { viewModel.setAdjust(state.adjust.copy(temperature = it)) }
                 )
             }
         }
@@ -465,6 +495,36 @@ private fun RotatePanel(state: PhotoEditState, viewModel: PhotoEditViewModel) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        }
+    }
+}
+
+/**
+ * 导出分区：格式 / 元数据与隐私 / 画质。
+ *
+ * 用的是分享面板那套 [ExportConfigControls]，不是第二份实现：两处导出必须给出
+ * 同一个结果，否则「在编辑器里选了清除位置、分享出去还带 GPS」这类差异
+ * 只能靠用户记住每个入口的脾气。
+ *
+ * 没有尺寸档位：编辑器的导出走「全分辨率重算」，尺寸由那条路径按内存预算定，
+ * 摆一个改了也没用的档位等于骗人。
+ */
+@Composable
+private fun ExportPanel(state: PhotoEditState, viewModel: PhotoEditViewModel) {
+    val config = state.exportConfig
+    AppSection(title = stringResource(R.string.share_settings_title)) {
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.S)) {
+            ExportConfigControls(
+                config = config,
+                onFormatChange = { viewModel.setExportConfig(config.copy(format = it)) },
+                onQualityChange = { viewModel.setExportConfig(config.copy(quality = it)) },
+                onExifChange = { viewModel.setExportConfig(config.copy(exif = it)) }
+            )
+            Text(
+                text = stringResource(R.string.edit_export_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

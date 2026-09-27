@@ -11,9 +11,14 @@ import com.imagedge.camera.core.common.AppLog
 import com.imagedge.camera.data.lut.LutType
 import com.imagedge.camera.data.lut.UserLutStore
 import com.imagedge.camera.image.EditStep
+import com.imagedge.camera.image.ExposureAnalysis
 import com.imagedge.camera.image.Geometry
 import com.imagedge.camera.image.ImagePipeline
+import com.imagedge.camera.image.LumaHistogram
 import com.imagedge.camera.image.NormRect
+import com.imagedge.camera.share.ExportConfig
+import com.imagedge.camera.share.ExportFormat
+import com.imagedge.camera.share.ExportManager
 import com.imagedge.camera.lut.ColorAdjust
 import com.imagedge.camera.lut.CubeLut
 import com.imagedge.camera.lut.CubeLutParser
@@ -62,6 +67,7 @@ enum class EditTab(val label: String) {
     COLOR("调色"),
     CROP("裁剪"),
     ROTATE("旋转"),
+    EXPORT("导出"),
 }
 
 /** 裁剪比例预设；[ratio] 为像素比例（宽/高），null = 自由 */
@@ -144,6 +150,14 @@ data class PhotoEditState(
     val straighten: Float = 0f,
     /** 裁剪模式的底图（已应用几何、**未裁剪**，裁剪框画在它上面） */
     val cropBase: Bitmap? = null,
+    /**
+     * 长按对比用的「之前」画面：几何与裁剪**已应用**、调色与 LUT **未应用**。
+     *
+     * 不能直接用 [original]：那是裸解码图，一旦用户旋转/拉直/裁剪过，
+     * 长按看到的和松手后看到的就是两幅不同构图的画，对比本身失去意义。
+     * 无几何也无裁剪时它为 null，此时 original 就是正确的对照（构图完全一致）。
+     */
+    val compareBase: Bitmap? = null,
     val processing: Boolean = false,
     /** 导出中（与预览处理分开，避免「导出时预览还在算」把按钮状态搅乱） */
     val exporting: Boolean = false,
@@ -151,7 +165,21 @@ data class PhotoEditState(
     val saved: Boolean = false,
     /** 滤镜 → 用户照片渲染的缩略图（含原图项） */
     val thumbnails: Map<String, Bitmap> = emptyMap(),
-    val thumbsLoading: Boolean = false
+    val thumbsLoading: Boolean = false,
+    /**
+     * 当前成品的亮度直方图（与 [filtered] 同一次渲染算出）。
+     *
+     * 取景页早就有峰值密度/高光警告，编辑器却没有直方图：调高光恢复、调对比度时
+     * 只看画面很容易判断过头，而削顶在缩略图上根本看不出来。
+     */
+    val histogram: LumaHistogram? = null,
+    /**
+     * 导出配置（格式 / 质量 / 元数据策略）。
+     *
+     * 默认与原实现一致（JPEG），但质量与 EXIF 策略不再写死：相机照片的 EXIF 里
+     * 常有 GPS 坐标与机身信息，「导出即保留全部」对分享到公开平台是不安全的。
+     */
+    val exportConfig: ExportConfig = ExportConfig()
 ) {
     val hasImage: Boolean get() = original != null
 
@@ -213,6 +241,8 @@ class PhotoEditViewModel @Inject constructor(
     private var convPixels: IntArray? = null
     private var convRgba: ByteArray? = null
     private var convOutPixels: IntArray? = null
+    /** 直方图采样缓冲。不复用 convPixels：那是调色路径的活缓冲，共享会在下一次渲染时串台 */
+    private var histoPixels: IntArray? = null
 
     /** 缩略图渲染源（128px 级的小图，供每个滤镜生成预览） */
     private var thumbSource: Bitmap? = null
@@ -315,12 +345,17 @@ class PhotoEditViewModel @Inject constructor(
                 convPixels = null
                 convRgba = null
                 convOutPixels = null
+                histoPixels = null
                 _state.update {
                     PhotoEditState(
                         sourceUri = uri,
                         original = decoded,
                         strength = it.strength,
                         adjust = it.adjust,
+                        // 导出配置也要带过去。不带的话「仅清除位置」只在当前这张有效，
+                        // 换下一张就悄悄回到 KEEP_ALL——用户以为自己在保护隐私，
+                        // 而 GPS 只是晚了一张照片才跟着出去
+                        exportConfig = it.exportConfig,
                         thumbnails = emptyMap()
                     )
                 }
@@ -487,7 +522,15 @@ class PhotoEditViewModel @Inject constructor(
         scheduleApply()
     }
 
-    /** 基础调色变化（曝光/对比度/饱和度/色温，防抖同强度） */
+    /**
+     * 改导出配置。**故意不触发 scheduleApply()**：
+     * 格式/质量/元数据只影响落盘，不影响画面，重算一次预览是白烧 CPU 与 GPU。
+     */
+    fun setExportConfig(config: ExportConfig) {
+        _state.update { it.copy(exportConfig = config) }
+    }
+
+    /** 基础调色变化（增益/分区/对比度/饱和度任一，防抖同强度） */
     fun setAdjust(adjust: ColorAdjust) {
         _state.update { it.copy(adjust = adjust, message = null) }
         scheduleApply()
@@ -547,6 +590,9 @@ class PhotoEditViewModel @Inject constructor(
             var coloredCropped: Bitmap? = null
             var coloredFull: Bitmap? = null
             var published = false
+            // 已被 state.compareBase 接管的那张：finally 的回收清单必须放行它，
+            // 否则界面上会留一个已回收的位图（崩溃点是异步的，查不到现场）
+            var heldByState: Bitmap? = null
             // 处理全程无挂起点，cancel() 停不住已在跑的任务；用互斥串行化，
             // 避免新旧任务并发读写复用的像素缓冲造成画面错乱
             try {
@@ -566,16 +612,16 @@ class PhotoEditViewModel @Inject constructor(
                     cropped = if (crop.isFull) {
                         geometryOnly
                     } else {
-                        ImagePipeline(listOf(EditStep.Crop(crop))).renderGeometry(geometryOnly!!)
+                        ImagePipeline(listOf(EditStep.Crop(crop))).renderGeometry(geometryOnly)
                     }
                     // 3) 颜色：调色 + LUT（一次像素遍历）
-                    coloredCropped = applyPipelineTo(cropped!!, lut, strength, adjust)
+                    coloredCropped = applyPipelineTo(cropped, lut, strength, adjust)
                     coroutineContext.ensureActive()
                     // 裁剪模式的底图 = 几何 + 颜色（让用户带着最终观感去框选）
                     coloredFull = if (cropped === geometryOnly) {
                         coloredCropped
                     } else {
-                        applyPipelineTo(geometryOnly!!, lut, strength, adjust)
+                        applyPipelineTo(geometryOnly, lut, strength, adjust)
                     }
                     coroutineContext.ensureActive()
                     if (sourceGeneration.get() != expectedGeneration ||
@@ -583,15 +629,26 @@ class PhotoEditViewModel @Inject constructor(
                     ) return@withLock
                     val oldFiltered = _state.value.filtered
                     val oldCropBase = _state.value.cropBase
+                    val oldCompareBase = _state.value.compareBase
+                    // 构图已定、尚未调色的那张，交给长按对比用。与 processSource 同一个对象时
+                    // 不持有（那是缓存的预览源，生命周期归 loadPicked 管），
+                    // 而这种情况下 original 本来就是正确对照——构图完全一致。
+                    val compare = cropped.takeIf { it !== processSource }
+                    // 先登记再发布：state 一旦拿着它，finally 就不许再回收它，
+                    // 中间哪怕抛一个 catch 没接住的 Throwable 也不能留个空窗
+                    heldByState = compare
                     _state.update {
                         it.copy(
                             filtered = coloredCropped,
                             cropBase = coloredFull,
+                            compareBase = compare,
+                            histogram = computeHistogram(coloredCropped),
                             processing = false
                         )
                     }
                     published = true
-                    releaseBitmapsLater(listOfNotNull(oldFiltered, oldCropBase))
+                    // 只回收被替换掉的旧的那几张；compare 已经进 state，不能回收
+                    releaseBitmapsLater(listOfNotNull(oldFiltered, oldCropBase, oldCompareBase))
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -602,7 +659,8 @@ class PhotoEditViewModel @Inject constructor(
                 }
             } finally {
                 recycleUnique(
-                    listOfNotNull(cropped, geometryOnly).filter { it !== processSource }
+                    listOfNotNull(geometryOnly, cropped)
+                        .filter { it !== processSource && it !== heldByState }
                 )
                 if (!published) recycleUnique(listOfNotNull(coloredCropped, coloredFull))
             }
@@ -720,11 +778,28 @@ class PhotoEditViewModel @Inject constructor(
     }
 
     /**
+     * 成品预览的亮度直方图。
+     *
+     * 与取景页同一套采样口径（[ExposureAnalysis.sampleStride] 降到 ~320px 长边），
+     * 所以这里的形状和监看工作台上看到的是可比的。
+     * 失败返回 null：直方图是辅助信息，不该因为它让整次渲染报错。
+     */
+    private fun computeHistogram(bitmap: Bitmap): LumaHistogram? = runCatching {
+        val w = bitmap.width
+        val h = bitmap.height
+        if (w <= 0 || h <= 0) return@runCatching null
+        val size = w * h
+        val buffer = reuseIntArray(histoPixels, size) ?: IntArray(size).also { histoPixels = it }
+        bitmap.getPixels(buffer, 0, w, 0, 0, w, h)
+        ExposureAnalysis.histogram(buffer, w, h, ExposureAnalysis.sampleStride(w, h))
+    }.getOrNull()
+
+    /**
      * 对一张位图执行完整管线：基础调色 → LUT → 强度混合。
      *
      * 复用三块转换缓冲（P1-9）：强度/调色滑条每次防抖后都会全图重算，
      * 原先每次新建 3 个大数组（Int 24MB + Byte 24MB + Int 24MB）会让 GC 疯狂抖动。
-     * **仅在预览尺寸下复用**——导出走独立缓冲（见 [exportBitmap]），避免与预览互相践踏。
+     * **仅在预览尺寸下复用**——导出走 [renderFullResolution] 的独立条带缓冲，避免与预览互相践踏。
      */
     private suspend fun applyPipelineTo(
         src: Bitmap,
@@ -787,14 +862,15 @@ class PhotoEditViewModel @Inject constructor(
         buffer?.takeIf { it.size == expectedSize }
 
     /**
-     * 导出：**按可用内存尽可能按原分辨率**重算，并保留原图 EXIF。
+     * 导出：**按可用内存尽可能按原分辨率**重算，格式/质量/元数据策略按 [PhotoEditState.exportConfig]
+     * 交给 [ExportManager]（与分享导出同一套）。
      *
      * 修复三处原实现的问题：
      * 1. 原实现把 1600px 的编辑副本当导出源 → 6000px 照片导出成 1600px（损失 90% 像素）；
      *    现在从源 URI 重新按全分辨率解码（内存不够时按 2 的幂降级，并在提示里说明）。
      * 2. 全分辨率一次性分配三块大缓冲（24MP ≈ 288MB）会 OOM → 改为**按条带处理**。
-     * 3. 导出件丢失全部 EXIF（拍摄时间/机型/GPS）→ 写进缓存临时文件，复制源 EXIF，
-     *    再提交到相册，并写入 IS_PENDING / DATE_TAKEN。
+     * 3. 导出件曾经丢失全部 EXIF（拍摄时间/机型/GPS）→ 现在按策略复制元数据后提交相册，
+     *    并写入 IS_PENDING / DATE_TAKEN。
      */
     fun save() {
         val editSnapshot = _state.value
@@ -834,19 +910,22 @@ class PhotoEditViewModel @Inject constructor(
                         rendered = result
                         coroutineContext.ensureActive()
 
-                        // 2) 写入缓存文件 → 复制 EXIF → 提交相册
-                        temp = File.createTempFile("lutexport", ".jpg", context.cacheDir)
-                        temp.outputStream().use { out ->
-                            check(result.compress(Bitmap.CompressFormat.JPEG, 96, out)) {
-                                "JPEG 编码失败"
-                            }
-                        }
+                        // 2) 交给 ExportManager 落盘（格式/质量/元数据策略都在那里）→ 提交相册
+                        // 格式 / 质量 / 元数据策略交给 ExportManager 统一处理（与分享导出同一套），
+                        // 文件名扩展名必须跟着格式走，否则相册里会出现一个后缀是 .jpg 的 WebP
+                        val config = editSnapshot.exportConfig
+                        val exported = ExportManager(context).exportRendered(
+                            bitmap = result,
+                            exifSource = uri,
+                            config = config,
+                            nameBase = "IMAGEDGE_EDIT_${System.currentTimeMillis()}",
+                        )
+                        // temp 只为 finally 的清理而存在：commitToGallery 把副本流进相册，
+                        // 缓存件一律由下面的 finally 删除
+                        temp = exported
                         coroutineContext.ensureActive()
-                        copyExif(uri, temp)
-                        coroutineContext.ensureActive()
-                        val name = "IMAGEDGE_EDIT_${System.currentTimeMillis()}.jpg"
-                        commitToGallery(temp, name)
-                        name
+                        commitToGallery(exported, exported.name, config.format, uri)
+                        exported.name
                     } finally {
                         recycleUnique(listOfNotNull(rendered, geometryApplied, exportSource))
                         temp?.let { runCatching { it.delete() } }
@@ -942,40 +1021,29 @@ class PhotoEditViewModel @Inject constructor(
         return out
     }
 
-    /** 把源图的 EXIF（含方向、拍摄时间、机型、GPS）复制到导出件 */
-    private fun copyExif(source: Uri, target: File) {
-        runCatching {
-            val srcExif = context.contentResolver.openFileDescriptor(source, "r")?.use {
-                ExifInterface(it.fileDescriptor)
-            } ?: return
-            val dstExif = ExifInterface(target.absolutePath)
-            for (tag in COPY_EXIF_TAGS) {
-                srcExif.getAttribute(tag)?.let { dstExif.setAttribute(tag, it) }
-            }
-            // 像素已在编辑阶段转正 → 方向必须写回 NORMAL，否则相册会再转一次
-            dstExif.setAttribute(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL.toString())
-            dstExif.saveAttributes()
-        }.onFailure { AppLog.w("lut", "EXIF 复制失败（成品仍可用，仅丢元数据）：${it.message}") }
-    }
-
     /**
      * 提交到相册：优先用户自选的 SAF 目录，否则 DCIM/Imagedge。
      * 走 IS_PENDING → 写完置 0，并写入 DATE_TAKEN，保证相册排序与完整性。
+     *
+     * MIME 必须跟着 [format] 走：写死 image/jpeg 会让相册把一个 WebP 当成 JPEG
+     * 索引，接收方按 MIME 分派解码器时直接解不出来。
      */
-    private fun commitToGallery(temp: File, name: String): String {
+    private fun commitToGallery(temp: File, name: String, format: ExportFormat, source: Uri): String {
         val resolver = context.contentResolver
         val treeUriStr = DownloadLocation.treeUri(context)
-        val dateTaken = runCatching {
-            ExifInterface(temp.absolutePath).getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
-        }.getOrNull()
-        val dateMillis = dateTaken?.let(::parseExifDate)
+        // 拍摄时间读**源图**，不读导出件：STRIP_ALL 与 PNG 两种情况下导出件里根本没有 EXIF，
+        // 那时 DATE_TAKEN 写不进去，去年拍的照片修完就插进相册「今天」那一堆里。
+        // MediaStore 这一列是本机的排序键、不随文件分享出去，所以它与「清除全部信息」不冲突
+        val dateMillis = captureDate(source)?.let(::parseExifDate)
 
         if (treeUriStr != null) {
             val treeUri = treeUriStr.toUri()
             val dirUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(
                 treeUri, android.provider.DocumentsContract.getTreeDocumentId(treeUri)
             )
-            val fileUri = android.provider.DocumentsContract.createDocument(resolver, dirUri, "image/jpeg", name)
+            val fileUri = android.provider.DocumentsContract.createDocument(
+                resolver, dirUri, format.mime, name
+            )
                 ?: throw IllegalStateException("无法在所选目录创建文件（权限或路径无效）")
             try {
                 resolver.openOutputStream(fileUri)?.use { out ->
@@ -990,7 +1058,7 @@ class PhotoEditViewModel @Inject constructor(
 
         val values = android.content.ContentValues().apply {
             put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, name)
-            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, format.mime)
             put(
                 android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
                 "${android.os.Environment.DIRECTORY_DCIM}/Imagedge"
@@ -1020,6 +1088,13 @@ class PhotoEditViewModel @Inject constructor(
         return name
     }
 
+    /** 源图的拍摄时间（EXIF `DateTimeOriginal`）；读不到返回 null，不因此中断导出 */
+    private fun captureDate(source: Uri): String? = runCatching {
+        context.contentResolver.openFileDescriptor(source, "r")?.use {
+            ExifInterface(it.fileDescriptor).getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+        }
+    }.getOrNull()
+
     /** EXIF 时间格式 `yyyy:MM:dd HH:mm:ss` → 毫秒时间戳 */
     private fun parseExifDate(value: String): Long? = runCatching {
         java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
@@ -1047,6 +1122,7 @@ class PhotoEditViewModel @Inject constructor(
         convPixels = null
         convRgba = null
         convOutPixels = null
+        histoPixels = null
         super.onCleared()
     }
 
@@ -1054,6 +1130,7 @@ class PhotoEditViewModel @Inject constructor(
         state.original?.let(::add)
         state.filtered?.let(::add)
         state.cropBase?.let(::add)
+        state.compareBase?.let(::add)
         addAll(state.thumbnails.values)
     }
 
@@ -1086,35 +1163,6 @@ class PhotoEditViewModel @Inject constructor(
 
     companion object {
         private const val BITMAP_RELEASE_GRACE_MS = 250L
-
-        /** 导出时复制的 EXIF 字段（拍摄参数 + 时间 + 作者信息） */
-        private val COPY_EXIF_TAGS = arrayOf(
-            ExifInterface.TAG_MAKE,
-            ExifInterface.TAG_MODEL,
-            ExifInterface.TAG_LENS_MODEL,
-            ExifInterface.TAG_F_NUMBER,
-            ExifInterface.TAG_EXPOSURE_TIME,
-            ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY,
-            ExifInterface.TAG_FOCAL_LENGTH,
-            ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM,
-            ExifInterface.TAG_DATETIME_ORIGINAL,
-            ExifInterface.TAG_DATETIME,
-            ExifInterface.TAG_EXPOSURE_BIAS_VALUE,
-            ExifInterface.TAG_WHITE_BALANCE,
-            ExifInterface.TAG_COLOR_SPACE,
-            ExifInterface.TAG_ARTIST,
-            ExifInterface.TAG_COPYRIGHT,
-            ExifInterface.TAG_IMAGE_DESCRIPTION,
-            ExifInterface.TAG_SOFTWARE,
-            ExifInterface.TAG_GPS_LATITUDE,
-            ExifInterface.TAG_GPS_LATITUDE_REF,
-            ExifInterface.TAG_GPS_LONGITUDE,
-            ExifInterface.TAG_GPS_LONGITUDE_REF,
-            ExifInterface.TAG_GPS_ALTITUDE,
-            ExifInterface.TAG_GPS_ALTITUDE_REF,
-            ExifInterface.TAG_GPS_TIMESTAMP,
-            ExifInterface.TAG_GPS_DATESTAMP,
-        )
     }
 
     /** 预览处理源：最长边缩到 [LUT_PREVIEW_MAX_DIM] 以内（交互式处理提速约 6 倍） */

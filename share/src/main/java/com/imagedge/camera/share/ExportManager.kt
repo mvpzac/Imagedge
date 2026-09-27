@@ -98,8 +98,8 @@ class ExportManager(private val context: Context) {
                     ?: throw IllegalArgumentException("无法解码该图片")
                 try {
                     val target = scaleTo(bitmap, config.size)
+                    val file = newOutputFile(source, config)
                     try {
-                        val file = newOutputFile(source, config)
                         writeBitmap(target, file, config)
                         applyMetadata(source, file, config)
                         FileProvider.getUriForFile(
@@ -107,6 +107,11 @@ class ExportManager(private val context: Context) {
                             "${context.packageName}.sharefileprovider",
                             file
                         )
+                    } catch (e: Exception) {
+                        // 编码或写元数据失败时不留半成品：写了一半的文件照样能被
+                        // FileProvider 发出去，接收方拿到的是一个打不开的附件
+                        runCatching { file.delete() }
+                        throw e
                     } finally {
                         if (target !== bitmap) target.recycle()
                     }
@@ -117,6 +122,38 @@ class ExportManager(private val context: Context) {
                 AppLog.e(TAG, "导出失败（${source.lastPathSegment}）：${it.message}")
             }
         }
+
+    /**
+     * 导出**已经渲染好的位图**，返回落盘的缓存文件。
+     *
+     * 与 [export] 的区别是这条给编辑器用：[export] 从 Uri 重新解码原图，
+     * 编辑器把算好的像素交给它等于把编辑丢掉、再多一次编解码（二次质量损失）。
+     *
+     * 格式 / 质量 / EXIF 策略这两段逻辑**两边共用**——此前编辑器自己写了一份
+     * 「只有 JPEG、写死质量 96、永远保留全部元数据」的导出，于是同一张图
+     * 从相册页分享可以选格式与去 GPS，从编辑器保存却不行。
+     *
+     * @param exifSource 元数据来源（编辑器的原图 Uri）；null 表示不复制元数据
+     * @param nameBase 输出文件名主干（不含扩展名）
+     */
+    suspend fun exportRendered(
+        bitmap: Bitmap,
+        exifSource: Uri?,
+        config: ExportConfig,
+        nameBase: String,
+    ): File = withContext(Dispatchers.IO) {
+        val dir = File(context.cacheDir, EXPORT_DIR).apply { mkdirs() }
+        val file = File(dir, "$nameBase.${config.format.extension}")
+        try {
+            writeBitmap(bitmap, file, config)
+            if (exifSource != null) applyMetadata(exifSource, file, config)
+            file
+        } catch (e: Exception) {
+            // 写坏一半的文件留着没有任何意义：调用方拿到的是异常，不会引用它
+            runCatching { file.delete() }
+            throw e
+        }
+    }
 
     /**
      * 批量导出。单张失败不影响其余（跳过并记日志），返回成功的 Uri 列表。
@@ -253,7 +290,7 @@ class ExportManager(private val context: Context) {
     }
 
     private fun writeBitmap(bitmap: Bitmap, file: File, config: ExportConfig) {
-        FileOutputStream(file).use { out ->
+        val written = FileOutputStream(file).use { out ->
             when (config.format) {
                 ExportFormat.JPEG -> bitmap.compress(Bitmap.CompressFormat.JPEG, config.quality, out)
                 // PNG 为无损，quality 参数无效
@@ -268,6 +305,9 @@ class ExportManager(private val context: Context) {
                 }
             }
         }
+        // compress 返回 false 时文件可能只写了一半，但字节流照样能进相册：
+        // 用户拿到的是一个打不开的条目，而不是一句「导出失败」。宁可抛
+        check(written) { "编码失败：${config.format.name} 未被编码器接受" }
     }
 
     /**
