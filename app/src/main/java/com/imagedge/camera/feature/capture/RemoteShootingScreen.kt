@@ -23,6 +23,7 @@ import androidx.annotation.StringRes
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -104,7 +105,15 @@ fun RemoteShootingScreen(
     val cameraStatus by viewModel.cameraStatus.collectAsStateWithLifecycle()
     var workstationOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
-    val frame by viewModel.frame.collectAsStateWithLifecycle()
+    // 这里**只**取「有没有帧」这一个布尔量，它决定整棵页面树的失效范围。
+    // 直接 collect 帧会让这棵树以相机帧率（约 20fps）重组：身份行、BLE 行、快门、参数区
+    // 全都跟着每一帧重来，而实际画画面的是下面那个自己读帧的 LiveViewPreview。
+    // 这里**只**取「有没有帧」这一个布尔量，它决定整棵页面树的失效范围。
+    // 直接 collect 帧会让这棵树以相机帧率（约 20fps）重组：身份行、BLE 行、快门、参数区
+    // 全都跟着每一帧重来，而实际画画面的是下面那个自己读帧的 LiveViewPreview。
+    // derivedStateOf 负责去重：底层 Bitmap 每帧都变，这个 Boolean 不是。
+    val frameState = viewModel.frame.collectAsStateWithLifecycle()
+    val hasFrame by remember(frameState) { derivedStateOf { frameState.value != null } }
     val policy by viewModel.transferPolicy.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
@@ -179,7 +188,7 @@ fun RemoteShootingScreen(
     val availability = captureAvailabilityOf(
         connected = state.isConnected,
         viewfinderPaused = state.viewfinderPaused,
-        hasFrame = frame != null,
+        hasFrame = hasFrame,
         bleConnected = bleConnected,
         ptpCapture = state.captureSupport,
         capabilitiesStale = state.capabilitiesStale,

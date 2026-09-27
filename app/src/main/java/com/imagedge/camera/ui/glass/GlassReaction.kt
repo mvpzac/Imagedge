@@ -20,6 +20,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.isActive
 import kotlin.math.tanh
@@ -44,8 +47,13 @@ fun Modifier.glassReactive(
     enabled: Boolean = true
 ): Modifier {
     if (!enabled) {
-        // 禁用态：无交互反应（保持透明可读）
-        return this
+        // 禁用态：无交互反应（保持透明可读）。
+        // 但必须留在无障碍树里并标明 disabled——否则禁用的按钮对 TalkBack 直接消失，
+        // 用户既看不到它、也听不到「现在不能用」。
+        return this.semantics {
+            disabled()
+            onClick { false }
+        }
     }
 
     val maxDragPx = with(LocalDensity.current) { MaxDragRadius.toPx() }
@@ -105,6 +113,17 @@ fun Modifier.glassReactive(
                 Modifier
             }
         )
+        .semantics(mergeDescendants = true) {
+            // 玻璃路径是这些控件**唯一**的交互来源（调用点都没有 clickable），
+            // 不补这一条，TalkBack 只能聚焦到按钮、底 Tab 和返回键，却无法激活。
+            // mergeDescendants：按钮的文字/图标在子节点上，不合并的话
+            // 读屏只会念出一个没有名字的「双击以激活」。
+            // 只加动作不加 role：role 归调用方（底 Tab 已经是 Role.Tab）。
+            onClick {
+                onClick()
+                true
+            }
+        }
         .pointerInput(onClick, enabled) {
             awaitEachGesture {
                 val down = awaitFirstDown()

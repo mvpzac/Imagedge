@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -113,7 +114,13 @@ private fun WorkstationContent(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val settings by viewModel.monitoringSettings.collectAsStateWithLifecycle()
-    val frame by viewModel.frame.collectAsStateWithLifecycle()
+    // 帧的 .value 一律不在组合期读：组合期读一次就等于把整棵 WorkstationContent
+    // 的失效范围设成「每帧」，连 pointerInput 都会被每帧重装一次。
+    // 画画面只需要绘制阶段失效，手势只需要读到当下那一刻的值——两处都在下面就地读。
+    val frameState = viewModel.frame.collectAsStateWithLifecycle()
+    // derivedStateOf 负责去重：底层 Bitmap 每帧都变，这个 Boolean 不是。
+    // 顺带不用为 collect 硬塞一个 initialValue——那会让进入时闪一帧「没有画面」。
+    val hasFrame by remember(frameState) { derivedStateOf { frameState.value != null } }
 
     // LocalView 必须在组合期读，再交给 remember：在 remember 的计算 lambda 里
     // 直接写 LocalView.current 不是 composable 上下文
@@ -136,8 +143,6 @@ private fun WorkstationContent(
         zoom = zoom.floatValue,
         pan = pan.value
     )
-    val frameSize = frame?.let { Size(it.width.toFloat(), it.height.toFloat()) }
-    val image = remember(frame) { frame?.asImageBitmap() }
 
     Box(
         modifier = Modifier
@@ -149,7 +154,7 @@ private fun WorkstationContent(
                 .fillMaxSize()
                 .pointerInput(Unit) {
                     detectTransformGestures { centroid, gesturePan, gestureZoom, _ ->
-                        val source = frame ?: return@detectTransformGestures
+                        val source = frameState.value ?: return@detectTransformGestures
                         val dimensions = Size(source.width.toFloat(), source.height.toFloat())
                         // PointerInputScope.size 是 IntSize，必须转 Float 才能进几何模型
                         val viewport = Size(size.width.toFloat(), size.height.toFloat())
@@ -168,8 +173,10 @@ private fun WorkstationContent(
                     }
                 }
         ) {
-            val dimensions = frameSize
-            val source = image
+            // .value 在绘制阶段读：每帧只重画，不重组
+            val frame = frameState.value
+            val dimensions = frame?.let { Size(it.width.toFloat(), it.height.toFloat()) }
+            val source = frame?.asImageBitmap()
             if (dimensions == null || source == null) {
                 // 没有画面时什么都不画（包括网格）——在空画面上画构图线是误导
                 return@Canvas
@@ -184,7 +191,7 @@ private fun WorkstationContent(
 
         // 状态提示只有这一处，居中显示：视线本来就在画面中间
         val hint = when {
-            frame == null -> stringResource(R.string.monitoring_no_frame)
+            !hasFrame -> stringResource(R.string.monitoring_no_frame)
             state.viewfinderPaused -> stringResource(R.string.monitoring_paused)
             else -> state.message
         }
@@ -234,7 +241,7 @@ private fun WorkstationContent(
             settings = settings,
             zoom = transform.effectiveZoom,
             paused = state.viewfinderPaused,
-            snapshotEnabled = frame != null && !state.snapshotting,
+            snapshotEnabled = hasFrame && !state.snapshotting,
             onResetView = {
                 zoom.floatValue = ViewportTransform.MIN_ZOOM
                 pan.value = Offset.Zero
