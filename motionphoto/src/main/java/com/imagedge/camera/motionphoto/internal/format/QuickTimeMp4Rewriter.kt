@@ -21,6 +21,8 @@ internal object QuickTimeMp4Rewriter {
 
     private const val COPY_BUFFER_SIZE = 8 * 1024
 
+    private const val UNSIGNED_INT_MAX = 0xFFFFFFFFL
+
     fun rebrand(source: File, target: File) {
         val sourceLength = source.length()
         if (sourceLength < 8) {
@@ -52,32 +54,39 @@ internal object QuickTimeMp4Rewriter {
         val delta = replacementFtyp.size.toLong() - originalFtypSize
 
         // 流式拷贝：替换 ftyp + 逐块搬运其余字节（堆内固定 8KB 缓冲）
-        FileInputStream(source).use { input ->
-            FileOutputStream(target).use { output ->
-                output.write(replacementFtyp)
-                var skipped = 0L
-                while (skipped < originalFtypSize) {
-                    val s = input.skip(originalFtypSize - skipped)
-                    if (s > 0) {
-                        skipped += s
-                        continue
+        try {
+            FileInputStream(source).use { input ->
+                FileOutputStream(target).use { output ->
+                    output.write(replacementFtyp)
+                    var skipped = 0L
+                    while (skipped < originalFtypSize) {
+                        val s = input.skip(originalFtypSize - skipped)
+                        if (s > 0) {
+                            skipped += s
+                            continue
+                        }
+                        if (input.read() == -1) break
+                        skipped += 1
                     }
-                    if (input.read() == -1) break
-                    skipped += 1
-                }
-                val buffer = ByteArray(COPY_BUFFER_SIZE)
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read == -1) break
-                    output.write(buffer, 0, read)
+                    val buffer = ByteArray(COPY_BUFFER_SIZE)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read == -1) break
+                        output.write(buffer, 0, read)
+                    }
                 }
             }
-        }
 
-        if (delta != 0L) {
-            RandomAccessFile(target, "rw").use { raf ->
-                patchChunkOffsets(raf, raf.length(), delta)
+            if (delta != 0L) {
+                RandomAccessFile(target, "rw").use { raf ->
+                    patchChunkOffsets(raf, raf.length(), delta)
+                }
             }
+        } catch (t: Throwable) {
+            // 走到这里时 target 已经是整份几百 MB 的拷贝，只是偏移没修好。
+            // 留着它等于「失败一次漏一个 GB」，必须就地删掉再抛。
+            target.delete()
+            throw t
         }
     }
 
@@ -110,7 +119,7 @@ internal object QuickTimeMp4Rewriter {
             if (size < 8 || offset + size > limit) {
                 break
             }
-            if (readBoxTypeAt(raf, offset) == "moov") {
+            if (readBoxTypeAt(raf, offset + 4) == "moov") {
                 patchChunkOffsetsInContainer(raf, offset + 8, offset + size, delta)
                 return
             }
@@ -130,7 +139,9 @@ internal object QuickTimeMp4Rewriter {
             if (size < 8 || offset + size > end) {
                 break
             }
-            when (readBoxTypeAt(raf, offset)) {
+            // type 在 box 的 +4 处（+0 是 size）。传 offset 会拿 size 当类型比，
+            // 于是 moov/stco 永远匹配不上，整段偏移修正静默变成空操作。
+            when (readBoxTypeAt(raf, offset + 4)) {
                 "stco" -> patchStcoBox(raf, offset, size, delta)
                 "co64" -> patchCo64Box(raf, offset, size, delta)
                 "moov", "trak", "mdia", "minf", "stbl", "edts", "dinf", "udta", "tref" ->
@@ -157,7 +168,15 @@ internal object QuickTimeMp4Rewriter {
                 return
             }
             val value = readUnsignedIntAt(raf, entryOffset)
-            writeIntAt(raf, entryOffset, (value + delta).toInt())
+            val patched = value + delta
+            // stco 条目是 32 位无符号。下溢后直接 toInt() 写回会被读成 ~4.29e9，
+            // 导出一个永远播不动、界面上却看不出任何异常的文件——宁可报错。
+            if (patched < 0L || patched > UNSIGNED_INT_MAX) {
+                throw MotionPhotoComposeException(
+                    "The chunk offset would fall outside the 32-bit range and cannot be patched safely.",
+                )
+            }
+            writeIntAt(raf, entryOffset, patched.toInt())
             entryOffset += 4
         }
     }

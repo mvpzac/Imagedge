@@ -175,78 +175,98 @@ class GpuLutProcessor(
         private val uHasLut: Int
 
         init {
-            display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
-            check(display != EGL14.EGL_NO_DISPLAY) { "eglGetDisplay 失败" }
-            val version = IntArray(2)
-            check(EGL14.eglInitialize(display, version, 0, version, 1)) { "eglInitialize 失败" }
+            var eglDisplay = EGL14.EGL_NO_DISPLAY
+            var eglContext = EGL14.EGL_NO_CONTEXT
+            var eglSurface = EGL14.EGL_NO_SURFACE
+            try {
+                eglDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
+                check(eglDisplay != EGL14.EGL_NO_DISPLAY) { "eglGetDisplay 失败" }
+                val version = IntArray(2)
+                check(EGL14.eglInitialize(eglDisplay, version, 0, version, 1)) { "eglInitialize 失败" }
 
-            val configAttrs = intArrayOf(
-                EGL14.EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
-                EGL14.EGL_SURFACE_TYPE, EGL14.EGL_PBUFFER_BIT,
-                EGL14.EGL_RED_SIZE, 8,
-                EGL14.EGL_GREEN_SIZE, 8,
-                EGL14.EGL_BLUE_SIZE, 8,
-                EGL14.EGL_ALPHA_SIZE, 8,
-                EGL14.EGL_NONE,
-            )
-            val configs = arrayOfNulls<EGLConfig>(1)
-            val configCount = IntArray(1)
-            check(
-                EGL14.eglChooseConfig(display, configAttrs, 0, configs, 0, 1, configCount, 0) &&
-                    configCount[0] > 0 && configs[0] != null
-            ) { "找不到支持 ES 3.0 的 EGL 配置" }
-            val config = configs[0]!!
+                val configAttrs = intArrayOf(
+                    EGL14.EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+                    EGL14.EGL_SURFACE_TYPE, EGL14.EGL_PBUFFER_BIT,
+                    EGL14.EGL_RED_SIZE, 8,
+                    EGL14.EGL_GREEN_SIZE, 8,
+                    EGL14.EGL_BLUE_SIZE, 8,
+                    EGL14.EGL_ALPHA_SIZE, 8,
+                    EGL14.EGL_NONE,
+                )
+                val configs = arrayOfNulls<EGLConfig>(1)
+                val configCount = IntArray(1)
+                check(
+                    EGL14.eglChooseConfig(eglDisplay, configAttrs, 0, configs, 0, 1, configCount, 0) &&
+                        configCount[0] > 0 && configs[0] != null
+                ) { "找不到支持 ES 3.0 的 EGL 配置" }
+                val config = configs[0]!!
 
-            context = EGL14.eglCreateContext(
-                display, config, EGL14.EGL_NO_CONTEXT,
-                intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 3, EGL14.EGL_NONE), 0
-            )
-            check(context != EGL14.EGL_NO_CONTEXT) { "eglCreateContext 失败" }
+                eglContext = EGL14.eglCreateContext(
+                    eglDisplay, config, EGL14.EGL_NO_CONTEXT,
+                    intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 3, EGL14.EGL_NONE), 0
+                )
+                check(eglContext != EGL14.EGL_NO_CONTEXT) { "eglCreateContext 失败" }
 
-            // 只做离屏渲染（FBO），1×1 的 pbuffer 就够了
-            surface = EGL14.eglCreatePbufferSurface(
-                display, config,
-                intArrayOf(EGL14.EGL_WIDTH, 1, EGL14.EGL_HEIGHT, 1, EGL14.EGL_NONE), 0
-            )
-            check(surface != EGL14.EGL_NO_SURFACE) { "eglCreatePbufferSurface 失败" }
-            check(EGL14.eglMakeCurrent(display, surface, surface, context)) { "eglMakeCurrent 失败" }
+                // 只做离屏渲染（FBO），1×1 的 pbuffer 就够了
+                eglSurface = EGL14.eglCreatePbufferSurface(
+                    eglDisplay, config,
+                    intArrayOf(EGL14.EGL_WIDTH, 1, EGL14.EGL_HEIGHT, 1, EGL14.EGL_NONE), 0
+                )
+                check(eglSurface != EGL14.EGL_NO_SURFACE) { "eglCreatePbufferSurface 失败" }
+                check(EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) { "eglMakeCurrent 失败" }
 
-            val limits = IntArray(1)
-            GLES30.glGetIntegerv(GLES30.GL_MAX_TEXTURE_SIZE, limits, 0)
-            maxTextureSize = limits[0]
-            GLES30.glGetIntegerv(GLES30.GL_MAX_3D_TEXTURE_SIZE, limits, 0)
-            max3dSize = limits[0]
-            glesVersion = GLES30.glGetString(GLES30.GL_VERSION).orEmpty()
+                val limits = IntArray(1)
+                GLES30.glGetIntegerv(GLES30.GL_MAX_TEXTURE_SIZE, limits, 0)
+                maxTextureSize = limits[0]
+                GLES30.glGetIntegerv(GLES30.GL_MAX_3D_TEXTURE_SIZE, limits, 0)
+                max3dSize = limits[0]
+                glesVersion = GLES30.glGetString(GLES30.GL_VERSION).orEmpty()
 
-            program = buildProgram()
-            uSrc = glGetUniform(program, "uSrc")
-            uLut = glGetUniform(program, "uLut")
-            uGain = glGetUniform(program, "uGain")
-            uContrast = glGetUniform(program, "uContrast")
-            uSaturation = glGetUniform(program, "uSaturation")
-            uStrength = glGetUniform(program, "uStrength")
-            uLutScale = glGetUniform(program, "uLutScale")
-            uLutOffset = glGetUniform(program, "uLutOffset")
-            uHasLut = glGetUniform(program, "uHasLut")
+                program = buildProgram()
 
-            // 全屏四边形：顶点坐标 [-1,1]，纹理坐标在顶点着色器里换算
-            val quad = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
-            val buffer = ByteBuffer.allocateDirect(quad.size * 4)
-                .order(ByteOrder.nativeOrder()).asFloatBuffer().put(quad).apply { position(0) }
-            val ids = IntArray(1)
-            GLES30.glGenVertexArrays(1, ids, 0)
-            vaoId = ids[0]
-            GLES30.glBindVertexArray(vaoId)
-            GLES30.glGenBuffers(1, ids, 0)
-            vboId = ids[0]
-            GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, vboId)
-            GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, quad.size * 4, buffer, GLES30.GL_STATIC_DRAW)
-            val aPos = GLES30.glGetAttribLocation(program, "aPos")
-            check(aPos >= 0) { "顶点属性 aPos 未找到" }
-            GLES30.glEnableVertexAttribArray(aPos)
-            GLES30.glVertexAttribPointer(aPos, 2, GLES30.GL_FLOAT, false, 0, 0)
-            GLES30.glBindVertexArray(0)
-            checkGl("初始化")
+                // 下面这些**必须留在 try 里**：checkGl 与 check(aPos) 才是初始化阶段
+                // 真正会抛的地方（驱动侧的 GL 错误、着色器属性改名），
+                // 放到 catch 之后就等于又漏掉了整条 EGL 链。
+                uSrc = glGetUniform(program, "uSrc")
+                uLut = glGetUniform(program, "uLut")
+                uGain = glGetUniform(program, "uGain")
+                uContrast = glGetUniform(program, "uContrast")
+                uSaturation = glGetUniform(program, "uSaturation")
+                uStrength = glGetUniform(program, "uStrength")
+                uLutScale = glGetUniform(program, "uLutScale")
+                uLutOffset = glGetUniform(program, "uLutOffset")
+                uHasLut = glGetUniform(program, "uHasLut")
+
+                // 全屏四边形：顶点坐标 [-1,1]，纹理坐标在顶点着色器里换算
+                val quad = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
+                val buffer = ByteBuffer.allocateDirect(quad.size * 4)
+                    .order(ByteOrder.nativeOrder()).asFloatBuffer().put(quad).apply { position(0) }
+                val ids = IntArray(1)
+                GLES30.glGenVertexArrays(1, ids, 0)
+                vaoId = ids[0]
+                GLES30.glBindVertexArray(vaoId)
+                GLES30.glGenBuffers(1, ids, 0)
+                vboId = ids[0]
+                GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, vboId)
+                GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, quad.size * 4, buffer, GLES30.GL_STATIC_DRAW)
+                val aPos = GLES30.glGetAttribLocation(program, "aPos")
+                check(aPos >= 0) { "顶点属性 aPos 未找到" }
+                GLES30.glEnableVertexAttribArray(aPos)
+                GLES30.glVertexAttribPointer(aPos, 2, GLES30.GL_FLOAT, false, 0, 0)
+                GLES30.glBindVertexArray(0)
+                checkGl("初始化")
+
+                display = eglDisplay
+                context = eglContext
+                surface = eglSurface
+            } catch (t: Throwable) {
+                // 走到这里时 EGL 链可能已经建了一半。构造函数抛异常意味着这个 Engine
+                // 根本不存在，engine() 里的 disable(reason, null) 也就没有任何东西可关——
+                // 不在这里就地拆掉，**每次初始化失败都会永久泄漏一整条 EGL 链**。
+                runCatching { GLES30.glDeleteBuffers(2, intArrayOf(vboId, vaoId), 0) }
+                destroyEgl(eglDisplay, eglContext, eglSurface)
+                throw t
+            }
         }
 
         /**
@@ -428,11 +448,7 @@ class GpuLutProcessor(
             }
             if (lutTexSize == size && lutTexSource === data) return
 
-            val texelCount = size * size * size
-            val shorts = ShortArray(texelCount * 3)
-            for (i in 0 until texelCount * 3) {
-                shorts[i] = HalfFloat.fromFloat(data[i].coerceIn(0f, 1f))
-            }
+            val shorts = packLutForTexture(data, size)
             val buffer = ByteBuffer.allocateDirect(shorts.size * 2)
                 .order(ByteOrder.nativeOrder()).asShortBuffer().put(shorts).apply { position(0) }
 
@@ -521,6 +537,30 @@ class GpuLutProcessor(
         companion object {
             /** EGL_OPENGL_ES3_BIT_KHR（EGL14 里没有为 ES3 提供常量） */
             private const val EGL_OPENGL_ES3_BIT = 0x40
+
+            /**
+             * 拆掉一条可能只建了一半的 EGL 链。给 [init] 的失败路径用——
+             * 那时 [close] 还不存在（对象根本没构造完）。
+             */
+            private fun destroyEgl(
+                eglDisplay: EGLDisplay,
+                eglContext: EGLContext,
+                eglSurface: EGLSurface
+            ) {
+                if (eglDisplay == EGL14.EGL_NO_DISPLAY) return
+                runCatching {
+                    EGL14.eglMakeCurrent(
+                        eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT
+                    )
+                }
+                if (eglSurface != EGL14.EGL_NO_SURFACE) {
+                    runCatching { EGL14.eglDestroySurface(eglDisplay, eglSurface) }
+                }
+                if (eglContext != EGL14.EGL_NO_CONTEXT) {
+                    runCatching { EGL14.eglDestroyContext(eglDisplay, eglContext) }
+                }
+                runCatching { EGL14.eglTerminate(eglDisplay) }
+            }
 
             private const val VERTEX_SHADER = """
                 #version 300 es
