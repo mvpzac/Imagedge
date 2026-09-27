@@ -21,6 +21,7 @@ import com.imagedge.camera.data.remote.CameraRepository
 import com.imagedge.camera.data.remote.CameraSnapshot
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -196,7 +197,16 @@ class CameraProfileViewModel @Inject constructor(
             val plan = PresetPlanner.plan(preset, probe.capabilities)
             val writes = plan.filterIsInstance<PresetPlanItem.Write>()
             val results = writes.associate { item ->
-                item.capability to runCatching { send(item.capability, item.raw) }.getOrDefault(false)
+                // 同 CameraControlViewModel：取消不是「这一项没写成功」，
+                // 把它算成 false 会让预设回读误判成部分失败
+                item.capability to try {
+                    send(item.capability, item.raw)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    AppLog.w("profile", "预设写入 ${item.capability} 失败：${e.message}")
+                    false
+                }
             }
             // 只在下发过命令后才重读；全被跳过时上一次读的结果就是最新事实，不必空跑一趟
             val readBack = if (writes.isEmpty()) probe.settings

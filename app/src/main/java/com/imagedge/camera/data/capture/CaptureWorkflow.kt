@@ -109,6 +109,23 @@ data class CaptureStep(
 )
 
 /**
+ * 倒计时循环的下一步。
+ *
+ * 单独成为一个类型，是因为「不再是倒计时」有两种截然相反的含义：
+ * **到点了该拍**，和**被取消了别拍**。调用方若自己拿阶段去推断，第二种会被读成第一种。
+ */
+enum class CountdownTick {
+    /** 继续等 */
+    WAIT,
+
+    /** 到点，向相机发命令 */
+    SHOOT,
+
+    /** 任务已终止（取消/断线/失败），一条命令都不该发 */
+    ABORTED
+}
+
+/**
  * 状态机。每个函数都是纯的，返回 [CaptureStep] 而不是自己发命令——
  * 这样「取消/断线/离页必须释放按键」是一条**可测试**的契约，而不是散落在协程里的约定。
  */
@@ -163,6 +180,16 @@ object CaptureMachine {
         } else {
             job
         }
+    }
+
+    /**
+     * 倒计时循环该做什么。终态优先于时间判断：取消之后哪怕时钟已经走到截止点，也是一条命令都不发。
+     */
+    fun tickCountdown(job: CaptureJob, now: Long): CountdownTick = when {
+        job.phase.isTerminal -> CountdownTick.ABORTED
+        job.phase != CapturePhase.COUNTING_DOWN -> CountdownTick.SHOOT
+        now >= job.countdownEndsAt -> CountdownTick.SHOOT
+        else -> CountdownTick.WAIT
     }
 
     /** 半按对焦命令已发出（不代表相机已开始对焦） */

@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import androidx.lifecycle.ViewModel
 import com.imagedge.camera.core.common.AppLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -20,8 +21,8 @@ import com.imagedge.camera.image.ExposureStats
 import com.imagedge.camera.image.FrameGate
 import com.imagedge.camera.data.capture.CaptureJob
 import com.imagedge.camera.data.capture.CaptureMachine
-import com.imagedge.camera.data.capture.CapturePhase
 import com.imagedge.camera.data.capture.CaptureRoute
+import com.imagedge.camera.data.capture.CountdownTick
 import com.imagedge.camera.data.capture.HeldKey
 import com.imagedge.camera.data.capture.IntervalScheduler
 import com.imagedge.camera.data.guidance.GuidanceStore
@@ -385,22 +386,33 @@ class CameraControlViewModel @Inject constructor(
      * 这是「倒计时取消不拍照」唯一需要保证的地方：这段时间里函数不会碰任何通道。
      */
     private suspend fun awaitCountdown(countdownMs: Long): Boolean {
-        val endsAt = System.currentTimeMillis() + countdownMs
-        job = CaptureJob(
+        val now = System.currentTimeMillis()
+        // 走 beginWithCountdown 而不是手搓 CaptureJob：负数倒计时必须在这里被拒收，
+        // 钳成 0 等于把用户设的倒计时悄悄变成「立刻拍」
+        job = CaptureMachine.beginWithCountdown(
             id = nextJobId(),
             route = if (bleShutter.state.value is BleShutterState.Connected) CaptureRoute.BLE else CaptureRoute.PTP,
-            phase = CapturePhase.COUNTING_DOWN,
-            startedAt = System.currentTimeMillis(),
-            countdownEndsAt = endsAt
-        )
+            now = now,
+            countdownMs = countdownMs
+        ) ?: return false
         publishCapture()
         while (true) {
             delay(COUNTDOWN_TICK_MS)
             val current = job ?: return false
-            val ticked = CaptureMachine.tick(current, System.currentTimeMillis())
-            job = ticked
-            publishCapture()
-            if (ticked.phase != CapturePhase.COUNTING_DOWN) return true
+            // 决策与推进用**同一个** now：墙上时钟在两次调用之间回拨的话，
+            // tick 会把任务按回 COUNTING_DOWN，而这里却已经认定「该拍了」
+            val now = System.currentTimeMillis()
+            // 决策交给状态机：终态（取消/断线）必须得出 ABORTED，
+            // 由这里自己拿「阶段不再是 COUNTING_DOWN」去推断会把「该拍了」和「别拍了」读成同一件事
+            when (CaptureMachine.tickCountdown(current, now)) {
+                CountdownTick.WAIT -> publishCapture()
+                CountdownTick.SHOOT -> {
+                    job = CaptureMachine.tick(current, now)
+                    publishCapture()
+                    return true
+                }
+                CountdownTick.ABORTED -> return false
+            }
         }
     }
 
@@ -967,7 +979,16 @@ class CameraControlViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
-            val ok = runCatching { send(raw) }.getOrDefault(false)
+            // 取消必须透传：离页导致的取消被写成「设置失败」是句假话，
+            // 而下方的 refreshCameraState() 本来也会在同一个挂起点抛出去
+            val ok = try {
+                send(raw)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                AppLog.w("control", "设置 $label 失败：${e.message}")
+                false
+            }
             _state.update {
                 it.copy(
                     message = if (ok) "$label 已设为 ${CameraCapabilities.labelOf(capability, raw)}"

@@ -22,8 +22,10 @@ import com.imagedge.camera.data.remote.wifi.CameraWifiManager
 import com.imagedge.camera.ptp.DeviceProperty
 import com.imagedge.camera.ptp.SonyDevicePropCode
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -179,12 +181,23 @@ class CameraRepository @Inject constructor(
         try {
             ptpChannel.connect(targetHost)
             return@withContext adoptChannel(ptpChannel)
+        } catch (cancelled: CancellationException) {
+            // 用户走开 ≠ 相机连不上。但解绑进程网络照样要做（P1-13 的理由在这里同样成立）：
+            // 没人再管这次连接，进程就永远绑在一台用户已经离开的相机上。
+            // 顺带把 PTP 通道拆掉——connectInternal 全程无挂起点，取消只在 withContext
+            // 出口才被观察到，那时 client/keepAlive/事件轮询都已经起来了，
+            // 而 activeChannel 还没被赋值，没有任何东西能再调用它的 disconnect()。
+            abandonConnectionAttempt()
+            throw cancelled
         } catch (ptpError: Exception) {
             AppLog.w(TAG, "PTP/IP 连接失败（${ptpError.message}），尝试降级 UPnP")
             // 降级通道：UPnP
             try {
                 upnpChannel.connect(targetHost)
                 return@withContext adoptChannel(upnpChannel)
+            } catch (upnpCancelled: CancellationException) {
+                abandonConnectionAttempt()
+                throw upnpCancelled
             } catch (upnpError: Exception) {
                 activeChannel = null
                 _connectionState.value = ChannelConnectionState.DISCONNECTED
@@ -200,6 +213,20 @@ class CameraRepository @Inject constructor(
                     "无法连接相机（PTP: ${ptpError.message}；UPnP: ${upnpError.message}）。$hint"
                 )
             }
+        }
+    }
+
+    /**
+     * 放弃一次被取消的连接尝试：拆通道 + 解绑进程网络。
+     *
+     * 必须在 `NonCancellable` 里做——此刻外层协程已经取消，任何挂起调用都会立刻抛。
+     */
+    private suspend fun abandonConnectionAttempt() {
+        activeChannel = null
+        withContext(NonCancellable) {
+            runCatching { ptpChannel.disconnect() }
+            runCatching { upnpChannel.disconnect() }
+            runCatching { wifiManager.unbindProcessNetwork() }
         }
     }
 

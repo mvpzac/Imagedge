@@ -76,6 +76,101 @@ class CaptureWorkflowTest {
         assertEquals(500L, started.countdownEndsAt)
     }
 
+    // ── 倒计时循环的下一步 ────────────────────────────────────────────
+
+    @Test
+    fun `a cancelled countdown aborts instead of firing the shutter`() {
+        // 回归：取消后 job 落到 CANCELLED，而调用方用「阶段不再是 COUNTING_DOWN」当作「继续拍」。
+        // 这两件事在取消的那一刻恰好同时成立，于是倒计时循环返回「继续」并真的按下了快门——
+        // 界面还在说「已取消，未拍摄」。
+        val started = requireNotNull(
+            CaptureMachine.beginWithCountdown(1, CaptureRoute.BLE, now = 0L, countdownMs = 3000L)
+        )
+        val cancelled = CaptureMachine.cancel(started).job
+
+        assertEquals(
+            "倒计时被取消后下一步必须是终止",
+            CountdownTick.ABORTED,
+            CaptureMachine.tickCountdown(cancelled, now = 1000L)
+        )
+    }
+
+    @Test
+    fun `a cancelled countdown aborts even after the deadline has passed`() {
+        // 真实时序：用户在第 1 秒取消，循环的下一次 tick 落在 3 秒之后。
+        // 这时候时间已经到点，光看 now >= endsAt 会得出「该拍了」。
+        val started = requireNotNull(
+            CaptureMachine.beginWithCountdown(1, CaptureRoute.BLE, now = 0L, countdownMs = 3000L)
+        )
+        val cancelled = CaptureMachine.cancel(started).job
+
+        assertTrue(cancelled.countdownEndsAt < 5000L)
+        assertEquals(CountdownTick.ABORTED, CaptureMachine.tickCountdown(cancelled, now = 5000L))
+    }
+
+    @Test
+    fun `the countdown keeps waiting until the deadline and then asks for a shot`() {
+        val started = requireNotNull(
+            CaptureMachine.beginWithCountdown(1, CaptureRoute.BLE, now = 0L, countdownMs = 3000L)
+        )
+
+        assertEquals(CountdownTick.WAIT, CaptureMachine.tickCountdown(started, now = 2999L))
+        assertEquals(CountdownTick.SHOOT, CaptureMachine.tickCountdown(started, now = 3000L))
+    }
+
+    @Test
+    fun `ticking a countdown the user cancels never reaches the shutter`() {
+        // 把整段循环跑一遍，而不是只断言单步决策：
+        // 缺陷藏在「循环怎么解释返回值」里，逐点断言有可能正好绕开它。
+        val started = requireNotNull(
+            CaptureMachine.beginWithCountdown(1, CaptureRoute.BLE, now = 0L, countdownMs = 3000L)
+        )
+        var current = started
+        var now = 0L
+        var shots = 0
+
+        while (true) {
+            now += 500L
+            when (CaptureMachine.tickCountdown(current, now)) {
+                CountdownTick.WAIT -> Unit
+                CountdownTick.SHOOT -> {
+                    shots++
+                    break
+                }
+                CountdownTick.ABORTED -> break
+            }
+            // 用户在第 1 秒按了取消
+            if (now == 1000L) current = CaptureMachine.cancel(current).job
+        }
+
+        assertEquals("倒计时被取消时不能走到开拍这一步", 0, shots)
+    }
+
+    @Test
+    fun `ticking an uncancelled countdown ends in exactly one shot`() {
+        // 反证：上面的取消用例不能靠「循环根本不会开拍」蒙混过关——不取消时它必须照常拍一张
+        val started = requireNotNull(
+            CaptureMachine.beginWithCountdown(1, CaptureRoute.BLE, now = 0L, countdownMs = 3000L)
+        )
+        var current = started
+        var now = 0L
+        var shots = 0
+
+        while (true) {
+            now += 500L
+            when (CaptureMachine.tickCountdown(current, now)) {
+                CountdownTick.WAIT -> Unit
+                CountdownTick.SHOOT -> {
+                    shots++
+                    break
+                }
+                CountdownTick.ABORTED -> break
+            }
+        }
+
+        assertEquals(1, shots)
+    }
+
     // ── 按键释放 ─────────────────────────────────────────────────────
 
     @Test

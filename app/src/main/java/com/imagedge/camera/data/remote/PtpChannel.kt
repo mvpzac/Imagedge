@@ -6,6 +6,7 @@ import com.imagedge.camera.data.model.MediaItem
 import com.imagedge.camera.ptp.PhotoType
 import com.imagedge.camera.ptp.PtpIpClient
 import com.imagedge.camera.ptp.PtpResponseException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -581,9 +582,8 @@ class PtpChannel @Inject constructor() : CameraChannel {
 
     override suspend fun getThumbnail(item: MediaItem): ByteArray? = withContext(Dispatchers.IO) {
         val c = client ?: return@withContext null
-        runCatching { ptpCall { c.getThumbnail(item.handle) } }.getOrElse { e ->
-            AppLog.w(TAG, "缩略图获取失败 handle=${item.handle}：${e.message}")
-            null
+        orDefault(null, onError = { AppLog.w(TAG, "缩略图获取失败 handle=${item.handle}：${it.message}") }) {
+            ptpCall { c.getThumbnail(item.handle) }
         }
     }
 
@@ -625,11 +625,9 @@ class PtpChannel @Inject constructor() : CameraChannel {
     suspend fun setDeviceProperty(propCode: Int, value: Long, valueSize: Int): Boolean =
         withContext(Dispatchers.IO) {
             val c = client ?: return@withContext false
-            runCatching { ptpCall { c.setDeviceProperty(propCode, value, valueSize) } }
-                .getOrElse { e ->
-                    AppLog.w(TAG, "设置设备属性 0x${propCode.toString(16)} 异常：${e.message}")
-                    false
-                }
+            orDefault(false, onError = { AppLog.w(TAG, "设置设备属性 0x${propCode.toString(16)} 异常：${it.message}") }) {
+                ptpCall { c.setDeviceProperty(propCode, value, valueSize) }
+            }
         }
 
     /**
@@ -638,8 +636,28 @@ class PtpChannel @Inject constructor() : CameraChannel {
      */
     suspend fun getAllDeviceProperties(): ByteArray? = withContext(Dispatchers.IO) {
         val c = client ?: return@withContext null
-        runCatching { ptpCall { c.getAllDeviceProperties() } }
-            .onFailure { AppLog.w(TAG, "读取 0x9209 设备属性失败：${it.message}") }
-            .getOrNull()
+        orDefault(null, onError = { AppLog.w(TAG, "读取 0x9209 设备属性失败：${it.message}") }) {
+            ptpCall { c.getAllDeviceProperties() }
+        }
+    }
+
+    /**
+     * 相机侧失败时回退到 [fallback]，但**取消必须继续往上抛**。
+     *
+     * `runCatching` 捕的是 `Throwable`，协程被取消时也会走进 `getOrElse`，
+     * 于是「离页导致的任务取消」会被读成「相机没有这个属性」——
+     * 上层拿到 null 就把能力判成 UNKNOWN，参数面板随之整片变灰。
+     */
+    private inline fun <T> orDefault(
+        fallback: T,
+        onError: (Throwable) -> Unit,
+        block: () -> T
+    ): T = try {
+        block()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (e: Exception) {
+        onError(e)
+        fallback
     }
 }

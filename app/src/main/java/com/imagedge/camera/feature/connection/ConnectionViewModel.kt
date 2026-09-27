@@ -12,6 +12,7 @@ import com.imagedge.camera.data.remote.wifi.CameraWifiManager
 import com.imagedge.camera.data.transfer.DownloadManager
 import com.imagedge.camera.ui.feedback.Haptics
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -172,6 +173,11 @@ class ConnectionViewModel @Inject constructor(
                     )
                 }
                 haptics.thud()
+            } catch (cancelled: CancellationException) {
+                // 用户走开不是「连接失败」：stateHolder 是 @Singleton，
+                // 写进去的假 ERROR 会活过 ViewModel 的销毁，下一次进来还显示报错
+                stateHolder.update { ConnectionState(ConnectionPhase.DISCONNECTED) }
+                throw cancelled
             } catch (e: Exception) {
                 stateHolder.update { ConnectionState(ConnectionPhase.ERROR, errorMessage = e.message ?: "连接失败") }
                 haptics.double()
