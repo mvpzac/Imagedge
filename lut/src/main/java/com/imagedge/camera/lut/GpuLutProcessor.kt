@@ -170,6 +170,8 @@ class GpuLutProcessor(
         private val uContrast: Int
         private val uSaturation: Int
         private val uPivot: Int
+        private val uShadows: Int
+        private val uHighlights: Int
         private val uStrength: Int
         private val uLutScale: Int
         private val uLutOffset: Int
@@ -234,6 +236,8 @@ class GpuLutProcessor(
                 uContrast = glGetUniform(program, "uContrast")
                 uSaturation = glGetUniform(program, "uSaturation")
                 uPivot = glGetUniform(program, "uPivot")
+                uShadows = glGetUniform(program, "uShadows")
+                uHighlights = glGetUniform(program, "uHighlights")
                 uStrength = glGetUniform(program, "uStrength")
                 uLutScale = glGetUniform(program, "uLutScale")
                 uLutOffset = glGetUniform(program, "uLutOffset")
@@ -362,6 +366,8 @@ class GpuLutProcessor(
             uniform1f(uContrast, u.contrast)
             uniform1f(uSaturation, u.saturation)
             uniform1f(uPivot, SrgbTransfer.CONTRAST_PIVOT)
+            uniform1f(uShadows, u.shadows)
+            uniform1f(uHighlights, u.highlights)
             uniform1f(uStrength, strength)
             uniform1f(uHasLut, if (lutSize >= 2) 1f else 0f)
             if (lutSize >= 2) {
@@ -583,7 +589,7 @@ class GpuLutProcessor(
              * 传输函数与常量必须与 [SrgbTransfer] 逐字一致，否则用户从 GPU 回退到 CPU
              * 时会看到画面突变。
              */
-            private const val FRAGMENT_SHADER = """
+            private val FRAGMENT_SHADER = """
                 #version 300 es
                 precision highp float;
                 precision highp sampler2D;
@@ -596,6 +602,9 @@ class GpuLutProcessor(
                 uniform float uContrast;
                 uniform float uSaturation;
                 uniform float uPivot;
+                // 增益常量由 Kotlin 注入，保证与 SrgbTransfer.recoverTone 同一个数字
+                uniform float uShadows;
+                uniform float uHighlights;
                 uniform float uStrength;
                 uniform float uLutScale;
                 uniform float uLutOffset;
@@ -621,6 +630,10 @@ class GpuLutProcessor(
                 void main() {
                     vec4 src = texture(uSrc, vUv);
                     vec3 lin = srgbToLinear(src.rgb) * uGain;
+                    vec3 below = max(1.0 - lin, vec3(0.0));
+                    vec3 above = max(lin, vec3(0.0));
+                    lin = lin * (1.0 + uShadows * ${SrgbTransfer.SHADOW_GAIN} * below * below * below * below)
+                              * (1.0 + uHighlights * ${SrgbTransfer.HIGHLIGHT_GAIN} * above * above * above * above);
                     lin = max((lin - uPivot) * uContrast + uPivot, vec3(0.0));
                     float luma = dot(lin, vec3(0.2126, 0.7152, 0.0722));
                     lin = max(mix(vec3(luma), lin, uSaturation), vec3(0.0));

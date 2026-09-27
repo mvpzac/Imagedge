@@ -77,6 +77,29 @@ class ColorScienceTest {
     }
 
     @Test
+    fun `desaturation clips shadows before the luma, exactly like the shader`() {
+        // 对比度拉满会把暗道算成**负光量**。两条路径都只能在落进 8 位之前把它钳成黑，
+        // 真正的分歧是钳在算亮度之前还是之后：着色器先 max(...,0) 再取亮度，
+        // CPU 若留到编码之前才钳，参与亮度的就还是那个负的暗道——
+        // 同一张照片在有没有 GPU 的机器上会掉进两个不同的灰。
+        // 期望值按着色器的写法独立算一遍（钳位 → 亮度 → 直接作为灰）。
+        val r = 20   // 对比度 100 下线性值约 -0.105，正是会被负值污染的那一格
+        val g = 150
+        val b = 150
+        val px = byteArrayOf(r.toByte(), g.toByte(), b.toByte(), 255.toByte())
+        val out = runBlocking {
+            processor.apply(px, 1, 1, LutProcessor.EMPTY_LUT, 0, 100, ColorAdjust(contrast = 100, saturation = -100))
+        }
+
+        fun clipped(v: Int): Float =
+            ((srgbDecode(v) - 0.18f) * 1.65f + 0.18f).coerceAtLeast(0f)
+        val luma = 0.2126f * clipped(r) + 0.7152f * clipped(g) + 0.0722f * clipped(b)
+        val expected = (srgbEncode(luma) * 255f).toInt().coerceIn(0, 255)
+
+        assertNear(expected, out.channel(0), 2, "按已钳位的通道算出的灰")
+    }
+
+    @Test
     fun `identity adjustment round trips an 8 bit value exactly`() {
         // 反证：上面的修正不能靠「整体偏一点」蒙混过关——不改任何东西就该逐位还原
         for (v in 0..255) {

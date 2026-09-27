@@ -51,4 +51,30 @@ internal object SrgbTransfer {
 
     /** 对比度支点：18% 灰（线性）。编码空间里它约等于 118，不是 128。 */
     const val CONTRAST_PIVOT = 0.18f
+
+    /** 阴影提升幅度：+100 大约把深暗部抬到 2 倍以上亮度 */
+    const val SHADOW_GAIN = 1.2f
+
+    /** 高光恢复幅度：-100 大约把亮部压掉两成 */
+    const val HIGHLIGHT_GAIN = 0.8f
+
+    /**
+     * 分区影调恢复，**在线性光下**作用于单个通道的线性值。
+     *
+     * 权重取 (1-v)⁴ 与 v⁴：四次方而不是平方，是为了让两端几乎不互相污染——
+     * 平方权重下「抬阴影」仍会把高光推近 9 个级，那样阴影与曝光就分不开了。
+     * 四次方下高光只动约 1 级，滑杆才各自有意义。
+     *
+     * 必须是线性值：编码空间里的 (1-v) 不是「离纯白还有多少光」，暗部会被系统性高估。
+     */
+    fun recoverTone(linear: Float, shadows: Float, highlights: Float): Float {
+        if (shadows == 0f && highlights == 0f) return linear
+        val clamped = linear.coerceAtLeast(0f)
+        val below = (1f - clamped).coerceAtLeast(0f)
+        val sw = below * below
+        val hw = clamped * clamped
+        return clamped *
+            (1f + shadows * SHADOW_GAIN * sw * sw) *
+            (1f + highlights * HIGHLIGHT_GAIN * hw * hw)
+    }
 }

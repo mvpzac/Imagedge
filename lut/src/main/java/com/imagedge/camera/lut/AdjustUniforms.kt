@@ -8,10 +8,11 @@ package com.imagedge.camera.lut
  * 这里只做纯数学，两个实现都从这里取值，杜绝了两边公式漂移。
  *
  * 处理顺序（与 [LutProcessor.apply] 的约定一致）：
- * 逐通道增益（曝光 × 色温）→ 对比度（绕 0.5 中灰）→ 饱和度 → LUT → 强度混合。
+ * 逐通道增益（曝光 × 色温）→ 分区影调恢复 → 对比度（绕 [SrgbTransfer.CONTRAST_PIVOT]，
+ * 即线性 18% 灰）→ 饱和度 → LUT → 强度混合。
  */
 data class AdjustUniforms(
-    /** 逐通道增益（曝光 × 色温） */
+    /** 逐通道增益（曝光 × 色温 R/B × 色调 G） */
     val gainR: Float,
     val gainG: Float,
     val gainB: Float,
@@ -19,6 +20,10 @@ data class AdjustUniforms(
     val contrast: Float,
     /** 饱和度系数：1 = 不变，0 = 全灰（去色），>1 更艳 */
     val saturation: Float,
+    /** 阴影恢复量 -1..1，作用见 [SrgbTransfer.recoverTone] */
+    val shadows: Float,
+    /** 高光恢复量 -1..1 */
+    val highlights: Float,
 ) {
     companion object {
         /** 曝光 ±100 ≈ ±1.6 档 */
@@ -27,25 +32,33 @@ data class AdjustUniforms(
         /** 色温对红/蓝通道的增益幅度 */
         private const val TEMPERATURE_AMOUNT = 0.12f
 
+        /** 色调对绿通道的增益幅度（与色温同量级，两轴才对称） */
+        private const val TINT_AMOUNT = 0.12f
+
         /** 对比度 ±100 ≈ ±65% */
         private const val CONTRAST_AMOUNT = 0.65f
 
         /** 正向饱和度上限约 2.2 倍（浓艳但不溢出） */
         private const val SATURATION_BOOST = 1.2f
 
-        val IDENTITY = AdjustUniforms(1f, 1f, 1f, 1f, 1f)
+        val IDENTITY = AdjustUniforms(1f, 1f, 1f, 1f, 1f, 0f, 0f)
 
         fun of(adjust: ColorAdjust): AdjustUniforms {
             val exposureGain = Math.pow(2.0, (ColorAdjust.norm(adjust.exposure) * EXPOSURE_STOPS).toDouble()).toFloat()
             val tempF = ColorAdjust.norm(adjust.temperature)
+            val tintF = ColorAdjust.norm(adjust.tint)
             val s = ColorAdjust.norm(adjust.saturation)
             return AdjustUniforms(
+                // 色温只动 R/B、色调只动 G：两轴必须正交，否则一个绿偏要靠红蓝凑，
+                // 凑出来的同时把白平衡的暖调也改掉
                 gainR = exposureGain * (1f + tempF * TEMPERATURE_AMOUNT),
-                gainG = exposureGain,
+                gainG = exposureGain * (1f + tintF * TINT_AMOUNT),
                 gainB = exposureGain * (1f - tempF * TEMPERATURE_AMOUNT),
                 contrast = 1f + ColorAdjust.norm(adjust.contrast) * CONTRAST_AMOUNT,
                 // -100 必须真的等于全灰（系数 0），正向最高约 2.2 倍
                 saturation = if (s >= 0f) 1f + s * SATURATION_BOOST else 1f + s,
+                shadows = ColorAdjust.norm(adjust.shadows),
+                highlights = ColorAdjust.norm(adjust.highlights),
             )
         }
     }

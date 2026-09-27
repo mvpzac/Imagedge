@@ -189,8 +189,12 @@ class CpuLutProcessor : LutProcessor {
             }
             val base = channel * 256
             for (v in 0..255) {
-                val linear = SrgbTransfer.decode(v) * gain
-                table[base + v] = (linear - pivot) * contrastF + pivot
+                val gained = SrgbTransfer.decode(v) * gain
+                val recovered = SrgbTransfer.recoverTone(gained, u.shadows, u.highlights)
+                // 下限钳到 0，与着色器的 max(..., vec3(0.0)) 同一位置：加对比度后深暗部会算出
+                // 负光量，两边都只能在输出前钳，区别在**钳之前还是之后**算亮度。留到后面算，
+                // 同一张图在有没有 GPU 的机器上会掉进不同的灰——阴影最多差到 4 个级。
+                table[base + v] = ((recovered - pivot) * contrastF + pivot).coerceAtLeast(0f)
             }
         }
         return table
