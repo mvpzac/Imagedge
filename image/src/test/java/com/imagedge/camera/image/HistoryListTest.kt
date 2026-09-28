@@ -3,6 +3,7 @@ package com.imagedge.camera.image
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -10,7 +11,8 @@ import org.junit.Test
  * 撤销 = 不可变快照列表上移动一个游标，不是命令模式。
  * （形状取自 Gallery2 的 HistoryManager + androidx 的 UndoManager。）
  *
- * 这里钉得住的是游标两端的界限、截断重做尾、上限淘汰不动当前项、同值不重复入档。
+ * 这里钉得住的是游标两端的界限、截断重做尾、上限淘汰不动当前项、同值不重复入档、
+ * 同值与截断的先后（同值提交连尾巴都不动）、可空条目类型的第一条、构造即校验的游标范围与正上限。
  * 参考实现那两处坑——共享可变快照、无上限的位图缓存——类型拦不住（条目类型 `T` 由调用方给，
  * 本类只存引用），所以它们不是下面的用例，而是给下一个使用者的约束：放进历史的必须是纯值。
  */
@@ -71,6 +73,65 @@ class HistoryListTest {
 
         assertEquals("同值重复不入历史", 1, history.size)
         assertFalse(history.canUndo)
+    }
+
+    @Test
+    fun `recording the current value keeps the redo tail alive`() {
+        // 去重判在截断之前：与当前同值的提交算「这一步没发生」，不是「改过历史」，
+        // 所以尾巴上被撤销掉的 c 不该跟着一起丢。
+        val history = HistoryList<String>().record("a").record("b").record("c")
+            .undo()          // 停在 b，尾巴上还有 c
+            .record("b")
+
+        assertEquals("同值提交不得截断重做尾", 3, history.size)
+        assertTrue("尾巴上的 c 必须还点得动", history.canRedo)
+        assertEquals("c", history.redo().current)
+    }
+
+    @Test
+    fun `the first null entry of a nullable history is recorded, not deduped away`() {
+        // 空历史的 current 与「当前项恰好是 null」在 current 上读起来一模一样，
+        // 去重只看 current 的话，可空条目类型的第一条永远记不进去且一声不响。
+        val history = HistoryList<String?>().record(null)
+
+        assertEquals("第一条 null 必须真的入档", 1, history.size)
+        assertNull(history.current)   // 这一句两种情况下都是 null，分辨得了的是下面两条
+        // 入档之后同值才该被去重；换个值就接着记——这两条一起证明游标确实落在第 0 项
+        assertEquals(1, history.record(null).size)
+        assertEquals(2, history.record("x").size)
+    }
+
+    @Test
+    fun `constructor refuses a cursor past the end of the entries`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            HistoryList<String>(capacity = 8, entries = listOf("a"), cursor = 5)
+        }
+    }
+
+    @Test
+    fun `constructor refuses a cursor before the empty slot`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            HistoryList<String>(capacity = 8, entries = listOf("a"), cursor = -2)
+        }
+    }
+
+    @Test
+    fun `constructor refuses a cursor into an empty entry list`() {
+        // 空列表的合法游标只有 -1，这是「空历史就是 cursor = -1」那条不变量的另一面：
+        // 方法们全按游标在列表内来写，越界形状不该靠注释提醒调用方别去构造。
+        assertThrows(IllegalArgumentException::class.java) {
+            HistoryList<String>(capacity = 8, entries = emptyList(), cursor = 0)
+        }
+    }
+
+    @Test
+    fun `constructor refuses a capacity that cannot hold one entry`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            HistoryList<String>(capacity = 0)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            HistoryList<String>(capacity = -1)
+        }
     }
 
     @Test

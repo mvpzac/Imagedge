@@ -17,13 +17,29 @@ package com.imagedge.camera.image
  *
  * 除无操作外一律返回新实例：`record` 碰到同值、`undo`/`redo` 走到头时原样返回 `this`。
  * 上限淘汰最旧一条，永不淘汰游标所在项。
+ *
+ * **构造即校验**：`capacity` 必须为正，`cursor` 必须落在 `-1..entries.lastIndex`
+ * （空历史因此只认 -1）。下面几个方法全按「游标在列表内」来写，而主构造器带着 private 属性
+ * 仍是公开的命名参数，挡得住的地方只有 init——这与 [EditRecipe] 同一决定。
  */
 data class HistoryList<T>(
     val capacity: Int = DEFAULT_CAPACITY,
     private val entries: List<T> = emptyList(),
     private val cursor: Int = -1,
 ) {
-    /** 游标指向的条目；空历史为 null */
+    init {
+        require(capacity > 0) {
+            "上限至少得装下一条记录，capacity=$capacity 会把每一条都裁空，历史静默什么都不记"
+        }
+        require(cursor in -1..entries.lastIndex) {
+            "游标必须指在列表内，空历史只能是 -1；实际 cursor=$cursor, size=${entries.size}"
+        }
+    }
+
+    /**
+     * 游标指向的条目；空历史为 null。
+     * 条目类型本身可空时这两者读起来一样（null 条目也是 null），所以判「有没有当前项」要看游标。
+     */
     val current: T? get() = entries.getOrNull(cursor)
 
     // 能不能退只看游标自己的位置，不拿「列表长度减去游标」：上限淘汰会把条目整体前移，
@@ -31,11 +47,20 @@ data class HistoryList<T>(
     // 于是游标永远指在列表内；越过最旧一条退不出去，被淘汰掉的更是回不去——那就是「上限」的含义。
     val canUndo: Boolean get() = entries.isNotEmpty() && cursor > 0
     val canRedo: Boolean get() = cursor >= 0 && cursor < entries.lastIndex
+
+    /** 保留的条目数，不是「一共提交过几步」：被上限淘汰掉的最旧条目不再计数 */
     val size: Int get() = entries.size
 
-    /** 记录一条新状态：截断游标之后的重做尾，同值不记录 */
+    /**
+     * 记录一条新状态：同值不记录，否则截断游标之后的重做尾，超上限淘汰最旧一条。
+     *
+     * 去重判在截断**之前**，所以「与当前同值的提交」连重做尾都不动：没记录就是什么都没改，
+     * 不等于「编辑过一次」，尾巴上那些状态留着比被这次空提交悄悄吃掉更合调用方的预期。
+     */
     fun record(item: T): HistoryList<T> {
-        if (current == item) return this
+        // 必须带上 cursor >= 0：空历史的 current 也是 null，只比 current 的话
+        // 可空条目类型的 `record(null)` 会被「null == null」当成重复，第一条永远进不来。
+        if (cursor >= 0 && current == item) return this
         val kept = entries.take(cursor + 1) + item
         val trimmed = if (kept.size > capacity) kept.drop(kept.size - capacity) else kept
         return copy(entries = trimmed, cursor = trimmed.lastIndex)
