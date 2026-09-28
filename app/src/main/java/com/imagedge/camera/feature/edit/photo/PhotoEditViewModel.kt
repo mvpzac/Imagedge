@@ -378,6 +378,23 @@ internal fun presetAppliedTo(current: EditRecipe, preset: EditRecipe): EditRecip
         .fold(EditRecipe(current.steps.filter { it.rank == 0 })) { acc, step -> acc.with(step) }
 
 /**
+ * 这份预设要的滤镜，在 [knownKeys] 里找不到吗？
+ *
+ * 抽成纯函数是因为这条规则本身终于能被测到：留在 ViewModel 里时它跟 JVM 起不来的构造绑在一起。
+ * 说清楚买到的是什么——**测到的是规则，不是接线**：`applyPreset` 里那一句调用仍然没有测试能守
+ * （ViewModel 在 JVM 里实例化不了，本文件头部记着这条已知边界，与滑条松手提交同一类）。
+ *
+ * 为什么要有这条规则：`applyCurrentFilter` 解析 key 用的域正是滤镜表的 key 集合，找不到就
+ * `?: return` 静默什么都不做——所以「这里判过、那里还能落空」不该存在。
+ *
+ * 没有滤镜步骤（或 key 是「原图」占位）返回 false：那种预设本来就不需要任何资产。
+ */
+internal fun presetLookMissing(preset: EditRecipe, knownKeys: Set<String>): Boolean {
+    val key = preset.lut?.key ?: return false
+    return key !in knownKeys
+}
+
+/**
  * 翻转开关的写入侧：当前开着就删掉**那一个方向**，关着就占住那一份槽位。
  *
  * 关掉时用的是 `EditRecipe.without(step)`（按身份删），不能用 reified 的
@@ -835,6 +852,16 @@ class PhotoEditViewModel @Inject constructor(
      * 而 message 渲染在预览上方——用户在按「存为预设」的时候根本看不到那一屏，
      * 一个被拒的名字就表现为按钮没反应。
      */
+    /**
+     * 这个名字是否已被占用——**问磁盘，不比界面上的列表**。
+     *
+     * 界面那份 `presets` 既晚一步（异步列目录，进页面才填、每次存完再刷），又是**归一化之后**
+     * 的名字；用户在输入框里打的是归一化之前的原文。拿原文去比列表，「我的.v2」与已经存在的
+     * 「我的v2」就不相等 → 走「不撞名」分支直接覆盖，正是覆盖确认要防的那件事。
+     * 存储层按落盘身份判等，一次 `isFile` 换回正确的撞名判断。
+     */
+    fun presetNameTaken(name: String): Boolean = presetStore.exists(name)
+
     fun savePreset(name: String) {
         val colourOnly = EditRecipe(_state.value.recipe.steps.filter { it.rank > 0 })
         presetStore.save(name, colourOnly)
@@ -854,10 +881,10 @@ class PhotoEditViewModel @Inject constructor(
      * 点比例是同一件事（一次离散改动、前后各一格），用同一个函数才不会出现第二种历史形状。
      * 中间再读一次 `_state.value` 更是白送一个「改过配方却没进历史」的窗口。
      *
-     * **先验滤镜还在不在**：预设里的 LUT key 来自磁盘，而用户可能在 设置 → LUT 管理 里
-     * 删掉或改名那个 .cube。`applyCurrentFilter` 找不到 key 时是 `?: return`——
-     * 于是配方与历史都推进了、预览还是旧的那张、`hasEdits` 翻成「有改动」，
-     * 而导出读的是配方：**预览与成品分家**。这条路径上唯一正确的做法是先拒掉。
+     * **先验滤镜在不在**（[presetLookMissing]）：预设里的 LUT key 来自磁盘，而用户可能在
+     * 设置 → LUT 管理 里删掉或改名那个 .cube。`applyCurrentFilter` 找不到 key 时是 `?: return`——
+     * 于是配方与历史都推进了、预览还是旧的那张、`hasEdits` 翻成「有改动」，而导出读的是配方：
+     * **预览与成品分家**。这条路径上唯一正确的做法是先拒掉。
      */
     fun applyPreset(name: String) {
         val result = presetStore.read(name)
@@ -866,9 +893,10 @@ class PhotoEditViewModel @Inject constructor(
             snackbarController.show(result.failure ?: "预设读取失败")
             return
         }
-        val lutKey = preset.lut?.key
-        if (lutKey != null && _filters.value.none { it.key == lutKey }) {
-            snackbarController.show("预设里的滤镜已经不在了，套用取消")
+        if (presetLookMissing(preset, _filters.value.map { it.key }.toSet())) {
+            // 话要说得准：滤镜表是 init 里异步装配的，刚进页面那一瞬按下去，
+            // key 也可能只是「还没装完」而不是「不在了」。分不清就不断言原因。
+            snackbarController.show("这个预设用的滤镜当前不可用，套用取消")
             return
         }
         _state.update { s ->
@@ -886,13 +914,16 @@ class PhotoEditViewModel @Inject constructor(
      * 删除预设。**不动配方**：预设是库，不是这张照片上的一步编辑，所以它不进历史。
      *
      * 先 `exists` 再删，是为了让「不存在」与「删不掉」是两条不同的回执——`delete` 只回
-     * Boolean，两者会塌成一句「删除失败」。多一次 stat 换一个看得懂的结果，值得。
+     * Boolean，两者会塌成一句。多一次 stat 换一个看得懂的结果，值得。
+     * 两条 stat 之间文件可能消失（只有并发的另一次删除会做到），所以失败那条**只说删不掉**，
+     * 不额外断言「文件还在」——那一刻我们并不知道。
      */
     fun deletePreset(name: String) {
+        val safe = sanitizePresetName(name)
         val outcome = when {
-            !presetStore.exists(name) -> "预设「${sanitizePresetName(name)}」不存在"
-            presetStore.delete(name) -> "已删除预设「${sanitizePresetName(name)}」"
-            else -> "预设「${sanitizePresetName(name)}」删不掉（文件仍在）"
+            !presetStore.exists(name) -> "预设「$safe」不存在"
+            presetStore.delete(name) -> "已删除预设「$safe」"
+            else -> "预设「$safe」删不掉"
         }
         snackbarController.show(outcome)
         refreshPresets()

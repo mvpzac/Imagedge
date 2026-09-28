@@ -446,6 +446,7 @@ private fun ColorPanel(
         // 而导出分区只有格式与元数据，摆在那儿等于把动作放到它管不到的东西后面
         PresetSection(
             presets = presets,
+            nameTaken = viewModel::presetNameTaken,
             onSave = viewModel::savePreset,
             onApply = viewModel::applyPreset,
             onDelete = viewModel::deletePreset
@@ -560,11 +561,12 @@ private fun RotatePanel(state: PhotoEditState, viewModel: PhotoEditViewModel) {
  * AppChip 内部那个 clickable 会先吃掉 down 事件，长按永远收不到。
  *
  * 删除动的是预设库、不是这张照片的配方，所以它**不进撤销历史**（见 deletePreset），
- * 但它是会丢东西的决定，因此走 [ConfirmDialog] 确认，删完给一条 message 而不是静默。
+ * 但它是会丢东西的决定，因此走 [ConfirmDialog] 确认，结果由全局横幅报出来（不是静默）。
  */
 @Composable
 private fun PresetSection(
     presets: List<String>,
+    nameTaken: (String) -> Boolean,
     onSave: (String) -> Unit,
     onApply: (String) -> Unit,
     onDelete: (String) -> Unit,
@@ -617,8 +619,10 @@ private fun PresetSection(
                 text = stringResource(R.string.edit_preset_save),
                 onClick = {
                     val trimmed = name.trim()
-                    // 撞名先问一句再覆盖（presets 这一屏本来就有，不用额外读盘）
-                    if (presets.any { it == trimmed }) pendingOverwrite = trimmed
+                    // 撞名要按**落盘身份**问存储层（viewModel::presetNameTaken）：
+                    // 界面上那份 presets 既晚一步又是归一化后的名字，拿输入框的原文去比，
+                    // 「我的.v2」与已经存在的「我的v2」不相等 → 不弹确认直接覆盖
+                    if (nameTaken(trimmed)) pendingOverwrite = trimmed
                     else onSave(trimmed)
                 },
                 type = AppButtonType.SECONDARY,

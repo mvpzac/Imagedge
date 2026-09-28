@@ -558,6 +558,30 @@ class PhotoEditRecipeStateTest {
     }
 
     @Test
+    fun `a preset naming a filter that is not available is detected before anything changes`() {
+        val known = setOf(FILTER_NONE, "kodak2383")
+
+        assertFalse(
+            "表里有的 key 不该判缺",
+            presetLookMissing(EditRecipe.EMPTY.with(EditStep.Lut("kodak2383", 60)), known)
+        )
+        assertTrue(
+            "用户在 LUT 管理里删掉或改名之后，预设里的 key 就成了悬空引用——" +
+                    "applyCurrentFilter 遇到它是静默 return，而配方与历史已经推进，" +
+                    "预览与导出就此分家，所以这一条必须判缺",
+            presetLookMissing(EditRecipe.EMPTY.with(EditStep.Lut("user_已删除.cube", 60)), known)
+        )
+        assertFalse(
+            "没有滤镜步骤的预设不需要任何资产",
+            presetLookMissing(EditRecipe.EMPTY.with(EditStep.Color(ColorAdjust(contrast = 20))), known)
+        )
+        assertFalse(
+            "「原图」那个占位 key 永远在滤镜表里，不是悬空引用",
+            presetLookMissing(EditRecipe.EMPTY.with(EditStep.Lut(FILTER_NONE, 80)), known)
+        )
+    }
+
+    @Test
     fun `the render guard key still carries everything a render actually consumes`() {
         val plain = EditRecipe.EMPTY.with(EditStep.Straighten(3f))
         assertNotEquals("拉直角是渲染的输入，闸不许对它瞎", renderInputsOf(plain), renderInputsOf(plain.with(EditStep.Straighten(9f))))

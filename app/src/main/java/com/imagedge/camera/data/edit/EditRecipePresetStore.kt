@@ -40,8 +40,9 @@ internal fun sanitizePresetName(raw: String): String = raw
  * 「../../etc/passwd」变成「etcpasswd」，文件确实落在目录里、构不成穿越，
  * 但用户存的那个名字与之后列出来的那个名字已经不是同一个了——静默改名比拒绝更难查。
  * 作废之后读侧给原因、写侧抛 IllegalArgumentException（由 [EditRecipePresetStore.save] 包成 Result），
- * 这两条拒绝路径都留下得见的理由。**删除这一条目前不给**：`delete` 只返回 Boolean，
- * 名字无效与文件删不掉在界面上都长成一句「删除失败」——要分开得先把签名换成带原因的结果。
+ * 两条都留下得见的理由。删除走 [EditRecipePresetStore.delete]，只回 Boolean，
+ * 但调用方先用 [presetExists] 分过一次，所以「不存在」「删不掉」「已删除」在界面上是三句话
+ * （见 PhotoEditViewModel.deletePreset）。
  */
 internal fun presetFileFor(dir: File, name: String): File? {
     if (name.contains('/') || name.contains('\\')) return null
@@ -76,7 +77,11 @@ internal fun readPreset(dir: File, name: String): DecodeResult {
     return EditRecipeDocument.decode(text)
 }
 
-/** 这个名字已经有预设了吗（覆盖前要先问一句，见 PhotoEditViewModel.savePreset） */
+/**
+ * 这个名字是否已经占用。**按落盘身份问磁盘**，不是拿输入框里的原文去比列表：
+ * 归一化会去掉点号并截到 60 字符，「我的.v2」与「我的v2」是同一个预设，
+ * 只有走这条路才认得出来——界面上比 `presets` 列表会漏掉这一类撞名。
+ */
 internal fun presetExists(dir: File, name: String): Boolean =
     presetFileFor(dir, name)?.isFile == true
 
