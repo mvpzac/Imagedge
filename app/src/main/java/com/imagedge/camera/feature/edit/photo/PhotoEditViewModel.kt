@@ -10,12 +10,17 @@ import androidx.lifecycle.viewModelScope
 import com.imagedge.camera.core.common.AppLog
 import com.imagedge.camera.data.lut.LutType
 import com.imagedge.camera.data.lut.UserLutStore
+import com.imagedge.camera.image.EditRecipe
 import com.imagedge.camera.image.EditStep
 import com.imagedge.camera.image.ExposureAnalysis
 import com.imagedge.camera.image.Geometry
+import com.imagedge.camera.image.HistoryList
 import com.imagedge.camera.image.ImagePipeline
 import com.imagedge.camera.image.LumaHistogram
 import com.imagedge.camera.image.NormRect
+import com.imagedge.camera.image.lutKeyOrDefault
+import com.imagedge.camera.image.rank
+import com.imagedge.camera.image.strengthOrDefault
 import com.imagedge.camera.share.ExportConfig
 import com.imagedge.camera.share.ExportFormat
 import com.imagedge.camera.share.ExportManager
@@ -131,10 +136,10 @@ data class PhotoEditState(
     val sourceUri: Uri? = null,
     val original: Bitmap? = null,
     val filtered: Bitmap? = null,
-    val selectedKey: String = FILTER_NONE,
-    val strength: Int = 80,
-    /** 基础调色（曝光/对比度/饱和度/色温），与 LUT 同一次处理完成 */
-    val adjust: ColorAdjust = ColorAdjust.NONE,
+    /** 唯一的编辑状态：几何 + 调色 + 滤镜 */
+    val recipe: EditRecipe = EditRecipe.EMPTY,
+    /** 撤销游标；只在 commitEdit() 时前进 */
+    val history: HistoryList<EditRecipe> = HistoryList(),
     /** 长按预览时置位：界面显示原图，用于对比 */
     val comparing: Boolean = false,
     /** 当前编辑分区 */
@@ -142,12 +147,6 @@ data class PhotoEditState(
     /** 归一化裁剪框（相对「拉直+旋转+翻转」之后的画面） */
     val crop: NormRect = NormRect.FULL,
     val cropAspect: CropAspect = CropAspect.FREE,
-    /** 顺时针 90° 旋转次数（0..3） */
-    val quarterTurns: Int = 0,
-    val flipHorizontal: Boolean = false,
-    val flipVertical: Boolean = false,
-    /** 拉直角度（-45..45，正 = 顺时针） */
-    val straighten: Float = 0f,
     /** 裁剪模式的底图（已应用几何、**未裁剪**，裁剪框画在它上面） */
     val cropBase: Bitmap? = null,
     /**
@@ -183,19 +182,108 @@ data class PhotoEditState(
 ) {
     val hasImage: Boolean get() = original != null
 
-    /** 是否有任何调整（LUT 或基础调色），用于「重置」按钮的可用态 */
-    val hasEdits: Boolean
-        get() = selectedKey != FILTER_NONE || !adjust.isIdentity || hasGeometryEdits
+    // 每个 state 实例只算一次：fields() 是纯映射，同一份 (recipe, crop) 的答案必然相同，
+    // 而这几个名字在同一个实例上会被反复读（滑条每动一下就 copy 出一个新实例，见各 setter）。
+    // 写成 `get()` 就是每次访问重筛一遍步骤列表——量不大，但没有理由白做。
+    private val derived by lazy { recipe.fields(crop) }
+    val selectedKey: String get() = derived.selectedKey
+    val strength: Int get() = derived.strength
+    val adjust: ColorAdjust get() = derived.adjust
+    val quarterTurns: Int get() = derived.quarterTurns
+    val flipHorizontal: Boolean get() = derived.flipHorizontal
+    val flipVertical: Boolean get() = derived.flipVertical
+    val straighten: Float get() = derived.straighten
+    val hasGeometryEdits: Boolean get() = derived.hasGeometryEdits
 
-    /** 是否有几何编辑 */
-    val hasGeometryEdits: Boolean
-        get() = quarterTurns % 4 != 0 || flipHorizontal || flipVertical ||
-            kotlin.math.abs(straighten) > 0.05f || !crop.isFull
+    /** 有没有「还没存盘的改动」；判定只在 [EditRecipeFields.hasEdits] 一处 */
+    val hasEdits: Boolean get() = derived.hasEdits
 
     /** 裁剪模式底图的宽高比（宽/高），裁剪框换算与比例预设都要用 */
     val cropBaseAspect: Float
         get() = (cropBase ?: original)?.let { it.width.toFloat() / it.height } ?: (4f / 3f)
 }
+
+/** 界面上原来那组编辑字段，现在全部由配方派生；字段名与默认值照旧（与 alpha08 一致） */
+data class EditRecipeFields(
+    val selectedKey: String,
+    val strength: Int,
+    val adjust: ColorAdjust,
+    val crop: NormRect,
+    val quarterTurns: Int,
+    val flipHorizontal: Boolean,
+    val flipVertical: Boolean,
+    val straighten: Float,
+) {
+    val hasGeometryEdits: Boolean
+        get() = quarterTurns % 4 != 0 || flipHorizontal || flipVertical ||
+            kotlin.math.abs(straighten) > 0.05f || !crop.isFull
+
+    /** 有没有「还没存盘的改动」——强度单独改不算（与 alpha08 的 hasEdits 同语义） */
+    val hasEdits: Boolean
+        get() = selectedKey != FILTER_NONE || !adjust.isIdentity || hasGeometryEdits
+}
+
+/**
+ * 折叠成界面字段。
+ *
+ * [crop] 作为参数进来而不是塞进配方：裁剪框是**用户正在拖的实时值**，`cropAspect` 是界面选择态，
+ * 两者都不该污染撤销单位（拖动每帧都会写 `setCropRect`，进了配方就是一帧一条历史）；
+ * `EditStep.Crop` 只在渲染与导出时按 live 值现拼（见 `applyCurrentFilter` / `save`）。
+ */
+fun EditRecipe.fields(crop: NormRect = NormRect.FULL): EditRecipeFields {
+    val rotate = steps.filterIsInstance<EditStep.Rotate>().firstOrNull()
+    return EditRecipeFields(
+        selectedKey = lutKeyOrDefault(FILTER_NONE),
+        strength = strengthOrDefault(80),
+        adjust = colorAdjust,
+        crop = crop,
+        quarterTurns = rotate?.let { (((it.degrees / 90f).toInt() % 4) + 4) % 4 } ?: 0,
+        flipHorizontal = steps.any { it is EditStep.Flip && it.horizontal },
+        flipVertical = steps.any { it is EditStep.Flip && !it.horizontal },
+        straighten = steps.filterIsInstance<EditStep.Straighten>().firstOrNull()?.degrees ?: 0f,
+    )
+}
+
+/**
+ * 在配方那**一份** rotate 槽位上累加一次 90°（[step] 为 +1 顺时针 / -1 逆时针）。
+ *
+ * 度数必须先加进来再写回：`EditRecipe.with` 按身份替换，rotate 只有一个槽位，
+ * 直接写 `Rotate(90f)` 的话第二次按下等于把 90° 又设了一遍——画面不动、也不报错。
+ * 转满一圈回到 0 时删掉这个槽位，配方里不留「等效于没转」的步骤。
+ */
+internal fun rotatedRecipe(recipe: EditRecipe, step: Int): EditRecipe {
+    val turns = (((recipe.fields().quarterTurns + step) % 4) + 4) % 4
+    return if (turns == 0) recipe.without<EditStep.Rotate>()
+    else recipe.with(EditStep.Rotate(90f * turns))
+}
+
+/**
+ * 翻转开关的写入侧：当前开着就删掉**那一个方向**，关着就占住那一份槽位。
+ *
+ * 关掉时用的是 `EditRecipe.without(step)`（按身份删），不能用 reified 的
+ * `without<EditStep.Flip>()`（按类型删）——后者会把另一个方向一起清掉，而水平与垂直是两枚
+ * 独立的 chip、可以同时开着（真机验收点过：两道都开，关掉水平，垂直仍然亮着）。
+ * 抽成纯函数是为了给它一条会红的用例：这个错在界面上不报错，只会被当成「我按错了」。
+ */
+internal fun toggledFlip(recipe: EditRecipe, horizontal: Boolean): EditRecipe {
+    val flip = EditStep.Flip(horizontal = horizontal)
+    val fields = recipe.fields()
+    return if (if (horizontal) fields.flipHorizontal else fields.flipVertical) {
+        recipe.without(flip)
+    } else {
+        recipe.with(flip)
+    }
+}
+
+/**
+ * 换照片时给历史**播种**：第一条就是「刚载入」那一格。
+ *
+ * `HistoryList.undo()` 不能越过第一条，所以带着空历史进来时用户改完第一笔仍会看到
+ * `canUndo == false`——「回到没动过的样子」这条最该有的撤销根本不存在。种子必须与当时的配方
+ * 同一个值，否则第一次 undo 会把用户推到一个照片本来没有的状态。
+ */
+internal fun seededHistoryOf(recipe: EditRecipe): HistoryList<EditRecipe> =
+    HistoryList<EditRecipe>().record(recipe)
 
 @HiltViewModel
 class PhotoEditViewModel @Inject constructor(
@@ -350,8 +438,10 @@ class PhotoEditViewModel @Inject constructor(
                     PhotoEditState(
                         sourceUri = uri,
                         original = decoded,
-                        strength = it.strength,
-                        adjust = it.adjust,
+                        // 历史必须在这里播下种子（理由见 seededHistoryOf）：种子取 EMPTY，
+                        // 因为新载入的配方就是 EMPTY
+                        recipe = EditRecipe.EMPTY,
+                        history = seededHistoryOf(EditRecipe.EMPTY),
                         // 导出配置也要带过去。不带的话「仅清除位置」只在当前这张有效，
                         // 换下一张就悄悄回到 KEEP_ALL——用户以为自己在保护隐私，
                         // 而 GPS 只是晚了一张照片才跟着出去
@@ -512,13 +602,21 @@ class PhotoEditViewModel @Inject constructor(
     fun selectFilter(key: String) {
         // 取消上一个强度/调色的防抖任务：否则 200ms 后它会用新状态再跑一遍（重复全图处理）
         applyJob?.cancel()
-        _state.update { it.copy(selectedKey = key, message = null) }
+        _state.update {
+            it.copy(
+                recipe = it.recipe.with(EditStep.Lut(key, it.recipe.strengthOrDefault(80))),
+                message = null
+            )
+        }
         applyCurrentFilter()
+        commitEdit()
     }
 
-    /** 强度变化（防抖：变化停止 200ms 后应用） */
+    /** 强度变化（防抖：变化停止 200ms 后应用；进历史由调用方在操作结束时调 commitEdit） */
     fun setStrength(value: Int) {
-        _state.update { it.copy(strength = value) }
+        _state.update {
+            it.copy(recipe = it.recipe.with(EditStep.Lut(it.selectedKey, value.coerceIn(0, 100))))
+        }
         scheduleApply()
     }
 
@@ -532,27 +630,46 @@ class PhotoEditViewModel @Inject constructor(
 
     /** 基础调色变化（增益/分区/对比度/饱和度任一，防抖同强度） */
     fun setAdjust(adjust: ColorAdjust) {
-        _state.update { it.copy(adjust = adjust, message = null) }
+        _state.update { it.copy(recipe = it.recipe.with(EditStep.Color(adjust)), message = null) }
         scheduleApply()
     }
 
-    /** 一键重置：回到原图（清掉滤镜、强度、全部调色） */
+    /** 一键重置：回到原图（清掉滤镜、强度、全部调色与几何） */
     fun resetEdits() {
         applyJob?.cancel()
         _state.update {
             it.copy(
-                selectedKey = FILTER_NONE,
-                strength = 80,
-                adjust = ColorAdjust.NONE,
-                quarterTurns = 0,
-                flipHorizontal = false,
-                flipVertical = false,
-                straighten = 0f,
+                recipe = EditRecipe.EMPTY,
                 crop = NormRect.FULL,
                 cropAspect = CropAspect.FREE,
+                // 走 record 而不是直接换配方：重置自己就该是一格可撤销的历史
+                history = it.history.record(EditRecipe.EMPTY),
                 message = null
             )
         }
+        applyCurrentFilter()
+    }
+
+    /** 一次连续操作结束（滑条松手、几何按钮按下之后）才进历史 */
+    fun commitEdit() {
+        _state.update { it.copy(history = it.history.record(it.recipe)) }
+    }
+
+    /** 退回上一格历史；退不动（已是最旧一条）时无操作 */
+    fun undoEdit() {
+        val history = _state.value.history
+        if (!history.canUndo) return
+        val previous = history.undo()
+        _state.update { it.copy(history = previous, recipe = previous.current ?: EditRecipe.EMPTY) }
+        applyCurrentFilter()
+    }
+
+    /** 前进一格历史；走不动时无操作 */
+    fun redoEdit() {
+        val history = _state.value.history
+        if (!history.canRedo) return
+        val next = history.redo()
+        _state.update { it.copy(history = next, recipe = next.current ?: EditRecipe.EMPTY) }
         applyCurrentFilter()
     }
 
@@ -580,7 +697,9 @@ class PhotoEditViewModel @Inject constructor(
         val adjust = snapshot.adjust
         val strength = snapshot.strength
         val crop = snapshot.crop
-        val geoSteps = geometrySteps(snapshot)
+        val geoSteps = snapshot.recipe.geometryOnly
+        // 本次渲染是按这份配方起的头；防抖窗口内配方又被改了一次时，旧参数的结果不许进 state
+        val requestRecipe = snapshot.recipe
         val request = renderGeneration.incrementAndGet()
         applyJob?.cancel()
         _state.update { it.copy(processing = true) }
@@ -599,7 +718,8 @@ class PhotoEditViewModel @Inject constructor(
                 applyMutex.withLock {
                     coroutineContext.ensureActive()
                     if (sourceGeneration.get() != expectedGeneration ||
-                        renderGeneration.get() != request || previewSource !== processSource
+                        renderGeneration.get() != request || previewSource !== processSource ||
+                        requestRecipe != _state.value.recipe
                     ) return@withLock
                     // 1) 几何：拉直 → 旋转 → 翻转（**不裁剪**，裁剪模式的底图要用它）
                     geometryOnly = if (geoSteps.isEmpty()) {
@@ -625,7 +745,8 @@ class PhotoEditViewModel @Inject constructor(
                     }
                     coroutineContext.ensureActive()
                     if (sourceGeneration.get() != expectedGeneration ||
-                        renderGeneration.get() != request || previewSource !== processSource
+                        renderGeneration.get() != request || previewSource !== processSource ||
+                        requestRecipe != _state.value.recipe
                     ) return@withLock
                     val oldFiltered = _state.value.filtered
                     val oldCropBase = _state.value.cropBase
@@ -667,20 +788,6 @@ class PhotoEditViewModel @Inject constructor(
         }
     }
 
-    /**
-     * 几何步骤（顺序与 [ImagePipeline] 的约定一致：拉直 → 旋转 → 翻转；裁剪单独处理）。
-     * 裁剪不放进这里，因为裁剪模式的底图必须是「未裁剪」的。
-     */
-    private fun geometrySteps(s: PhotoEditState = _state.value): List<EditStep> {
-        val steps = mutableListOf<EditStep>()
-        if (kotlin.math.abs(s.straighten) > 0.05f) steps += EditStep.Straighten(s.straighten)
-        val turns = ((s.quarterTurns % 4) + 4) % 4
-        if (turns != 0) steps += EditStep.Rotate(90f * turns)
-        if (s.flipHorizontal) steps += EditStep.Flip(horizontal = true)
-        if (s.flipVertical) steps += EditStep.Flip(horizontal = false)
-        return steps
-    }
-
     // ── 几何编辑 API ──────────────────────────────────────────────
 
     /** 切换编辑分区；进入裁剪时确保底图与裁剪框就绪 */
@@ -716,52 +823,77 @@ class PhotoEditViewModel @Inject constructor(
     /** 顺时针/逆时针 90°；裁剪框同步旋转，锁定比例时重新贴合该比例 */
     fun rotate(clockwise: Boolean) {
         val step = if (clockwise) 1 else -1
+        commitEdit()
+        val nextRecipe = rotatedRecipe(_state.value.recipe, step)
         _state.update { s ->
-            val turns = (((s.quarterTurns + step) % 4) + 4) % 4
             val rotated = Geometry.rotate90(s.crop, step)
             s.copy(
-                quarterTurns = turns,
+                recipe = nextRecipe,
                 // 旋转后画面宽高互换，比例预设要按新画面重新贴合
                 crop = if (s.cropAspect.ratio == null) rotated
                 else Geometry.maxRectForAspect(
-                    effectiveImageAspect(s.copy(quarterTurns = turns)),
+                    effectiveImageAspect(s.copy(recipe = nextRecipe)),
                     s.cropAspect.ratio
                 ),
                 comparing = false
             )
         }
         applyCurrentFilter()
+        commitEdit()
     }
 
+    /** 左右翻转：开→写进那一份 flip:true 槽位；关→只删 flip:true，另一个方向不动 */
     fun toggleFlipHorizontal() {
-        _state.update { it.copy(flipHorizontal = !it.flipHorizontal, crop = Geometry.flipHorizontal(it.crop)) }
+        commitEdit()
+        _state.update { s ->
+            // 关掉一个方向必须按身份删，理由与用例见 toggledFlip
+            s.copy(
+                recipe = toggledFlip(s.recipe, horizontal = true),
+                crop = Geometry.flipHorizontal(s.crop)
+            )
+        }
         applyCurrentFilter()
+        commitEdit()
     }
 
+    /** 上下翻转：与左右翻转各自独立一份槽位，可同时开着 */
     fun toggleFlipVertical() {
-        _state.update { it.copy(flipVertical = !it.flipVertical, crop = Geometry.flipVertical(it.crop)) }
+        commitEdit()
+        _state.update { s ->
+            s.copy(
+                recipe = toggledFlip(s.recipe, horizontal = false),
+                crop = Geometry.flipVertical(s.crop)
+            )
+        }
         applyCurrentFilter()
+        commitEdit()
     }
 
-    /** 拉直角度（-45..45），防抖后重渲染 */
+    /** 拉直角度（-45..45），防抖后重渲染；进历史由调用方在操作结束时调 commitEdit */
     fun setStraighten(degrees: Float) {
-        _state.update { it.copy(straighten = degrees.coerceIn(-45f, 45f)) }
+        val clamped = degrees.coerceIn(-45f, 45f)
+        _state.update {
+            it.copy(
+                // 阈值内等于「没拉直」，槽位直接删掉，配方里不留几乎看不见的角度
+                recipe = if (kotlin.math.abs(clamped) > 0.05f) it.recipe.with(EditStep.Straighten(clamped))
+                else it.recipe.without<EditStep.Straighten>()
+            )
+        }
         scheduleApply()
     }
 
     /** 重置几何（保留调色与滤镜） */
     fun resetGeometry() {
-        _state.update {
-            it.copy(
-                quarterTurns = 0,
-                flipHorizontal = false,
-                flipVertical = false,
-                straighten = 0f,
+        _state.update { s ->
+            s.copy(
+                // 只留 rank 非 0 的步骤（调色与滤镜），几何整段清空
+                recipe = EditRecipe(s.recipe.steps.filter { it.rank != 0 }),
                 crop = NormRect.FULL,
                 cropAspect = CropAspect.FREE
             )
         }
         applyCurrentFilter()
+        commitEdit()
     }
 
     /** 只重置裁剪（保留旋转/翻转/拉直与调色） */
@@ -902,7 +1034,8 @@ class PhotoEditViewModel @Inject constructor(
                         val strength = editSnapshot.strength
                         // 几何（含裁剪）在全分辨率上先做，再按条带调色——
                         // 导出必须与预览用同一套几何参数，否则「框选的不是导出的」
-                        val steps = geometrySteps(editSnapshot) + EditStep.Crop(editSnapshot.crop)
+                        // 裁剪仍按 live 的裁剪框现拼在末尾，与预览那条管线同一套参数
+                        val steps = editSnapshot.recipe.geometryOnly + EditStep.Crop(editSnapshot.crop)
                         val transformed = ImagePipeline(steps).renderGeometry(decoded)
                         geometryApplied = transformed
                         coroutineContext.ensureActive()

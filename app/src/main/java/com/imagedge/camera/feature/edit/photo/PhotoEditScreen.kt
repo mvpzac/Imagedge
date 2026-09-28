@@ -171,6 +171,22 @@ fun PhotoEditScreen(
                         onSelect = viewModel::setTab
                     )
 
+                    // 撤销/重做：一格 = 一次连续操作（提交时机见 PhotoEditViewModel.commitEdit）。
+                    // 「刚载入」那一格由 loadPicked 调 seededHistoryOf 播下种子，所以第一次改动
+                    // 就能退回没动过的样子——播种的理由与用例都写在那个小函数旁边
+                    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.S)) {
+                        AppLink(
+                            text = stringResource(R.string.editor_undo),
+                            enabled = state.history.canUndo,
+                            onClick = { viewModel.undoEdit() }
+                        )
+                        AppLink(
+                            text = stringResource(R.string.editor_redo),
+                            enabled = state.history.canRedo,
+                            onClick = { viewModel.redoEdit() }
+                        )
+                    }
+
                     when (state.tab) {
                         EditTab.COLOR -> ColorPanel(
                             state = state,
@@ -355,6 +371,8 @@ private fun ColorPanel(
                         label = stringResource(R.string.edit_strength),
                         value = state.strength,
                         onValueChange = viewModel::setStrength,
+                        // 松手才进历史：拖动过程中每个中间值都记一格的话，一次拖动就占满 64 格
+                        onValueChangeFinished = viewModel::commitEdit,
                         range = 0..100,
                         valueSuffix = "%"
                     )
@@ -363,40 +381,49 @@ private fun ColorPanel(
                 // 曝光与色温/色调是同一次增益，先算；然后才是分区恢复与对比度。
                 // 这三段之间是不可交换的（对比度绕 18% 灰做仿射），界面顺序与实际顺序不一致时，
                 // 用户会看到「同样拉满、先动哪个」给出两张不同的照片，却没有任何地方解释。
+                // 每条都要挂 onValueChangeFinished：一次拖动算一格历史（松手时提交），
+                // 而不是让 200ms 防抖把每个中间值都记成一步。
                 AppSlider(
                     label = stringResource(R.string.edit_exposure),
                     value = state.adjust.exposure,
-                    onValueChange = { viewModel.setAdjust(state.adjust.copy(exposure = it)) }
+                    onValueChange = { viewModel.setAdjust(state.adjust.copy(exposure = it)) },
+                    onValueChangeFinished = viewModel::commitEdit
                 )
                 AppSlider(
                     label = stringResource(R.string.edit_temperature),
                     value = state.adjust.temperature,
-                    onValueChange = { viewModel.setAdjust(state.adjust.copy(temperature = it)) }
+                    onValueChange = { viewModel.setAdjust(state.adjust.copy(temperature = it)) },
+                    onValueChangeFinished = viewModel::commitEdit
                 )
                 AppSlider(
                     label = stringResource(R.string.edit_tint),
                     value = state.adjust.tint,
-                    onValueChange = { viewModel.setAdjust(state.adjust.copy(tint = it)) }
+                    onValueChange = { viewModel.setAdjust(state.adjust.copy(tint = it)) },
+                    onValueChangeFinished = viewModel::commitEdit
                 )
                 AppSlider(
                     label = stringResource(R.string.edit_highlights),
                     value = state.adjust.highlights,
-                    onValueChange = { viewModel.setAdjust(state.adjust.copy(highlights = it)) }
+                    onValueChange = { viewModel.setAdjust(state.adjust.copy(highlights = it)) },
+                    onValueChangeFinished = viewModel::commitEdit
                 )
                 AppSlider(
                     label = stringResource(R.string.edit_shadows),
                     value = state.adjust.shadows,
-                    onValueChange = { viewModel.setAdjust(state.adjust.copy(shadows = it)) }
+                    onValueChange = { viewModel.setAdjust(state.adjust.copy(shadows = it)) },
+                    onValueChangeFinished = viewModel::commitEdit
                 )
                 AppSlider(
                     label = stringResource(R.string.edit_contrast),
                     value = state.adjust.contrast,
-                    onValueChange = { viewModel.setAdjust(state.adjust.copy(contrast = it)) }
+                    onValueChange = { viewModel.setAdjust(state.adjust.copy(contrast = it)) },
+                    onValueChangeFinished = viewModel::commitEdit
                 )
                 AppSlider(
                     label = stringResource(R.string.edit_saturation),
                     value = state.adjust.saturation,
-                    onValueChange = { viewModel.setAdjust(state.adjust.copy(saturation = it)) }
+                    onValueChange = { viewModel.setAdjust(state.adjust.copy(saturation = it)) },
+                    onValueChangeFinished = viewModel::commitEdit
                 )
             }
         }
@@ -487,6 +514,8 @@ private fun RotatePanel(state: PhotoEditState, viewModel: PhotoEditViewModel) {
                     label = stringResource(R.string.edit_straighten),
                     value = state.straighten.roundToInt(),
                     onValueChange = { viewModel.setStraighten(it.toFloat()) },
+                    // 与调色滑条同一条规矩：松手提交一格历史（见 ColorPanel 里的说明）
+                    onValueChangeFinished = viewModel::commitEdit,
                     range = -45..45
                 )
                 Text(

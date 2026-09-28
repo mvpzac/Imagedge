@@ -139,6 +139,24 @@ class EditRecipeTest {
     }
 
     @Test
+    fun `without step deletes only the flip direction it was given`() {
+        // 上面那条按类型删的用例说明 without<Flip>() 会一次清掉两格；编辑器上的「关掉翻转」
+        // 是两个独立开关各关各的，所以那处必须用按身份删的 without(step)——这条钉的就是它不多删。
+        val recipe = EditRecipe.EMPTY
+            .with(EditStep.Flip(horizontal = true))
+            .with(EditStep.Flip(horizontal = false))
+
+        assertEquals(
+            listOf("flip:false"),
+            recipe.without(EditStep.Flip(horizontal = true)).steps.map { it.identity }
+        )
+        assertEquals(
+            listOf("flip:true"),
+            recipe.without(EditStep.Flip(horizontal = false)).steps.map { it.identity }
+        )
+    }
+
+    @Test
     fun `constructor rejects a list holding two steps of the same identity`() {
         assertThrows(IllegalArgumentException::class.java) {
             EditRecipe(

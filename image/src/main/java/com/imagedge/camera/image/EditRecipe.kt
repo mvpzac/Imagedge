@@ -49,11 +49,20 @@ data class EditRecipe(val steps: List<EditStep> = emptyList()) {
      * 与 `toggleFlipVertical`，两道可以并存，所以「撤销这一步翻转」必须是方向敏感的。
      * rank-0 只有 `Flip` 一个类型对应两个身份，按类型删正好把它多删一格——撤销一个方向
      * 会把另一个方向一起清掉，且没有任何地方会报错（`EditRecipeTest` 里那条 Flip 用例钉住
-     * 的就是这个多删行为）。真要按方向删，得在**本模块**加带方向的写法：`identity` 是
-     * internal，调用方连按身份过滤都写不出来，所以别在 :app 里绕，来这里加参数。
+     * 的就是这个多删行为）。要按方向删就用下面的 `without(step)`：它按身份精确删那一步，
+     * `EditRecipeTest` 里「只删掉给定的那个翻转方向」那条用例是它唯一的钉。
      */
     inline fun <reified S : EditStep> without(): EditRecipe =
         EditRecipe(steps.filterNot { it is S })
+
+    /**
+     * 精确删除与给定步骤**同身份**的那一步。
+     *
+     * `Flip` 是唯一一个类型对应两个身份的步骤，所以上面按类型删的 reified 版到这里会多删一格；
+     * 方向本来就在 `Flip` 的构造参数里，传一个步骤实例进来就点得中那一个槽位。
+     */
+    fun without(step: EditStep): EditRecipe =
+        EditRecipe(steps.filterNot { it.identity == step.identity })
 
     /** 调色快照；没有 Color 步骤时是 NONE（恒等） */
     val colorAdjust: ColorAdjust

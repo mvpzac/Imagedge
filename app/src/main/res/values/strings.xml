@@ -301,6 +301,8 @@
     <string name="edit_temperature">色温</string>
     <string name="edit_reset">重置</string>
     <string name="edit_action">编辑</string>
+    <string name="editor_undo">撤销</string>
+    <string name="editor_redo">重做</string>
 
     <!-- 分享 / 导出 -->
     <string name="share_action">分享</string>
