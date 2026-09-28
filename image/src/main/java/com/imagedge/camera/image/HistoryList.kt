@@ -18,8 +18,10 @@ package com.imagedge.camera.image
  * 除无操作外一律返回新实例：`record` 碰到同值、`undo`/`redo` 走到头时原样返回 `this`。
  * 上限淘汰最旧一条，永不淘汰游标所在项。
  *
- * **构造即校验**：`capacity` 必须为正，`cursor` 必须落在 `-1..entries.lastIndex`
- * （空历史因此只认 -1）。下面几个方法全按「游标在列表内」来写，而主构造器带着 private 属性
+ * **构造即校验**：`capacity` 必须为正，`entries` 不许超过 `capacity`，`cursor` 必须落在
+ * `-1..entries.lastIndex`（空历史因此只认 -1）。第三条今天没有调用方能触发
+ * （唯一的构造路径是 record/undo/redo，它们自己维持上限），但「构造即校验」是这个类的卖点，
+ * 留一个没人守的不变量等于留一个将来会静默烂掉的洞。下面几个方法全按「游标在列表内」来写，而主构造器带着 private 属性
  * 仍是公开的命名参数，挡得住的地方只有 init——这与 [EditRecipe] 同一决定。
  */
 data class HistoryList<T>(
@@ -31,6 +33,9 @@ data class HistoryList<T>(
         require(capacity > 0) {
             "上限至少得装下一条记录，capacity=$capacity 会把每一条都裁空，历史静默什么都不记"
         }
+        require(entries.size <= capacity) {
+            "条目数不能超过上限，否则第一条就被裁掉、而裁掉哪条取决于调用顺序；实际 size=${entries.size}, capacity=$capacity"
+        }
         require(cursor in -1..entries.lastIndex) {
             "游标必须指在列表内，空历史只能是 -1；实际 cursor=$cursor, size=${entries.size}"
         }
@@ -38,7 +43,8 @@ data class HistoryList<T>(
 
     /**
      * 游标指向的条目；空历史为 null。
-     * 条目类型本身可空时这两者读起来一样（null 条目也是 null），所以判「有没有当前项」要看游标。
+     * 条目类型本身可空时这两者读起来一样（null 条目也是 null）。判「有没有当前项」用 [canUndo]/[canRedo]
+     * 或 [size]——游标是 private 的，外部看不到，别在注释里把读者送去看一个他读不到的字段。
      */
     val current: T? get() = entries.getOrNull(cursor)
 

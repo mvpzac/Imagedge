@@ -144,4 +144,14 @@ class HistoryListTest {
         assertEquals(history, history.undo())
         assertEquals(history, history.redo())
     }
+
+    @Test
+    fun `a history built with more entries than its capacity is refused`() {
+        // 唯一的构造路径（record/undo/redo）今天造不出超限实例，但「构造即校验」是这个类的卖点：
+        // 不守的话，将来任何一处直接构造都会静默丢掉最旧几条，而丢哪几条取决于调用顺序
+        val e = assertThrows(IllegalArgumentException::class.java) {
+            HistoryList(capacity = 2, entries = listOf("a", "b", "c"), cursor = 2)
+        }
+        assertEquals(true, e.message!!.contains("上限"))
+    }
 }

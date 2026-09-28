@@ -121,4 +121,17 @@ class EditRecipePresetStoreTest {
         assertEquals(null, readPreset(dir, listed.single()).failure)
         dir.deleteRecursively()
     }
+
+    @Test
+    fun `a foreign file whose name cannot round trip is not listed`() {
+        // 手放的「我的.v2.json」：按后缀它是预设，可列表给出的名字「我的.v2」再归一化就成了
+        // 「我的v2」→ 读不到、套不上、删了还报「删不掉」。列表里出现一个点不动的名字，
+        // 比看不到它更难查，所以只保留能往返的名字
+        val dir = tempDir("foreign").apply { mkdirs() }
+        File(dir, "我的.v2.$PRESET_EXTENSION").writeText("{}")
+        writePreset(dir, "能用的", EditRecipe.EMPTY)
+
+        assertEquals(listOf("能用的"), dir.listPresetNames())
+        dir.deleteRecursively()
+    }
 }

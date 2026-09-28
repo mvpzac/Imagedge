@@ -8,6 +8,7 @@ import com.imagedge.camera.data.transfer.DownloadLocation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.imagedge.camera.core.common.AppLog
+import com.imagedge.camera.data.edit.EditRecipeDocument
 import com.imagedge.camera.data.edit.EditRecipePresetStore
 import com.imagedge.camera.data.edit.sanitizePresetName
 import com.imagedge.camera.data.lut.LutType
@@ -339,11 +340,11 @@ internal fun committedTransform(
 /**
  * 交给 `ImagePipeline.renderGeometry` 的那份几何：全部几何步骤（含裁剪框），不含调色与滤镜。
  *
- * 之所以要有这个名字：预览与导出要读**同一个值**，一处一个名字就会长成两次取值——导出曾把
- * `geometryOnly` 与当时那份 live 裁剪框在末尾现拼一次，预览另一条路取框，两边各自追配方；
- * 框进配方之后，这一处取值就是唯一的那一份。取用它的每一处都不许再单独拼一条 `Crop`；
- * 契约（有哪些步骤、框是不是界面正在显示的那个）由 PhotoEditRecipeStateTest 的
- * 「the geometry handed to the renderer…」钉着。
+ * 之所以要有这个名字：导出要读的就是它，而**预览不走这条整链**——预览先把不含裁剪的几何
+ * 跑一遍当裁剪页底图，再从那张结果上裁（见 `applyCurrentFilter`），免得同一段几何被栅格化两遍。
+ * 两条路的框都出自配方里同一份 `EditStep.Crop`（预览用的 `snapshot.crop` 是它的派生字段），
+ * 所以「预览与导出各拿一个框」那种分家仍然不可能；被钉住的是这件事，
+ * 用例是 PhotoEditRecipeStateTest 的「the geometry handed to the renderer…」。
  */
 internal fun geometryToRender(recipe: EditRecipe): List<EditStep> = recipe.allSteps
 
@@ -380,7 +381,8 @@ internal fun presetAppliedTo(current: EditRecipe, preset: EditRecipe): EditRecip
 /**
  * 这份预设要的滤镜，在 [knownKeys] 里找不到吗？
  *
- * 抽成纯函数是因为这条规则本身终于能被测到：留在 ViewModel 里时它跟 JVM 起不来的构造绑在一起。
+ * 抽成纯函数是因为这条规则本身终于能被测到：留在 ViewModel 里时它跟 JVM 起不来的构造绑在一起
+ * （这条边界记在 PhotoEditRecipeStateTest 的类注释里，不在本文件）。
  * 说清楚买到的是什么——**测到的是规则，不是接线**：`applyPreset` 里那一句调用仍然没有测试能守
  * （ViewModel 在 JVM 里实例化不了，本文件头部记着这条已知边界，与滑条松手提交同一类）。
  *
@@ -864,6 +866,14 @@ class PhotoEditViewModel @Inject constructor(
 
     fun savePreset(name: String) {
         val colourOnly = EditRecipe(_state.value.recipe.steps.filter { it.rank > 0 })
+        // 写侧也要有读侧那道上限：预设的 lut key 来自磁盘文件名，一个超过 MAX_KEY_CHARS 的
+        // .cube 文件名会「存得进去、每次套用都被解码拒掉」——正是本层反复要防的
+        // 「存在了却永远用不了」，只是这次换了指针够不到的地方
+        val lutKey = colourOnly.lut?.key
+        if (lutKey != null && lutKey.length > EditRecipeDocument.MAX_KEY_CHARS) {
+            snackbarController.show("滤镜名超过 ${EditRecipeDocument.MAX_KEY_CHARS} 字符，存不进预设")
+            return
+        }
         presetStore.save(name, colourOnly)
             .onSuccess {
                 refreshPresets()
@@ -955,9 +965,9 @@ class PhotoEditViewModel @Inject constructor(
         val crop = snapshot.crop
         // 裁剪模式的底图：几何但**不**裁剪，框要画在它上面
         val geoSteps = snapshot.recipe.geometryOnly
-        // 成品那一份几何：全部几何（含裁剪框）、不含调色；取用只经 geometryToRender 这一处，
-        // 不再在这里单独拼一条 Crop
-        val renderSteps = geometryToRender(snapshot.recipe)
+        // 成品那一份几何不在这里整链重跑：几何先跑一遍（下面那张 geometryOnly），裁剪从它身上裁。
+        // 拼出来的那条 Crop 出自 snapshot.crop，而它是配方里那**同一份** EditStep.Crop 的派生值，
+        // 所以「预览与导出各拿一个框」这个分家来源仍然不存在
         // 本次渲染是按这份输入起的头；防抖窗口内输入又被改了一次时，旧参数的结果不许进 state。
         // 比的是 renderInputsOf（不含裁剪框），理由与代价见它的 KDoc
         val requestInputs = renderInputsOf(snapshot.recipe)
@@ -994,7 +1004,10 @@ class PhotoEditViewModel @Inject constructor(
                     cropped = if (crop.isFull) {
                         geometryOnly
                     } else {
-                        ImagePipeline(renderSteps).renderGeometry(processSource)
+                        // 改动前这里是拿 allSteps 从 processSource **再跑一遍**整条几何链：
+                        // 输出逐像素相同，但同一段拉直/旋转/翻转被栅格化两次，
+                        // 与本文件自己的口径（「为一次拖框跑整轮遍历是纯烧」）相冲
+                        ImagePipeline(listOf(EditStep.Crop(crop))).renderGeometry(geometryOnly)
                     }
                     // 3) 颜色：调色 + LUT（一次像素遍历）
                     coloredCropped = applyPipelineTo(cropped, lut, strength, adjust)

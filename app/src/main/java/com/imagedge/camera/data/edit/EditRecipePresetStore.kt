@@ -54,6 +54,10 @@ internal fun presetFileFor(dir: File, name: String): File? {
 internal fun File.listPresetNames(): List<String> =
     listFiles { f -> f.isFile && f.extension == PRESET_EXTENSION }
         ?.mapNotNull { it.nameWithoutExtension.takeIf(String::isNotBlank) }
+        // 只保留**能往返**的名字：手放的「我的.v2.json」按后缀会列成「我的.v2」，
+        // 而读/套/删都会再归一化成「我的v2」→ 列出来却永远用不了。过滤条件与读侧同一条
+        // （presetFileFor 的归一化 + isFile），列表因此不可能出现一个点不动的名字
+        ?.filter { name -> presetFileFor(this, name)?.isFile == true }
         ?.sorted()
         ?: emptyList()
 

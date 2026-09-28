@@ -29,7 +29,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -579,7 +578,7 @@ private fun PresetSection(
     // 这个不一致本身就是 bug
     var pendingOverwrite by remember { mutableStateOf<String?>(null) }
 
-    AppSection(title = stringResource(R.string.edit_preset_apply)) {
+    AppSection(title = stringResource(R.string.edit_preset_title)) {
         Column(verticalArrangement = Arrangement.spacedBy(Spacing.S)) {
             if (presets.isEmpty()) {
                 Text(
@@ -588,7 +587,7 @@ private fun PresetSection(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(Spacing.S)) {
                     // key 用名字本身：预设名就是它的文件身份，列表刷新后同一个名字不该换触点
                     items(presets, key = { it }) { preset ->
                         AppChip(
@@ -862,7 +861,7 @@ private fun LutFilterGroup(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         } else {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(Spacing.S)) {
                 items(options, key = { it.key }) { option ->
                     val selected = selectedKey == option.key
                     Column(

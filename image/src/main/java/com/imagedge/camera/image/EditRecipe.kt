@@ -50,7 +50,7 @@ data class EditRecipe(val steps: List<EditStep> = emptyList()) {
      * rank-0 只有 `Flip` 一个类型对应两个身份，按类型删正好把它多删一格——撤销一个方向
      * 会把另一个方向一起清掉，且没有任何地方会报错（`EditRecipeTest` 里那条 Flip 用例钉住
      * 的就是这个多删行为）。要按方向删就用下面的 `without(step)`：它按身份精确删那一步，
-     * `EditRecipeTest` 里「只删掉给定的那个翻转方向」那条用例是它唯一的钉。
+     * `EditRecipeTest` 里「只删掉给定的那个翻转方向」那条用例是它原语层这一侧的钉（调用侧另有 PhotoEditRecipeStateTest 的 flip 用例）。
      */
     inline fun <reified S : EditStep> without(): EditRecipe =
         EditRecipe(steps.filterNot { it is S })

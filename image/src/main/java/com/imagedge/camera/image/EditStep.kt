@@ -39,7 +39,8 @@ sealed interface EditStep {
      *
      * 它必须交给 `:lut` 解释（CPU 与 GPU 共用 SrgbTransfer 那一套换算），
      * 本模块不实现任何像素运算——这里曾有一份 ColorMatrix 版本，正因为它在
-     * sRGB 编码空间里做乘性操作而被删掉。
+     * sRGB **编码空间**里做算术（既有乘法也有三通道平移）而被删掉：反对的理由是色彩空间，
+     * 不是「乘性」这两个字。
      */
     data class Color(val adjust: ColorAdjust) : EditStep
 

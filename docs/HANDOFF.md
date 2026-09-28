@@ -45,7 +45,7 @@ Sony 相机无线传输 / 遥控 Android 应用。Kotlin + Jetpack Compose (Mate
 | `raw` | RAW / 内嵌 JPEG 解码 |
 | `lut` | .cube LUT 解析与 CPU 应用 |
 | `motionphoto` | 动态照片（移植自 SuoxingTech/MotionPhotoLab，MIT） |
-| `image` | 非破坏性编辑管线（`EditStep` + `ImagePipeline`）——**已被 `feature/edit/BasicEditViewModel` 使用** |
+| `image` | 非破坏性编辑管线（`EditStep` + `ImagePipeline`）——**已被 `feature/edit/photo/PhotoEditViewModel` 使用** |
 | `share` | 导出配置 / 导出器 / 分享 Intent |
 
 `app` 内部：

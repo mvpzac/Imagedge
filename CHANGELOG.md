@@ -66,7 +66,7 @@ All notable changes to this project are documented here. Format follows [Keep a 
 这条最容易被顺手优化掉的；换照片时的携带行为也按 alpha08 逐字恢复（带调色与强度、
 滤镜选择回落到原图、几何不带）。
 
-验收：全仓 332 → 418 条单测 + lint + `uiSpecCheck` 通过。撤销/重做/翻转独立性/
+验收：全仓 332 → 421 条单测 + lint + `uiSpecCheck` 通过。撤销/重做/翻转独立性/
 带改动返回确认这几项在模拟器上用 debug 变体实跑过并留了截图。
 
 ### 未验证 / Not yet verified

@@ -252,7 +252,8 @@
 
     <!-- 编辑预设：存的是「调色 + 滤镜」，几何按照片各自留着 -->
     <string name="edit_preset_save">存为预设</string>
-    <string name="edit_preset_apply">套用预设</string>
+    <!-- 分区标题：这一节同时住着「存为预设」，叫「套用预设」名不副实 -->
+    <string name="edit_preset_title">预设</string>
     <string name="edit_preset_empty">还没有预设</string>
     <string name="edit_preset_name_hint">预设名称</string>
     <!-- 删除预设的确认框：body 要说清实际影响（只删预设，不动这张照片） -->

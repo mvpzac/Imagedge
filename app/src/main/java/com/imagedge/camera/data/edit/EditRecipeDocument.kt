@@ -62,11 +62,11 @@ data class DecodeResult(val recipe: EditRecipe?, val failure: String?) {
  * 未知键、未知步骤、越界数字、超长文本都必须**明确拒绝并给原因**，
  * 而不是宽容地读出一个半成品配方去改用户的照片。
  *
- * **线格式带的是整份配方，含几何四步**（拉直 / 旋转 / 翻转 / 裁剪）。这是有意的：
+ * **线格式带的是整份配方，含几何四步**。这是有意的：
  * 预设要能原样 reopen 才能改、才能再存，只存颜色与滤镜等于把「存下来的」和「用的时候」
- * 变成两种东西。`EditStep.rank` 那句「预设要按它挑出只存颜色与滤镜的步骤」说的是**套用侧**
- * （Task 6 把预设贴到另一张照片上时只取 `rank != 0` 的部分），不是编码侧——
- * 别为了对上那句话去把 `encode` 裁短。
+ * 变成两种东西。套用侧只取 `rank > 0` 的部分（见 PhotoEditViewModel.presetAppliedTo 与
+ * savePreset，两处判据相同）——**不是** `rank != 0`：今天等价只因 rank 没有负值，
+ * 写 `> 0` 让「几何」这件事由「排在 0」这一个事实定义。别为了别的口径去把 `encode` 裁短。
  */
 object EditRecipeDocument {
 
@@ -74,11 +74,13 @@ object EditRecipeDocument {
     const val MAX_TEXT_CHARS = 16 * 1024
 
     private const val MAX_STEPS = 16
-    private const val MAX_KEY_CHARS = 120
+    /** 滤镜 key 的长度上限；写侧（PhotoEditViewModel.savePreset）用同一个数把关 */
+    const val MAX_KEY_CHARS = 120
 
     private val json = Json {
-        // 必须 true：版本号要真的写进文件。默认 false 时 `format = 1`（等于默认值）
-        // 会被省略，读侧就无法判断版本，「未来版本必须拒绝」那条测试也会变成空跑。
+        // 必须 true：版本号要真的写进文件。默认 false 时 `format = 1`（等于默认值）会被省略，
+        // 读侧就拿不到版本；「未来版本必须拒绝」那条测试会**直接红**而不是空跑——
+        // 它的 replaceFirst 匹配不到 format、文本原样进解码、读回来仍是版本 1。
         encodeDefaults = true
         ignoreUnknownKeys = false
         isLenient = false
