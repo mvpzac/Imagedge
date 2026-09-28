@@ -344,6 +344,21 @@ internal fun committedTransform(
 internal fun geometryToRender(recipe: EditRecipe): List<EditStep> = recipe.allSteps
 
 /**
+ * 在途渲染的**闸**比较的那一份配方：整份配方去掉裁剪框。
+ *
+ * 闸的本职是「按旧参数算出来的结果不许进 state」，但裁剪框是唯一一个改了不必重算的输入：
+ * 裁剪页显示的是 `cropBase`（`recipe.geometryOnly`，刻意不含裁剪），拖框对它零影响，
+ * 而拖框只可能发生在裁剪页上。于是拖框不许再把在途渲染判废——拖框不发起渲染，
+ * 被丢弃的渲染就没有人接替，`processing` 只在采纳与异常两条路径里复位，卡住的转圈正好长在这上面。
+ *
+ * 换到的代价是「带框那一张」（`filtered` / `compareBase` / `histogram`）可能短暂落后于配方，
+ * 已核对这三样在裁剪页都不显示：预览取的是 `cropBase`（PhotoEditScreen 的 `PreviewArea`）、
+ * 长按对比在裁剪页被禁用、直方图属调色页。补上的路径也都带渲染：切分区经 `setTab`、
+ * 撤销与重做各自 `applyCurrentFilter`、导出直读配方而非预览位图。
+ */
+internal fun renderInputsOf(recipe: EditRecipe): EditRecipe = recipe.without<EditStep.Crop>()
+
+/**
  * 翻转开关的写入侧：当前开着就删掉**那一个方向**，关着就占住那一份槽位。
  *
  * 关掉时用的是 `EditRecipe.without(step)`（按身份删），不能用 reified 的
@@ -804,8 +819,9 @@ class PhotoEditViewModel @Inject constructor(
         // 成品那一份几何：全部几何（含裁剪框）、不含调色；取用只经 geometryToRender 这一处，
         // 不再在这里单独拼一条 Crop
         val renderSteps = geometryToRender(snapshot.recipe)
-        // 本次渲染是按这份配方起的头；防抖窗口内配方又被改了一次时，旧参数的结果不许进 state
-        val requestRecipe = snapshot.recipe
+        // 本次渲染是按这份输入起的头；防抖窗口内输入又被改了一次时，旧参数的结果不许进 state。
+        // 比的是 renderInputsOf（不含裁剪框），理由与代价见它的 KDoc
+        val requestInputs = renderInputsOf(snapshot.recipe)
         val request = renderGeneration.incrementAndGet()
         applyJob?.cancel()
         _state.update { it.copy(processing = true) }
@@ -825,7 +841,7 @@ class PhotoEditViewModel @Inject constructor(
                     coroutineContext.ensureActive()
                     if (sourceGeneration.get() != expectedGeneration ||
                         renderGeneration.get() != request || previewSource !== processSource ||
-                        requestRecipe != _state.value.recipe
+                        requestInputs != renderInputsOf(_state.value.recipe)
                     ) return@withLock
                     // 1) 几何：拉直 → 旋转 → 翻转（**不裁剪**，裁剪模式的底图要用它）
                     geometryOnly = if (geoSteps.isEmpty()) {
@@ -853,7 +869,7 @@ class PhotoEditViewModel @Inject constructor(
                     coroutineContext.ensureActive()
                     if (sourceGeneration.get() != expectedGeneration ||
                         renderGeneration.get() != request || previewSource !== processSource ||
-                        requestRecipe != _state.value.recipe
+                        requestInputs != renderInputsOf(_state.value.recipe)
                     ) return@withLock
                     val oldFiltered = _state.value.filtered
                     val oldCropBase = _state.value.cropBase
@@ -901,7 +917,9 @@ class PhotoEditViewModel @Inject constructor(
     fun setTab(tab: EditTab) {
         _state.update { it.copy(tab = tab, comparing = false, message = null) }
         if (tab == EditTab.CROP) {
-            // 已选比例预设时才重贴比例；自由比例下**不能**重置用户的裁剪框
+            // 已选比例预设时才重贴比例；自由比例下**不能**重置用户的裁剪框。
+            // 这一格刻意**不进历史**：它是按 chip 重新推导出来的视口贴合（alpha08 起就是这条规则），
+            // 不是用户做的一次编辑——切个分区就凭空多出一格可撤销，比它盖掉的那点框位移更误导。
             if (_state.value.cropAspect.ratio != null) {
                 _state.update {
                     it.copy(
@@ -919,26 +937,39 @@ class PhotoEditViewModel @Inject constructor(
 
     /**
      * 拖动裁剪框：写进配方里那一份 Crop 槽位，**不进历史**（一次拖动的提交在手势结束时，
-     * 由界面调 [commitEdit]；理由与用例见 [croppedRecipe]）。
+     * 由界面调 [commitEdit]；理由与用例见 [croppedRecipe]），也**不发起渲染**。
      *
-     * 必须接上防抖重渲染：配方一变，在途那次渲染就被 `applyCurrentFilter` 的配方闸丢掉，
-     * 而没有后续渲染时 `processing` 就没人复位（闸只「不采纳」，不负责收尾）。
+     * 不发起渲染是回到 alpha08 的行为，也是这一格本该有的代价：裁剪页显示的是不含裁剪的
+     * `cropBase`，拖框对它没有任何影响，为一次拖框跑几何 + 两趟像素遍历是纯烧。
+     * 配套的是闸不再把裁剪框当输入（见 [renderInputsOf]）——若闸仍因拖框作废在途渲染，
+     * 而拖框自己又不发起渲染，`processing` 就没人复位。
      */
     fun setCropRect(rect: NormRect) {
         _state.update { it.copy(recipe = croppedRecipe(it.recipe, rect)) }
-        scheduleApply()
     }
 
     /**
-     * 选择裁剪比例：把裁剪框收成该比例能占满画面的最大矩形，写进配方。
-     * @param silent 只写状态、不重渲染。用它就得自己保证随后还有一次渲染，
-     *   否则在途结果会被配方闸丢掉、`processing` 没人复位（见 [setCropRect] 的同一处说明）。
-     *   比例按钮本身不算一格编辑：预设改的是框，框随配方一起被撤销。
+     * 选择裁剪比例：把裁剪框收成该比例能占满画面的最大矩形，写进配方并提交一格。
+     *
+     * 框现在在配方里，所以点比例是一颗离散编辑（与旋转、翻转同类）：改动前后各记一格，
+     * 撤销退得回上一个框。不这么做的后果不是「退不回」，而是这一格被卷进**下一次无关的提交**
+     * ——用户点完 16:9 再去动曝光，撤销曝光会连框一起搬回去。
+     * 与 [setCropRect] 同理不发起渲染。
+     *
+     * 没被一起记住的是那枚点亮着的比例 chip：`cropAspect` 是界面选择、不是编辑步骤，
+     * 所以撤销会把框搬回去而 chip 仍停在 16:9；此时若切走再回裁剪页，[setTab] 会按 chip
+     * 重新贴合（alpha08 起就是这条规则），把撤销回来的框覆盖掉。已知不对称，不是这次的改动。
      */
-    fun setCropAspect(aspect: CropAspect, silent: Boolean = false) {
+    fun setCropAspect(aspect: CropAspect) {
         val forced = Geometry.maxRectForAspect(effectiveImageAspect(_state.value), aspect.ratio)
-        _state.update { it.copy(cropAspect = aspect, recipe = croppedRecipe(it.recipe, forced)) }
-        if (!silent) applyCurrentFilter()
+        _state.update { s ->
+            val next = croppedRecipe(s.recipe, forced)
+            s.copy(
+                cropAspect = aspect,
+                recipe = next,
+                history = committedTransform(s.history, s.recipe, next)
+            )
+        }
     }
 
     /** 顺时针/逆时针 90°；裁剪框跟着换到新坐标系，锁定比例时按新画面重新贴合该比例 */
@@ -979,7 +1010,14 @@ class PhotoEditViewModel @Inject constructor(
         applyCurrentFilter()
     }
 
-    /** 拉直角度（-45..45），防抖后重渲染；进历史由调用方在操作结束时调 commitEdit */
+    /**
+     * 拉直角度（-45..45），防抖后重渲染；进历史由调用方在操作结束时调 commitEdit。
+     *
+     * 与旋转、翻转不同，这里**不搬裁剪框**，而且是刻意的。框归一化在「拉直之后、尚未裁剪」的画面上
+     * （几何顺序：拉直 → 旋转 → 翻转 → 裁剪），所以转正时内容从固定的框下经过，用户看着画面正过来；
+     * 把框按角度差搬一遍反而会把用户刚对准的那一格挪走，还得为转出画面的部分做 clamp，
+     * 顺带改掉框的面积。这条不搬也不会造成「看到的不是导出的」——预览与成品同读一份配方。
+     */
     fun setStraighten(degrees: Float) {
         val clamped = degrees.coerceIn(-45f, 45f)
         _state.update {
@@ -1005,15 +1043,16 @@ class PhotoEditViewModel @Inject constructor(
         commitEdit()
     }
 
-    /** 只重置裁剪（保留旋转/翻转/拉直与调色） */
+    /** 只重置裁剪（保留旋转/翻转/拉直与调色）；与 [setCropAspect] 同类，离散一格、前后各提交 */
     fun resetCrop() {
-        _state.update {
-            it.copy(
-                recipe = croppedRecipe(it.recipe, NormRect.FULL),
-                cropAspect = CropAspect.FREE
+        _state.update { s ->
+            val next = croppedRecipe(s.recipe, NormRect.FULL)
+            s.copy(
+                cropAspect = CropAspect.FREE,
+                recipe = next,
+                history = committedTransform(s.history, s.recipe, next)
             )
         }
-        applyCurrentFilter()
     }
 
     /** 未经几何变换的画面宽高比（宽/高）：预览源优先，它本来就是原图的等比缩略 */

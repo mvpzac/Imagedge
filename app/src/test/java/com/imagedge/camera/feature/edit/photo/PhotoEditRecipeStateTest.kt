@@ -10,6 +10,7 @@ import com.imagedge.camera.image.strengthOrDefault
 import com.imagedge.camera.lut.ColorAdjust
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -31,14 +32,15 @@ import org.junit.Test
  * Context，重渲染走 viewModelScope，而 :app 的测试依赖只有 junit4，没有 mockk 与 Robolectric），
  * JVM 里起不来，所以把它们的纯算术与纯构造抽成 [rotatedRecipe] / [rotatedGeometry] /
  * [flippedGeometry] / [croppedRecipe] / [committedTransform] / [geometryToRender] /
- * [toggledFlip] / [seededHistoryOf] / [carriedColour] 由这里钉。
+ * [renderInputsOf] / [toggledFlip] / [seededHistoryOf] / [carriedColour] 由这里钉。
  * 这些都属「写错了界面不报错、只是行为不对」：90° 不累加就是按了没反应，按类型删翻转会把
  * 另一个方向一起清掉，历史没播种则第一次改动根本退不回去，几何与框不成对写则导出的不是看到的。
  * （strength 的**输入**钳制在 `setStrength` 里，那要 ViewModel 实例，不在本文件钉。）
  *
  * 这里**钉不住**的几件事：滑条松手与裁剪手势结束才提交（`onValueChangeFinished` /
- * `onDragFinished` 的接线）、撤销/重做入口的 enabled、在途渲染不采纳过期配方（协程与互斥的
- * 时序，JVM 上模拟不出来）——这几条只能靠代码审查与真机验收，不假装测过。
+ * `onDragFinished` 的接线）、撤销/重做入口的 enabled、在途渲染**在两处闸上都去比**
+ * [renderInputsOf]（能钉的是这份键本身该含什么、不该含什么；协程与互斥的时序模拟不出来）
+ * ——这几条只能靠代码审查与真机验收，不假装测过。
  */
 class PhotoEditRecipeStateTest {
 
@@ -392,9 +394,9 @@ class PhotoEditRecipeStateTest {
 
     @Test
     fun `undoing a rotate takes the crop box back with it`() {
-        // 这条就是缺陷本身。旧形态里裁剪框是 state 上另一份 live 值、撤销只搬配方，
-        // 于是「拖框 → 右转 → 撤销」之后画面回到未旋转、框仍停在旋转后的坐标系上，
-        // save() 拿那份框导出的就不是用户看到的那一块（本轮改动前这条是红的，见报告）。
+        // 这条钉的是「框与几何成对写进同一份配方」。反面是它曾经的形态：框是 state 上另一份
+        // live 值、撤销只搬配方，于是「拖框 → 右转 → 撤销」之后画面回到未旋转、框仍停在旋转后的
+        // 坐标系上，save() 拿那份框导出的就不是用户看到的那一块。
         val dragged = NormRect(0.1f, 0.2f, 0.5f, 0.6f)
         val loaded = seededHistoryOf(EditRecipe.EMPTY)
         // setCropRect：写进配方的 Crop 槽位，不进历史
@@ -493,6 +495,41 @@ class PhotoEditRecipeStateTest {
             "渲染拿到的那条 Crop 就是界面显示的那个框；两者分家时成品裁的不是看到的那一块",
             PhotoEditState(recipe = recipe).crop,
             geometryToRender(recipe).filterIsInstance<EditStep.Crop>().single().rect
+        )
+    }
+
+    @Test
+    fun `dragging the crop box is not a change the render guard may act on`() {
+        val started = EditRecipe.EMPTY
+            .with(EditStep.Straighten(3f))
+            .with(EditStep.Lut("kodak2383", 55))
+        val framed = croppedRecipe(started, NormRect(0.1f, 0.2f, 0.5f, 0.6f))
+        val dragged = croppedRecipe(started, NormRect(0.2f, 0.1f, 0.7f, 0.4f))
+
+        assertEquals(
+            "拖框只换配方里的 Crop 槽位。裁剪页显示的是 geometryOnly（不含裁剪），拖框对它零影响，" +
+                    "于是拖框不能出现在闸的比较里——一旦在途渲染被它判为过期，" +
+                    "而拖框又不发起新的渲染，processing 就没人复位，转圈会一直挂着",
+            renderInputsOf(framed),
+            renderInputsOf(dragged)
+        )
+    }
+
+    @Test
+    fun `the render guard key still carries everything a render actually consumes`() {
+        val plain = EditRecipe.EMPTY.with(EditStep.Straighten(3f))
+        assertNotEquals("拉直角是渲染的输入，闸不许对它瞎", renderInputsOf(plain), renderInputsOf(plain.with(EditStep.Straighten(9f))))
+        assertNotEquals(
+            "调色与滤镜同属渲染输入",
+            renderInputsOf(plain),
+            renderInputsOf(plain.with(EditStep.Color(ColorAdjust(exposure = 20))))
+        )
+        assertEquals(
+            "闸去掉的只有 Crop 这一步，其余几何一步不少",
+            listOf(EditStep.Straighten(3f), EditStep.Rotate(90f)),
+            renderInputsOf(
+                croppedRecipe(plain.with(EditStep.Rotate(90f)), NormRect(0.1f, 0.1f, 0.5f, 0.5f))
+            ).steps
         )
     }
 }
