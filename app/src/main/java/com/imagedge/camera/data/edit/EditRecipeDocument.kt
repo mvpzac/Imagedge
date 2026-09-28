@@ -147,8 +147,9 @@ object EditRecipeDocument {
         "rotate" -> degrees?.takeIf { it in -360f..360f && it % 90f == 0f }?.let { EditStep.Rotate(it) }
         "flip" -> horizontal?.let { EditStep.Flip(it) }
         "crop" -> rect?.let {
-            // 定点检查够用：NaN 到不了这一层（isLenient=false 的解析直接拒掉这个 token，
-            // 有用例钉着），而 ±Infinity 会被 sanitized() 钳回边界、与原判据不等 → 拒
+            // 定点检查够用：NaN 到不了这一层——kotlinx 的 allowSpecialFloatingPointValues
+            // （默认 false）在 decodeFloat 里就拒掉非有限值，与 isLenient 无关，有用例钉着；
+            // 而 ±Infinity 同样在那一层被拒，退一步说也会被 sanitized() 钳回边界、与原判据不等 → 拒
             val candidate = NormRect(it.left, it.top, it.right, it.bottom)
             if (candidate.sanitized() != candidate) null else EditStep.Crop(candidate)
         }

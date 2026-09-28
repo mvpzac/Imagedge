@@ -47,7 +47,10 @@ All notable changes to this project are documented here. Format follows [Keep a 
   未知/不完整步骤拒绝、越界拒绝、超长拒绝，且**一律给原因而不是抛**。
   `EditRecipe` 的 init 抛的 IllegalArgumentException 在这里翻译成原因：文件来自磁盘，
   是不可信输入，一个能解析但不合规矩的文件不该把调用方炸崩；不变量仍只有 init 那一份，
-  读侧不另抄一遍规则。线格式带整份配方（含几何四步），套用侧只取颜色与滤镜是 Task 6 的事
+  读侧不另抄一遍规则。线格式带整份配方（含几何四步），套用侧只取颜色与滤镜是 Task 6 的事。
+  旋转这一步只收 **±360 之内的 90 整倍**：`quarterTurns` 是按整除从度数派生的，收一个 45°
+  会「画面真转、状态说没动过构图」，裁剪页还会拿到错的画面比例——读侧宁可拒也不能收下
+  一个下游表达不了的值
 
 零行为变化是被测试钉住的，不是被声明的：`EditRecipeFoldEquivalenceTest` 断言配方折叠出的
 （滤镜 key, 强度, 调色）三元组与 alpha08 直接读三个字段逐位相同，包括「没选滤镜也记住强度」

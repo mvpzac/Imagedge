@@ -4,6 +4,7 @@ import com.imagedge.camera.image.EditRecipe
 import com.imagedge.camera.image.EditStep
 import com.imagedge.camera.lut.ColorAdjust
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -186,13 +187,45 @@ class EditRecipeDocumentTest {
     fun `a NaN coordinate is refused by the parser before the rect is ever checked`() {
         // 这条是给「定点检查够不够用」设的**绊线**：NaN 能穿过 sanitized() 后不变这个判据
         // （Kotlin 的 Float == 是全序的，NaN == NaN 为真，coerceIn/minOf/maxOf 遇全 NaN 原样返回），
-        // 今天靠 isLenient=false 在解析层就把它挡了。哪天换的 kotlinx 版本开始接受这个 token，
-        // 这条会红——那时要补的是 toDomain 里的 isFinite，而不是把这条删掉
+        // 今天靠 kotlinx 的 allowSpecialFloatingPointValues（默认 false）在 decodeFloat 里就拒掉——
+        // **不是** isLenient，那个开关管的是另一件事，挡不住这个 token。
+        // 哪天有人把它打开、或换的 kotlinx 版本改了默认值，这条会红——那时要补的是 toDomain 里的
+        // isFinite，而不是把这条删掉
         val result = EditRecipeDocument.decode(
             """{"format":1,"steps":[{"kind":"crop","rect":{"left":NaN,"top":0.0,"right":1.0,"bottom":1.0}}]}"""
         )
 
         assertNotNull(result.failure)
         assertEquals(true, result.failure!!.contains("不是受支持的预设格式"))
+    }
+
+    @Test
+    fun `a rotate angle beyond one turn is refused`() {
+        // 450 是 90 的整倍，quarterTurns 那关拦不住它——只有 ±360 那条范围闸拦得住。
+        // 上一轮补的 45° 用例测的是 %90 那一半，范围这一半当时仍然是拆了也没人红
+        val text = """{"format":1,"steps":[{"kind":"rotate","degrees":450}]}"""
+
+        val failure = EditRecipeDocument.decode(text).failure
+        assertNotNull("范围闸要有自己的用例，不能搭 %90 那条的便车", failure)
+        assertEquals(true, failure!!.contains("rotate"))
+    }
+
+    @Test
+    fun `a filter key longer than the format allows is refused`() {
+        // MAX_KEY_CHARS 是这一句唯一的用处：不给上限，一个 5MB 的 key 也能读成一条合法步骤。
+        // 空白那条用例只钉住了 isNotBlank，长度这一半没人钉
+        val text = """{"format":1,"steps":[{"kind":"lut","key":"${"k".repeat(121)}","strength":50}]}"""
+
+        assertNotNull(EditRecipeDocument.decode(text).failure)
+    }
+
+    @Test
+    fun `isUsable is false on a refused file, not just true on an accepted one`() {
+        // 只断言正向的话，isUsable 被改成 `recipe != null` 或 `failure == null` 都能全绿；
+        // 两个方向都钉，它才真的是「有配方且无原因」
+        val refused = EditRecipeDocument.decode("""{"format":1,"steps":[{"kind":"Warp"}]}""")
+
+        assertFalse(refused.isUsable)
+        assertNull(refused.recipe)
     }
 }
