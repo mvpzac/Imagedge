@@ -37,7 +37,14 @@ data class EditRecipe(val steps: List<EditStep> = emptyList()) {
         return EditRecipe(next)
     }
 
-    /** 按步骤类型删除（删不掉就是无操作，不抛） */
+    /**
+     * 按步骤类型删除（删不掉就是无操作，不抛）。
+     *
+     * 删的是**类型**，不是身份，所以 `without<EditStep.Flip>()` 会把 `flip:true` 与
+     * `flip:false` 一起删掉——`Flip` 是唯一一个类型对应两个身份的步骤。今天 UI 上只有
+     * 「取消翻转」这一个入口，语义正好；将来要按方向单独撤销，得换带参数的写法，
+     * 别把这条当成方向敏感的 API 用。
+     */
     inline fun <reified S : EditStep> without(): EditRecipe =
         EditRecipe(steps.filterNot { it is S })
 
@@ -66,3 +73,20 @@ data class EditRecipe(val steps: List<EditStep> = emptyList()) {
         val EMPTY = EditRecipe()
     }
 }
+
+/**
+ * 滤镜 key；没有 Lut 步骤时返回调用方给的「原图」常量。
+ *
+ * `:image` 不该认识 `:app` 的 `FILTER_NONE = "none"`，所以它作为参数进来。
+ */
+fun EditRecipe.lutKeyOrDefault(noFilterKey: String): String =
+    lut?.key ?: noFilterKey
+
+/**
+ * 强度；没有 Lut 步骤时返回默认值。
+ *
+ * key 是「原图」占位值时**同样要返回它记的强度**：那是用户滑出来的值，alpha08 即使没套
+ * LUT 也把它留在状态里，下次选滤镜接着用。别在这里顺手加「占位值就当没有 Lut」的过滤去
+ * 「优化」掉占位步骤——那会静默丢掉强度，是行为变化，折叠等价性测试会红。
+ */
+fun EditRecipe.strengthOrDefault(default: Int): Int = lut?.strength ?: default

@@ -138,6 +138,21 @@ class EditRecipeTest {
     }
 
     @Test
+    fun `constructor rejects a list whose rank decreases`() {
+        // 反向也得测：其余用例都走 with()，而它自己就按 rank 排序，所以只把 init 里
+        // 那条「不降」的 require 删掉时，正向的接受用例一条都不会红——等于没有守卫。
+        // 调色排在几何之前正是渲染会读错的那种列表（预设解码进来也是这个形状）。
+        assertThrows(IllegalArgumentException::class.java) {
+            EditRecipe(
+                listOf(
+                    EditStep.Color(ColorAdjust(exposure = 10)),
+                    EditStep.Rotate(90f),
+                )
+            )
+        }
+    }
+
+    @Test
     fun `constructor accepts a hand-built list that is already rank ordered`() {
         // 同 rank 相邻（两条几何）也必须放行：约束是「不降」而非「严格递增」
         val recipe = EditRecipe(
