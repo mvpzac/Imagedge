@@ -232,8 +232,10 @@ data class EditRecipeFields(
  * 折叠成界面字段：八份值全部来自配方这一个来源。
  *
  * 裁剪框也在配方里（`EditStep.Crop` 那一步）。它曾是一份**独立于配方**的 live 值，于是
- * 「旋转 + 撤销」之后配方说没转、框却还停在旋转后的坐标系里，用户导出的就不是他看到的那一块
- * （`geometryToRender` 与 PhotoEditRecipeStateTest 的「undoing a rotate…」一起钉这件事）。
+ * 「旋转 + 撤销」之后画面回到未旋转、框却还停在旋转后的坐标系里——用户当初框住的那块内容被无声
+ * 换成另一块。（屏幕上那一个框与导出的那一个框从来都是同一个值，坏的是框与它依附的几何脱了钩；
+ * 别把这条写成「看到的不是导出的」，那个缺陷从来不存在。）
+ * `geometryToRender` 与 PhotoEditRecipeStateTest 的「undoing a rotate…」一起钉这件事。
  * 「拖动裁剪框不许一帧一条历史」这件事现在靠**写入侧不提交**、手势结束时才提交来做
  * （见 [PhotoEditViewModel.setCropRect] 与 [PhotoEditViewModel.commitEdit]），不是靠把框放在配方外。
  */
@@ -335,11 +337,11 @@ internal fun committedTransform(
 /**
  * 交给 `ImagePipeline.renderGeometry` 的那份几何：全部几何步骤（含裁剪框），不含调色与滤镜。
  *
- * 之所以要有这个名字：预览与导出要读**同一个值**，而「框选的不是导出的」这个缺陷就长在两份
- * 来源上——导出曾把 `geometryOnly` 与当时那份 live 裁剪框现拼在末尾，撤销只搬得动配方、
- * 搬不动那个 live 值，撤销一次旋转之后成品裁的就不是用户看到的那一块。
- * 取用它的每一处都不许再单独拼一条 `Crop`；契约（有哪些步骤、框是不是界面正在显示的那个）
- * 由 PhotoEditRecipeStateTest 的「the geometry handed to the renderer…」钉着。
+ * 之所以要有这个名字：预览与导出要读**同一个值**，一处一个名字就会长成两次取值——导出曾把
+ * `geometryOnly` 与当时那份 live 裁剪框在末尾现拼一次，预览另一条路取框，两边各自追配方；
+ * 框进配方之后，这一处取值就是唯一的那一份。取用它的每一处都不许再单独拼一条 `Crop`；
+ * 契约（有哪些步骤、框是不是界面正在显示的那个）由 PhotoEditRecipeStateTest 的
+ * 「the geometry handed to the renderer…」钉着。
  */
 internal fun geometryToRender(recipe: EditRecipe): List<EditStep> = recipe.allSteps
 
@@ -348,7 +350,9 @@ internal fun geometryToRender(recipe: EditRecipe): List<EditStep> = recipe.allSt
  *
  * 闸的本职是「按旧参数算出来的结果不许进 state」，但裁剪框是唯一一个改了不必重算的输入：
  * 裁剪页显示的是 `cropBase`（`recipe.geometryOnly`，刻意不含裁剪），拖框对它零影响，
- * 而拖框只可能发生在裁剪页上。于是拖框不许再把在途渲染判废——拖框不发起渲染，
+ * 而拖框只可能发生在裁剪页上（写它的三处都在裁剪页：[setCropRect] 的手势、[setCropAspect]
+ * 与 [resetCrop] 的按钮，外加 [setTab] 进裁剪页时那次按 chip 的重新贴合）。
+ * 于是拖框不许再把在途渲染判废——拖框不发起渲染，
  * 被丢弃的渲染就没有人接替，`processing` 只在采纳与异常两条路径里复位，卡住的转圈正好长在这上面。
  *
  * 换到的代价是「带框那一张」（`filtered` / `compareBase` / `histogram`）可能短暂落后于配方，
@@ -363,7 +367,8 @@ internal fun renderInputsOf(recipe: EditRecipe): EditRecipe = recipe.without<Edi
  *
  * 关掉时用的是 `EditRecipe.without(step)`（按身份删），不能用 reified 的
  * `without<EditStep.Flip>()`（按类型删）——后者会把另一个方向一起清掉，而水平与垂直是两枚
- * 独立的 chip、可以同时开着（真机验收点过：两道都开，关掉水平，垂直仍然亮着）。
+ * 独立的 chip、可以同时开着（模拟器 debug 包上实跑过：两道都开，关掉水平，垂直仍然亮着；
+ * 真机 + release 那一遍还没走，见 CHANGELOG 的未验证清单）。
  * 抽成纯函数是为了给它一条会红的用例：这个错在界面上不报错，只会被当成「我按错了」。
  */
 internal fun toggledFlip(recipe: EditRecipe, horizontal: Boolean): EditRecipe {
@@ -917,18 +922,18 @@ class PhotoEditViewModel @Inject constructor(
     fun setTab(tab: EditTab) {
         _state.update { it.copy(tab = tab, comparing = false, message = null) }
         if (tab == EditTab.CROP) {
-            // 已选比例预设时才重贴比例；自由比例下**不能**重置用户的裁剪框。
-            // 这一格刻意**不进历史**：它是按 chip 重新推导出来的视口贴合（alpha08 起就是这条规则），
-            // 不是用户做的一次编辑——切个分区就凭空多出一格可撤销，比它盖掉的那点框位移更误导。
-            if (_state.value.cropAspect.ratio != null) {
-                _state.update {
-                    it.copy(
-                        recipe = croppedRecipe(
-                            it.recipe,
-                            Geometry.maxRectForAspect(effectiveImageAspect(it), it.cropAspect.ratio)
-                        )
-                    )
-                }
+            // 已选比例预设时才重贴比例；自由比例下**不能**重置用户的裁剪框（alpha08 起就是这条规则）。
+            //
+            // 记一格，但只记**改动后**那一格（不是 rotate 那种前后成对）：贴合前的框本来就是
+            // 上一次提交记进去的，再记一遍就等于凭空多出一格「与当前画面一模一样」的历史——
+            // 用户点一次撤销看起来什么都没发生。而完全不记更糟：那是全类里唯一一处
+            // 「改了配方却不进历史」的写入，history.current 与 state.recipe 一旦脱钩，
+            // 下一次成对提交就会先记出一份陈旧的「之前」，同样是一格死步骤。
+            // 同值时 HistoryList.record 自己的去重会把这一下变成空操作，所以自由比例下不产生任何格子。
+            _state.update { s ->
+                val ratio = s.cropAspect.ratio ?: return@update s
+                val next = croppedRecipe(s.recipe, Geometry.maxRectForAspect(effectiveImageAspect(s), ratio))
+                s.copy(recipe = next, history = s.history.record(next))
             }
         }
         // 统一重渲染：裁剪框/几何可能在别的分区被改过，预览与底图都要跟上
@@ -961,8 +966,10 @@ class PhotoEditViewModel @Inject constructor(
      * 重新贴合（alpha08 起就是这条规则），把撤销回来的框覆盖掉。已知不对称，不是这次的改动。
      */
     fun setCropAspect(aspect: CropAspect) {
-        val forced = Geometry.maxRectForAspect(effectiveImageAspect(_state.value), aspect.ratio)
         _state.update { s ->
+            // 画面比例与配方都从**同一个** s 里读：分两次读 _state.value，第二次可能读到别人写过的
+            // state（渲染协程也在写），框就会按上一个画面的比例算——不报错，只是框偏了
+            val forced = Geometry.maxRectForAspect(effectiveImageAspect(s), aspect.ratio)
             val next = croppedRecipe(s.recipe, forced)
             s.copy(
                 cropAspect = aspect,
@@ -1189,7 +1196,8 @@ class PhotoEditViewModel @Inject constructor(
                         // 几何（含裁剪框）在全分辨率上先做，再按条带调色。
                         // 这一步不许再另外拼一条 Crop：裁剪框就在配方里。这里曾是
                         // `geometryOnly + 现拼的 live 裁剪框`，而撤销只搬配方、搬不动那个 live 值，
-                        // 撤销一次旋转之后成品裁的就不是用户看到的那一块（说明见 geometryToRender）
+                        // 框在配方里，撤销一次旋转会把「几何 + 框」一起搬回去，成品裁的才是用户
+                        // 当初框住的那块内容（说明见 geometryToRender）
                         val steps = geometryToRender(editSnapshot.recipe)
                         val transformed = ImagePipeline(steps).renderGeometry(decoded)
                         geometryApplied = transformed

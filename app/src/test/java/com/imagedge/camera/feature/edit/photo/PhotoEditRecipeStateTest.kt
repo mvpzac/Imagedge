@@ -396,7 +396,7 @@ class PhotoEditRecipeStateTest {
     fun `undoing a rotate takes the crop box back with it`() {
         // 这条钉的是「框与几何成对写进同一份配方」。反面是它曾经的形态：框是 state 上另一份
         // live 值、撤销只搬配方，于是「拖框 → 右转 → 撤销」之后画面回到未旋转、框仍停在旋转后的
-        // 坐标系上，save() 拿那份框导出的就不是用户看到的那一块。
+        // 坐标系上——用户当初框住的那块内容被无声换成另一块（框本身在屏幕上与导出始终是同一个值）。
         val dragged = NormRect(0.1f, 0.2f, 0.5f, 0.6f)
         val loaded = seededHistoryOf(EditRecipe.EMPTY)
         // setCropRect：写进配方的 Crop 槽位，不进历史
@@ -492,7 +492,7 @@ class PhotoEditRecipeStateTest {
             geometryToRender(recipe)
         )
         assertEquals(
-            "渲染拿到的那条 Crop 就是界面显示的那个框；两者分家时成品裁的不是看到的那一块",
+            "渲染拿到的那条 Crop 与界面显示的框必须出自同一份配方；分成两处取值时撤销搬得动一处、搬不动另一处",
             PhotoEditState(recipe = recipe).crop,
             geometryToRender(recipe).filterIsInstance<EditStep.Crop>().single().rect
         )
