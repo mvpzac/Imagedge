@@ -1,7 +1,9 @@
 package com.imagedge.camera.image
 
+import com.imagedge.camera.lut.ColorAdjust
+
 /**
- * 编辑步骤 —— 几何类编辑的原子单位。
+ * 编辑步骤 —— 一次编辑的原子单位（几何 / 调色 / 滤镜）。
  *
  * 只记录「做了什么」，不改动像素：[ImagePipeline.renderGeometry] 每次从输入重新生成，
  * 所以步骤可以增删、换一张图重放。
@@ -10,11 +12,6 @@ package com.imagedge.camera.image
  * ImagePipeline 里一份 sRGB 空间的 ColorMatrix 实现解释；那份实现没有任何调用方，
  * 而真正的调色走 :lut（线性光、CPU 与 GPU 共用一套换算）。留着四个无人解释的数据类，
  * 比不写更容易出错——下一个接手的人会以为配方已经能承载调色。
- *
- * 也别把「配方可以序列化 / 可以做预设与批处理」当成既成事实：**目前没有配方编码器**，
- * 编辑状态仍然散在 PhotoEditViewModel 的字段里，因此也没有撤销。要让这几件事成立，
- * 需要的是让本类型真正承载调色（Color(ColorAdjust) + Lut(key, strength)），
- * 而不是再加一份颜色实现。
  *
  * 几何类步骤的顺序由 [ImagePipeline] 固定（拉直 → 旋转 → 翻转 → 裁剪），
  * 与「用户在裁剪界面看到的画面」保持一致。
@@ -36,8 +33,55 @@ sealed interface EditStep {
     /** 翻转：horizontal = true 左右镜像，false 上下镜像 */
     data class Flip(val horizontal: Boolean) : EditStep
 
+    /**
+     * 调色：一份 [:lut] 的 ColorAdjust 快照。
+     *
+     * 它必须交给 `:lut` 解释（CPU 与 GPU 共用 SrgbTransfer 那一套换算），
+     * 本模块不实现任何像素运算——这里曾有一份 ColorMatrix 版本，正因为它在
+     * sRGB 编码空间里做乘性操作而被删掉。
+     */
+    data class Color(val adjust: ColorAdjust) : EditStep
+
+    /**
+     * 滤镜：资产 key + 强度。
+     *
+     * key 为编辑器的「原图」占位值时它仍然占位——那是**故意的**：强度是用户滑出来的值，
+     * 今天即使没选滤镜也留在状态里，下次选滤镜要用同一个强度。把无滤镜折叠成「没有这一步」
+     * 就会丢掉强度，行为与 alpha08 不一致。
+     */
+    data class Lut(val key: String, val strength: Int) : EditStep
+
     companion object {
         /** 全图（不裁剪） */
         val FULL_CROP = NormRect.FULL
     }
 }
+
+/**
+ * 步骤身份：同身份即互相替换。
+ *
+ * `Lut` 刻意不带 key——两个不同滤镜只有一份能存在，这一轮不开放多层 LUT 叠加。
+ * `Flip` 要带方向，因为水平与垂直今天可以并存。
+ */
+internal val EditStep.identity: String
+    get() = when (this) {
+        is EditStep.Straighten -> "straighten"
+        is EditStep.Rotate -> "rotate"
+        is EditStep.Flip -> "flip:$horizontal"
+        is EditStep.Crop -> "crop"
+        is EditStep.Color -> "color"
+        is EditStep.Lut -> "lut"
+    }
+
+/**
+ * 规范顺序：几何 → 调色 → LUT。同 rank 内保持原相对次序（sortedBy 是稳定排序）。
+ *
+ * 公开是因为 `:app` 的预设要按它挑出「只存颜色与滤镜」的步骤；
+ * internal 在 Kotlin 里是**按模块**算的，跨模块用不到。
+ */
+val EditStep.rank: Int
+    get() = when (this) {
+        is EditStep.Lut -> 2
+        is EditStep.Color -> 1
+        else -> 0
+    }

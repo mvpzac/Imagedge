@@ -35,6 +35,9 @@ android {
 
 dependencies {
     api(project(":core"))
+    // EditStep.Color 直接携带 ColorAdjust：在 :image 里另抄一份七参数结构，
+    // 就是本批次刚删掉的「两份调色定义必然漂移」的复现路径。
+    api(project(":lut"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
