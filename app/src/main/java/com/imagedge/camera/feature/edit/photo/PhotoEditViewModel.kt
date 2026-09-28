@@ -285,6 +285,21 @@ internal fun toggledFlip(recipe: EditRecipe, horizontal: Boolean): EditRecipe {
 internal fun seededHistoryOf(recipe: EditRecipe): HistoryList<EditRecipe> =
     HistoryList<EditRecipe>().record(recipe)
 
+/**
+ * 换到下一张照片时带过去的部分：调色与「记住的强度」。
+ *
+ * 与 alpha08 逐字一致——它 `loadPicked` 时带 `strength` 与 `adjust`，而 `selectedKey` 回落到默认
+ * （原图）。滤镜选择属于「这张照片用哪个风格」，调参数属于「我这次的影调偏好」，
+ * 前者跟着照片走、后者跟着人走。配方里那条 key 为「原图」的 Lut 步骤不是残留：
+ * 强度要活下来就得让它继续占位（见 strengthOrDefault 的折叠等价测试）。
+ */
+internal fun carriedColour(previous: EditRecipe, noFilterKey: String): EditRecipe {
+    val strength = previous.strengthOrDefault(80)
+    val adjust = previous.colorAdjust
+    val base = EditRecipe.EMPTY.with(EditStep.Lut(noFilterKey, strength))
+    return if (adjust.isIdentity) base else base.with(EditStep.Color(adjust))
+}
+
 @HiltViewModel
 class PhotoEditViewModel @Inject constructor(
     @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
@@ -435,13 +450,15 @@ class PhotoEditViewModel @Inject constructor(
                 convOutPixels = null
                 histoPixels = null
                 _state.update {
+                    // 上一张的调色与记住的强度跟着人走，滤镜选择与几何跟着照片走（理由见 carriedColour）
+                    val carried = carriedColour(it.recipe, FILTER_NONE)
                     PhotoEditState(
                         sourceUri = uri,
                         original = decoded,
-                        // 历史必须在这里播下种子（理由见 seededHistoryOf）：种子取 EMPTY，
-                        // 因为新载入的配方就是 EMPTY
-                        recipe = EditRecipe.EMPTY,
-                        history = seededHistoryOf(EditRecipe.EMPTY),
+                        recipe = carried,
+                        // 历史必须在这里播下种子（理由见 seededHistoryOf），而且种子就是新状态那份配方：
+                        // 两者取不同的值时，第一次撤销会退回一张照片从来没有过的状态
+                        history = seededHistoryOf(carried),
                         // 导出配置也要带过去。不带的话「仅清除位置」只在当前这张有效，
                         // 换下一张就悄悄回到 KEEP_ALL——用户以为自己在保护隐私，
                         // 而 GPS 只是晚了一张照片才跟着出去

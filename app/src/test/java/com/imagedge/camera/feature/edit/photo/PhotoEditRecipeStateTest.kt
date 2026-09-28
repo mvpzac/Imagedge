@@ -4,6 +4,7 @@ import com.imagedge.camera.image.EditRecipe
 import com.imagedge.camera.image.EditStep
 import com.imagedge.camera.image.HistoryList
 import com.imagedge.camera.image.NormRect
+import com.imagedge.camera.image.rank
 import com.imagedge.camera.image.strengthOrDefault
 import com.imagedge.camera.lut.ColorAdjust
 import org.junit.Assert.assertEquals
@@ -19,11 +20,13 @@ import org.junit.Test
  * - **转发**：[PhotoEditState] 上那九个同名属性真的转发折叠结果，并把自己那份 live crop 一起
  *   交给折叠（alpha08 的 hasGeometryEdits 里写着「!crop.isFull」）；
  * - **写入**：同一槽位的第二次写是替换不是叠加（滤镜与调色各一份），旋转度数在那**一份** rotate
- *   槽位上累加，关掉翻转只删那一个方向，换照片时历史里已经播下「刚载入」那一格。
+ *   槽位上累加，关掉翻转只删那一个方向，换照片时历史里已经播下「刚载入」那一格；
+ * - **跨照片**：换到下一张时哪些东西跟着人走（调色、强度）、哪些跟着照片走（滤镜选择、几何）。
  *
  * `rotate()` / `toggleFlip*()` / `loadPicked()` 都挂在 ViewModel 上（构造要 Context，重渲染走
  * viewModelScope，而 :app 的测试依赖只有 junit4，没有 mockk 与 Robolectric），JVM 里起不来，
- * 所以把它们的纯算术与纯构造抽成 [rotatedRecipe] / [toggledFlip] / [seededHistoryOf] 由这里钉。
+ * 所以把它们的纯算术与纯构造抽成 [rotatedRecipe] / [toggledFlip] / [seededHistoryOf] /
+ * [carriedColour] 由这里钉。
  * 这三处都属于「写错了界面不报错、只是行为不对」：90° 不累加就是按了没反应，按类型删翻转会把
  * 另一个方向一起清掉，历史没播种则第一次改动根本退不回去。
  * （strength 的**输入**钳制在 `setStrength` 里，那要 ViewModel 实例，不在本文件钉。）
@@ -255,6 +258,87 @@ class PhotoEditRecipeStateTest {
             "再按一次是打开同一份槽位，不是新增第二道",
             both.steps.size,
             toggledFlip(horizontalOff, horizontal = true).steps.size
+        )
+    }
+
+    @Test
+    fun `switching photos carries the tone and the strength but not the filter or the geometry`() {
+        // alpha08 的 loadPicked 带 strength 与 adjust、不带 selectedKey，几何靠「新建 state」清零；
+        // 这里逐条钉同一件事，读的是 UI 那条路径（PhotoEditState 的派生属性）。
+        val adjust = ColorAdjust(exposure = 43, contrast = -20)
+        val previous = EditRecipe.EMPTY
+            .with(EditStep.Lut("kodak2383", 44))
+            .with(EditStep.Color(adjust))
+            .with(EditStep.Rotate(90f))
+            .with(EditStep.Flip(horizontal = true))
+            .with(EditStep.Flip(horizontal = false))
+            .with(EditStep.Straighten(6f))
+
+        val carried = carriedColour(previous, FILTER_NONE)
+        val fresh = PhotoEditState(recipe = carried)
+
+        assertEquals("调色跟着人走：下一张还是这次的影调", adjust, fresh.adjust)
+        assertEquals(
+            "强度同理；它靠配方里那条 key 为「原图」的 Lut 步骤占位才活得下来",
+            44,
+            fresh.strength
+        )
+        assertEquals("滤镜选择跟着照片走：下一张回到原图", FILTER_NONE, fresh.selectedKey)
+
+        // 几何「一步都不许带」要按配方形状断言，不能只看折叠布尔：
+        // fields(crop) 的裁剪来自参数而不是配方，配方里混进一条 Crop 时 hasGeometryEdits 照样是假的。
+        assertEquals(
+            "旋转、翻转、拉直、裁剪框都不跟着人走",
+            emptyList<EditStep>(),
+            carried.steps.filter { it.rank == 0 }
+        )
+        assertEquals(0, fresh.quarterTurns)
+        assertFalse(fresh.flipHorizontal)
+        assertFalse(fresh.flipVertical)
+        assertEquals(0f, fresh.straighten, 0f)
+        assertFalse(fresh.hasGeometryEdits)
+
+        // 带过来的调色本身就算「没存盘的改动」：alpha08 换完照片「重置」就是亮的
+        // （canReset/hasEdits 吃的是同一个 hasEdits，见 PhotoEditScreen 的 EditorFrameState）
+        assertTrue("换了照片仍带着未存盘的调色，离开确认与重置按钮都得认", fresh.hasEdits)
+    }
+
+    @Test
+    fun `nothing to carry leaves a bare strength slot instead of a phantom colour step`() {
+        // 折叠结果两者一样（identity 的 Color 读回还是 NONE），所以这条只能钉配方形状：
+        // 带过去的必须是「有内容的东西」，空步骤不许占槽位。
+        val previous = EditRecipe.EMPTY.with(EditStep.Lut(FILTER_NONE, 37))
+        val carried = carriedColour(previous, FILTER_NONE)
+
+        assertEquals(listOf(EditStep.Lut(FILTER_NONE, 37)), carried.steps)
+        assertEquals(37, carried.fields().strength)
+        assertFalse(
+            "只带着强度换照片，在新照片上同样不算改过（与 alpha08 同语义），重置不该亮",
+            PhotoEditState(recipe = carried).hasEdits
+        )
+    }
+
+    @Test
+    fun `the seeded history points at the recipe the new photo actually starts with`() {
+        // loadPicked 里 recipe 与 history 用的是同一个 carried 值，这条钉那个不变量本身：
+        // 游标得站在起始配方上，否则第一次撤销退回的是「这张照片从来没有过的状态」。
+        val carried = carriedColour(
+            EditRecipe.EMPTY
+                .with(EditStep.Lut("kodak2383", 44))
+                .with(EditStep.Color(ColorAdjust(exposure = 43))),
+            FILTER_NONE
+        )
+        val seeded = seededHistoryOf(carried)
+
+        assertEquals(carried, seeded.current)
+        assertFalse("站在刚载入那一格，再往前就没了", seeded.canUndo)
+
+        val edited = seeded.record(carried.with(EditStep.Lut("slog3_fuji_et-8", 20)))
+        assertTrue(edited.canUndo)
+        assertEquals(
+            "第一次撤销要退回「带着影调的刚载入」，不是真正的空白",
+            carried,
+            edited.undo().current
         )
     }
 }

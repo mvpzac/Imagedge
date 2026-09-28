@@ -173,7 +173,8 @@ fun PhotoEditScreen(
 
                     // 撤销/重做：一格 = 一次连续操作（提交时机见 PhotoEditViewModel.commitEdit）。
                     // 「刚载入」那一格由 loadPicked 调 seededHistoryOf 播下种子，所以第一次改动
-                    // 就能退回没动过的样子——播种的理由与用例都写在那个小函数旁边
+                    // 就能退回它；那一格的内容是 carriedColour 带上来的调色与强度，不是空白
+                    // （用例见 PhotoEditRecipeStateTest 的「seeded history points at…」）。
                     Row(horizontalArrangement = Arrangement.spacedBy(Spacing.S)) {
                         AppLink(
                             text = stringResource(R.string.editor_undo),
