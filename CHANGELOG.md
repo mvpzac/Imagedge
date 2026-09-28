@@ -41,12 +41,20 @@ All notable changes to this project are documented here. Format follows [Keep a 
   （`renderInputsOf`）——否则拖框把在途结果判废、自己又不发起渲染，`processing` 无人复位，
   屏幕上就是一个转到停的圈。点比例与重置裁剪是离散的一格，与旋转同类，前后各提交
 
+- 新增 `data/edit/EditRecipeDocument.kt`：一份配方的文本编解码（预设文件的读写），
+  纪律照 `data/profile/PresetDocument.kt`——版本号真的写进字节（`encodeDefaults = true`，
+  否则版本等于默认值会被省略，「未来版本必须拒绝」那条测试就成空跑）、未知键拒绝、
+  未知/不完整步骤拒绝、越界拒绝、超长拒绝，且**一律给原因而不是抛**。
+  `EditRecipe` 的 init 抛的 IllegalArgumentException 在这里翻译成原因：文件来自磁盘，
+  是不可信输入，一个能解析但不合规矩的文件不该把调用方炸崩；不变量仍只有 init 那一份，
+  读侧不另抄一遍规则。线格式带整份配方（含几何四步），套用侧只取颜色与滤镜是 Task 6 的事
+
 零行为变化是被测试钉住的，不是被声明的：`EditRecipeFoldEquivalenceTest` 断言配方折叠出的
 （滤镜 key, 强度, 调色）三元组与 alpha08 直接读三个字段逐位相同，包括「没选滤镜也记住强度」
 这条最容易被顺手优化掉的；换照片时的携带行为也按 alpha08 逐字恢复（带调色与强度、
 滤镜选择回落到原图、几何不带）。
 
-验收：全仓 332 → 389 条单测 + lint + `uiSpecCheck` 通过。撤销/重做/翻转独立性/
+验收：全仓 332 → 398 条单测 + lint + `uiSpecCheck` 通过。撤销/重做/翻转独立性/
 带改动返回确认这几项在模拟器上用 debug 变体实跑过并留了截图。
 
 ### 未验证 / Not yet verified
@@ -55,11 +63,13 @@ All notable changes to this project are documented here. Format follows [Keep a 
   不能用 debug 覆盖 release（签名不符，唯一出路是卸载，那会清掉传输账本）
 - 「换一张照片带走我刚调好的影调」今天只在传输页链路可达（创作页一个 VM 只 load 一次），
   模拟器无传输记录 → 该行为只有 JVM 三条断言撑着，未实跑
-- 裁剪框那一格的修复**还没过重审**：任务级评审提的三条已各自处理（注释里那句伪造的 RED 证据删掉、
-  拖框不再白烧一轮渲染、拉直不搬框裁定为有意行为并写进规则所在处），模拟器上实跑留了证据
-  （拖框后 1 秒与立即截图逐字节相同 = 没有转圈也没有重算；切到调色页预览确实带上框）。
-  复核要由另一个上下文做，尚未回
-- 计划 1 剩余部分未做：预设编解码与落盘（Task 5、6）。计划 2（度量式排版 + 图层化画框）未开始
+- 裁剪框那一格过了**两轮**评审：三条 Important 已处理，重审留下的两条 Minor（贴合不入历史
+  造成的死格子、这套修复自己的错误前提）也已落地。重审中途曾报一条「预览源被回收」的 Critical，
+  经独立核对驳回：`finally` 的回收清单按引用排除 `processSource`，`releaseBitmapsLater`
+  又显式保留 `previewSource`/`thumbSource`，且模拟器上按它给的时序跑完一轮无异常、无失败提示
+- 预设的**落盘与界面**（Task 6）未做：今天 `EditRecipeDocument` 能读能写，但用户还没有任何
+  入口能存一个预设出来，所以「预设」在界面上仍然不存在
+- 计划 1 剩最后一格：预设的落盘与套用界面（Task 6）。计划 2（度量式排版 + 图层化画框）未开始
 
 
 ## [0.2.0-alpha08] - 2026-09-28
