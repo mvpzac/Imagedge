@@ -22,11 +22,16 @@ private const val MAX_PRESET_NAME_CHARS = 60
  * 点号也一并去掉，是因为读回来的名字走的是 `File.nameWithoutExtension`：
  * 留着点号的话「我的.v2」落盘成 `我的.v2.json`，列表里读回来却是「我的」，
  * 再按这个名字去读就找不到文件——预设存在了却永远套不出来，且不报任何错。
+ *
+ * **先截断再 trim**，反过来会留下一个尾巴空格：59 个字符 + 空格 + 更多，截到 60 之后
+ * 末尾是个空格，而 `presetFileFor` 每次都会再 trim 掉它 → 写进去的文件叫「…​ .json」、
+ * 列出来的是「…」、再去按列出的名字读又解析成另一个文件——正是点号那条要防的
+ * 「存在但永远套不出来」，只是换了个诱饵。
  */
 internal fun sanitizePresetName(raw: String): String = raw
     .replace(Regex("""[\\/:.*?"<>|\u0000-\u001F]"""), "")
-    .trim()
     .take(MAX_PRESET_NAME_CHARS)
+    .trim()
 
 /**
  * 名字 → 预设文件；不合法（归一化后为空、或含路径分隔符）返回 null，**不抛**。
@@ -35,7 +40,8 @@ internal fun sanitizePresetName(raw: String): String = raw
  * 「../../etc/passwd」变成「etcpasswd」，文件确实落在目录里、构不成穿越，
  * 但用户存的那个名字与之后列出来的那个名字已经不是同一个了——静默改名比拒绝更难查。
  * 作废之后读侧给原因、写侧抛 IllegalArgumentException（由 [EditRecipePresetStore.save] 包成 Result），
- * 每条拒绝路径都留下得见的理由。
+ * 这两条拒绝路径都留下得见的理由。**删除这一条目前不给**：`delete` 只返回 Boolean，
+ * 名字无效与文件删不掉在界面上都长成一句「删除失败」——要分开得先把签名换成带原因的结果。
  */
 internal fun presetFileFor(dir: File, name: String): File? {
     if (name.contains('/') || name.contains('\\')) return null
@@ -61,10 +67,18 @@ internal fun writePreset(dir: File, name: String, recipe: EditRecipe) {
 internal fun readPreset(dir: File, name: String): DecodeResult {
     val file = presetFileFor(dir, name) ?: return DecodeResult(null, "预设名称无效")
     if (!file.isFile) return DecodeResult(null, "预设「${sanitizePresetName(name)}」不存在")
-    val text = runCatching { file.readText() }
-        .getOrElse { return DecodeResult(null, "预设文件读不出来：${it.message}") }
+    // 只接 IOException：兜住一切会把 OOM 这类程序错误也翻成一句「读不出来：null」给用户看
+    val text = try {
+        file.readText()
+    } catch (e: java.io.IOException) {
+        return DecodeResult(null, "预设文件读不出来：${e.message}")
+    }
     return EditRecipeDocument.decode(text)
 }
+
+/** 这个名字已经有预设了吗（覆盖前要先问一句，见 PhotoEditViewModel.savePreset） */
+internal fun presetExists(dir: File, name: String): Boolean =
+    presetFileFor(dir, name)?.isFile == true
 
 /**
  * 编辑预设落盘：`filesDir/edit_presets/<名字>.json`。
@@ -80,12 +94,19 @@ class EditRecipePresetStore @Inject constructor(
 
     fun list(): List<String> = dir.listPresetNames()
 
+    fun exists(name: String): Boolean = presetExists(dir, name)
+
     fun save(name: String, recipe: EditRecipe): Result<Unit> =
         runCatching { writePreset(dir, name, recipe) }
             .onFailure { AppLog.w(TAG, "预设保存失败：${it.message}") }
 
     fun read(name: String): DecodeResult = readPreset(dir, name)
 
+    /**
+     * 删除。**只返回 Boolean 是本层的短板**：名字无效与 unlink 失败在界面上会塌成同一句话，
+     * 真正的区别只进 AppLog。调用方（[PhotoEditViewModel.deletePreset]）先用 [exists] 分一次，
+     * 让「不存在」与「删不掉」在界面上是两条原因——多一次 stat 换一个看得懂的回执，值。
+     */
     fun delete(name: String): Boolean {
         val file = presetFileFor(dir, name) ?: return false
         val ok = file.delete()

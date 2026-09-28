@@ -66,7 +66,7 @@ All notable changes to this project are documented here. Format follows [Keep a 
 这条最容易被顺手优化掉的；换照片时的携带行为也按 alpha08 逐字恢复（带调色与强度、
 滤镜选择回落到原图、几何不带）。
 
-验收：全仓 332 → 415 条单测 + lint + `uiSpecCheck` 通过。撤销/重做/翻转独立性/
+验收：全仓 332 → 418 条单测 + lint + `uiSpecCheck` 通过。撤销/重做/翻转独立性/
 带改动返回确认这几项在模拟器上用 debug 变体实跑过并留了截图。
 
 ### 未验证 / Not yet verified
@@ -81,8 +81,12 @@ All notable changes to this project are documented here. Format follows [Keep a 
   又显式保留 `previewSource`/`thumbSource`，且模拟器上按它给的时序跑完一轮无异常、无失败提示
 - 预设走的是**模拟器 + debug 包**那一遍（存 → 落盘文件逐字节看过 → 套用把 +62 曝光清回 0 →
   长按删除 → 目录空了），真机 + release 那一遍仍未做（手机本会话两次掉线，只剩 emulator-5554）
-- 删除成功那条提示（`state.message`）长在预览区，而预设区排在调色分区底部——按得着删除
-  却看不见「已删除」，是个已知的小毛病，没在本次修
+- 预设的三个回执（存 / 套 / 删）改走 Snackbar 而不是 `state.message`：后者渲染在预览上方，
+  而预设区在调色分区底部，被拒的名字等于「按钮没反应」，成功那条还会被 `resultOk = state.saved`
+  画成红色（saved 只有导出成功才为真）。覆盖同名预设现在也先问一句——删除都要确认，
+  毁掉一份用户自己存的东西反而不问，这个不一致本身就是 bug
+- 套用一份「滤镜已经不在了」的预设会被拒并给回执：`applyCurrentFilter` 找不到 key 时是静默 return，
+  那样配方与历史都推进了、预览还是旧图、导出读配方 → **预览与成品分家**，正是这一路要防的形状
 - 计划 1 已完。计划 2（度量式排版 + 图层化画框）未开始；多层 LUT 与 SAF 预设分享刻意留到后面
 
 

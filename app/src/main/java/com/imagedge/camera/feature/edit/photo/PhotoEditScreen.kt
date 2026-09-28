@@ -36,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -568,8 +569,13 @@ private fun PresetSection(
     onApply: (String) -> Unit,
     onDelete: (String) -> Unit,
 ) {
-    var name by remember { mutableStateOf("") }
+    // rememberSaveable：切到裁剪再切回来时 ColorPanel 整个被 when 分支换掉，普通 remember
+    // 会把用户刚打的预设名一起丢掉
+    var name by rememberSaveable { mutableStateOf("") }
     var pendingDelete by remember { mutableStateOf<String?>(null) }
+    // 覆盖同名预设要单独问一次：删除都要确认，毁掉一份用户自己存的东西反而不问，
+    // 这个不一致本身就是 bug
+    var pendingOverwrite by remember { mutableStateOf<String?>(null) }
 
     AppSection(title = stringResource(R.string.edit_preset_apply)) {
         Column(verticalArrangement = Arrangement.spacedBy(Spacing.S)) {
@@ -609,11 +615,29 @@ private fun PresetSection(
             // 不如让按钮自己看起来就是按不动的
             AppButton(
                 text = stringResource(R.string.edit_preset_save),
-                onClick = { onSave(name.trim()) },
+                onClick = {
+                    val trimmed = name.trim()
+                    // 撞名先问一句再覆盖（presets 这一屏本来就有，不用额外读盘）
+                    if (presets.any { it == trimmed }) pendingOverwrite = trimmed
+                    else onSave(trimmed)
+                },
                 type = AppButtonType.SECONDARY,
                 enabled = name.isNotBlank()
             )
         }
+    }
+
+    pendingOverwrite?.let { target ->
+        ConfirmDialog(
+            title = stringResource(R.string.edit_preset_overwrite_title),
+            body = stringResource(R.string.edit_preset_overwrite_body, target),
+            confirmLabel = stringResource(R.string.edit_preset_overwrite_confirm),
+            onDismiss = { pendingOverwrite = null },
+            onConfirm = {
+                pendingOverwrite = null
+                onSave(target)
+            }
+        )
     }
 
     pendingDelete?.let { target ->

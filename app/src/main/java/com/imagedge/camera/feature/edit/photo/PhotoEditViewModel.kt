@@ -9,6 +9,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.imagedge.camera.core.common.AppLog
 import com.imagedge.camera.data.edit.EditRecipePresetStore
+import com.imagedge.camera.data.edit.sanitizePresetName
 import com.imagedge.camera.data.lut.LutType
 import com.imagedge.camera.data.lut.UserLutStore
 import com.imagedge.camera.image.EditRecipe
@@ -362,6 +363,19 @@ internal fun geometryToRender(recipe: EditRecipe): List<EditStep> = recipe.allSt
  * 撤销与重做各自 `applyCurrentFilter`、导出直读配方而非预览位图。
  */
 internal fun renderInputsOf(recipe: EditRecipe): EditRecipe = recipe.without<EditStep.Crop>()
+
+/**
+ * 把一份预设套到当前配方上：留下这张照片自己的几何，只换颜色与滤镜。
+ *
+ * 抽成纯函数是因为这里守着计划点名的两条不变量——**几何保留**、**同类替换而不是叠加**——
+ * 而 `applyPreset` 本体要 ViewModel 实例，JVM 里起不来（同 [carriedColour] 的理由）。
+ * 线格式带的是整份配方（含几何四步），所以这里按 rank 滤掉几何；走 [EditRecipe.with]
+ * 而不是直接拼列表，是为了让「同一身份至多一步」仍由配方自己保证——手拼会叠出两条 Color，
+ * 读的时候只看得见后一条，前一条白留在配方里。
+ */
+internal fun presetAppliedTo(current: EditRecipe, preset: EditRecipe): EditRecipe =
+    preset.steps.filter { it.rank > 0 }
+        .fold(EditRecipe(current.steps.filter { it.rank == 0 })) { acc, step -> acc.with(step) }
 
 /**
  * 翻转开关的写入侧：当前开着就删掉**那一个方向**，关着就占住那一份槽位。
@@ -814,34 +828,51 @@ class PhotoEditViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) { _presets.value = presetStore.list() }
     }
 
-    /** 存的是「调色 + 滤镜」，不含几何：几何属于这张照片的构图，换一张就没意义 */
+    /**
+     * 存的是「调色 + 滤镜」，不含几何：几何属于这张照片的构图，换一张就没意义。
+     *
+     * 回执走 [SnackbarController] 而不是 `state.message`：预设区排在调色分区底部，
+     * 而 message 渲染在预览上方——用户在按「存为预设」的时候根本看不到那一屏，
+     * 一个被拒的名字就表现为按钮没反应。
+     */
     fun savePreset(name: String) {
         val colourOnly = EditRecipe(_state.value.recipe.steps.filter { it.rank > 0 })
         presetStore.save(name, colourOnly)
-            .onSuccess { refreshPresets() }
+            .onSuccess {
+                refreshPresets()
+                snackbarController.show("已存为预设「${sanitizePresetName(name)}」")
+            }
             .onFailure { error ->
-                _state.update { it.copy(message = "预设保存失败：${error.message}") }
+                snackbarController.show("预设保存失败：${error.message ?: error.javaClass.simpleName}")
             }
     }
 
     /**
-     * 套用预设：保留当前照片的几何步骤，只换颜色与滤镜。
+     * 套用预设：保留当前照片的几何步骤，只换颜色与滤镜（合并规则见 [presetAppliedTo]）。
      *
      * 走 [committedTransform] 而不是「前后各调一次 commitEdit」：那两次提交与 rotate / 翻转 /
      * 点比例是同一件事（一次离散改动、前后各一格），用同一个函数才不会出现第二种历史形状。
      * 中间再读一次 `_state.value` 更是白送一个「改过配方却没进历史」的窗口。
+     *
+     * **先验滤镜还在不在**：预设里的 LUT key 来自磁盘，而用户可能在 设置 → LUT 管理 里
+     * 删掉或改名那个 .cube。`applyCurrentFilter` 找不到 key 时是 `?: return`——
+     * 于是配方与历史都推进了、预览还是旧的那张、`hasEdits` 翻成「有改动」，
+     * 而导出读的是配方：**预览与成品分家**。这条路径上唯一正确的做法是先拒掉。
      */
     fun applyPreset(name: String) {
         val result = presetStore.read(name)
         val preset = result.recipe
         if (preset == null) {
-            _state.update { it.copy(message = result.failure ?: "预设读取失败") }
+            snackbarController.show(result.failure ?: "预设读取失败")
+            return
+        }
+        val lutKey = preset.lut?.key
+        if (lutKey != null && _filters.value.none { it.key == lutKey }) {
+            snackbarController.show("预设里的滤镜已经不在了，套用取消")
             return
         }
         _state.update { s ->
-            val geometry = s.recipe.steps.filter { it.rank == 0 }
-            val next = preset.steps.filter { it.rank > 0 }
-                .fold(EditRecipe(geometry)) { acc, step -> acc.with(step) }
+            val next = presetAppliedTo(s.recipe, preset)
             s.copy(
                 recipe = next,
                 history = committedTransform(s.history, s.recipe, next),
@@ -854,14 +885,16 @@ class PhotoEditViewModel @Inject constructor(
     /**
      * 删除预设。**不动配方**：预设是库，不是这张照片上的一步编辑，所以它不进历史。
      *
-     * 删的是用户自己存的东西，成败都要说得出结果——`delete` 返回 false（名字无效、文件删不掉）
-     * 时给一条原因，不静默。
+     * 先 `exists` 再删，是为了让「不存在」与「删不掉」是两条不同的回执——`delete` 只回
+     * Boolean，两者会塌成一句「删除失败」。多一次 stat 换一个看得懂的结果，值得。
      */
     fun deletePreset(name: String) {
-        val deleted = presetStore.delete(name)
-        _state.update {
-            it.copy(message = if (deleted) "已删除预设「$name」" else "预设「$name」删除失败")
+        val outcome = when {
+            !presetStore.exists(name) -> "预设「${sanitizePresetName(name)}」不存在"
+            presetStore.delete(name) -> "已删除预设「${sanitizePresetName(name)}」"
+            else -> "预设「${sanitizePresetName(name)}」删不掉（文件仍在）"
         }
+        snackbarController.show(outcome)
         refreshPresets()
     }
 

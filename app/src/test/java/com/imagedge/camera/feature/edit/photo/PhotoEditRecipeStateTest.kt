@@ -516,6 +516,48 @@ class PhotoEditRecipeStateTest {
     }
 
     @Test
+    fun `applying a preset keeps this photo's geometry and takes only the look`() {
+        // 计划点名的两条不变量都在这：几何保留、颜色**替换**而不是叠加。
+        // 线格式带的是整份配方，所以预设里真的会有几何四步——套用时必须按 rank 滤掉，
+        // 否则别人手机上框好的 16:9 会盖掉这张照片的构图
+        val photo = EditRecipe.EMPTY
+            .with(EditStep.Rotate(90f))
+            .with(EditStep.Color(ColorAdjust(exposure = 10)))
+        val preset = EditRecipe.EMPTY
+            .with(EditStep.Straighten(12f))
+            .with(EditStep.Crop(NormRect(0.2f, 0.2f, 0.8f, 0.8f)))
+            .with(EditStep.Color(ColorAdjust(contrast = 40)))
+            .with(EditStep.Lut("kodak2383", 60))
+
+        val applied = presetAppliedTo(photo, preset)
+
+        assertEquals(
+            "照片自己的旋转留着，预设带来的拉直与裁剪一律不要",
+            listOf(EditStep.Rotate(90f)),
+            applied.steps.filter { it.rank == 0 }
+        )
+        assertEquals(
+            "颜色与滤镜取预设那份，且各自只有一份——叠两条 Color 时读侧只看得到后一条，" +
+                    "前一条会白留在配方里被导出重放",
+            listOf(EditStep.Color(ColorAdjust(contrast = 40)), EditStep.Lut("kodak2383", 60)),
+            applied.steps.filter { it.rank > 0 }
+        )
+    }
+
+    @Test
+    fun `applying a preset with no look in it clears the look instead of keeping it`() {
+        // 空配方是合法预设（Task 5 钉过），套用它必须真的「清掉调色」，
+        // 而不是因为没东西可替换就悄悄什么都不做——那与用户点它的意图正好相反
+        val photo = EditRecipe.EMPTY
+            .with(EditStep.Flip(horizontal = true))
+            .with(EditStep.Color(ColorAdjust(saturation = -100)))
+
+        val applied = presetAppliedTo(photo, EditRecipe.EMPTY)
+
+        assertEquals(listOf<EditStep>(EditStep.Flip(horizontal = true)), applied.steps)
+    }
+
+    @Test
     fun `the render guard key still carries everything a render actually consumes`() {
         val plain = EditRecipe.EMPTY.with(EditStep.Straighten(3f))
         assertNotEquals("拉直角是渲染的输入，闸不许对它瞎", renderInputsOf(plain), renderInputsOf(plain.with(EditStep.Straighten(9f))))

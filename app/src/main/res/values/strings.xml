@@ -261,6 +261,10 @@
     <string name="edit_preset_delete_confirm">删除</string>
     <!-- 长按是唯一能删的入口，不写出来就等于没有这个入口（设计 §4.7：不可发现的交互要标出来） -->
     <string name="edit_preset_long_press_hint">长按预设可删除</string>
+    <!-- 覆盖同名预设：删除都要确认，毁掉一份用户自己存的东西更不能不问 -->
+    <string name="edit_preset_overwrite_title">覆盖预设</string>
+    <string name="edit_preset_overwrite_body">「%1$s」已经存在。覆盖后原来那份就没了，当前照片的改动不受影响。</string>
+    <string name="edit_preset_overwrite_confirm">覆盖</string>
 
     <!-- LUT 滤镜页：按适用画面类型分排 + 问号说明 -->
     <string name="edit_lut_filter_title">滤镜</string>
