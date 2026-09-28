@@ -2,6 +2,7 @@ package com.imagedge.camera.image
 
 import com.imagedge.camera.lut.ColorAdjust
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 /**
@@ -100,5 +101,55 @@ class EditRecipeTest {
         assertEquals(ColorAdjust.NONE, recipe.colorAdjust)
         assertEquals(null, recipe.lut)
         assertEquals(emptyList<EditStep>(), recipe.allSteps)
+    }
+
+    @Test
+    fun `without removes the rotate slot and leaves the rest in order`() {
+        val recipe = EditRecipe.EMPTY
+            .with(EditStep.Rotate(90f))
+            .with(EditStep.Color(ColorAdjust(exposure = 10)))
+            .with(EditStep.Lut("kodak2383", 50))
+
+        val next = recipe.without<EditStep.Rotate>()
+
+        assertEquals(listOf("color", "lut"), next.steps.map { it.identity })
+        assertEquals(EditStep.Color(ColorAdjust(exposure = 10)), next.steps[0])
+    }
+
+    @Test
+    fun `without a step that is absent is a no-op returning an equal recipe`() {
+        val recipe = EditRecipe.EMPTY
+            .with(EditStep.Crop(NormRect(0.1f, 0.1f, 0.9f, 0.9f)))
+            .with(EditStep.Color(ColorAdjust(exposure = 10)))
+
+        assertEquals(recipe, recipe.without<EditStep.Rotate>())
+    }
+
+    @Test
+    fun `constructor rejects a list holding two steps of the same identity`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            EditRecipe(
+                listOf(
+                    EditStep.Color(ColorAdjust(exposure = 10)),
+                    EditStep.Color(ColorAdjust(exposure = 30)),
+                )
+            )
+        }
+    }
+
+    @Test
+    fun `constructor accepts a hand-built list that is already rank ordered`() {
+        // 同 rank 相邻（两条几何）也必须放行：约束是「不降」而非「严格递增」
+        val recipe = EditRecipe(
+            listOf(
+                EditStep.Rotate(90f),
+                EditStep.Flip(horizontal = true),
+                EditStep.Color(ColorAdjust(exposure = 10)),
+                EditStep.Lut("kodak2383", 50),
+            )
+        )
+
+        assertEquals(4, recipe.steps.size)
+        assertEquals(listOf("rotate", "flip:true", "color", "lut"), recipe.steps.map { it.identity })
     }
 }

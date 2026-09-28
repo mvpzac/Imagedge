@@ -11,7 +11,8 @@ import com.imagedge.camera.lut.ColorAdjust
  * **这里刻意不再有亮度/对比度/饱和度/色温四个变体。** 它们曾存在，并由
  * ImagePipeline 里一份 sRGB 空间的 ColorMatrix 实现解释；那份实现没有任何调用方，
  * 而真正的调色走 :lut（线性光、CPU 与 GPU 共用一套换算）。留着四个无人解释的数据类，
- * 比不写更容易出错——下一个接手的人会以为配方已经能承载调色。
+ * 比不写更容易出错——那时它们会让人以为配方已经能承载调色，可那四个字段谁也没有解释。
+ * 如今承载调色的位置是下面的 `Color`（以及滤镜的 `Lut`），一律由 :lut 解释。
  *
  * 几何类步骤的顺序由 [ImagePipeline] 固定（拉直 → 旋转 → 翻转 → 裁剪），
  * 与「用户在裁剪界面看到的画面」保持一致。
@@ -34,7 +35,7 @@ sealed interface EditStep {
     data class Flip(val horizontal: Boolean) : EditStep
 
     /**
-     * 调色：一份 [:lut] 的 ColorAdjust 快照。
+     * 调色：一份 `:lut` 的 ColorAdjust 快照。
      *
      * 它必须交给 `:lut` 解释（CPU 与 GPU 共用 SrgbTransfer 那一套换算），
      * 本模块不实现任何像素运算——这里曾有一份 ColorMatrix 版本，正因为它在
@@ -78,10 +79,18 @@ internal val EditStep.identity: String
  *
  * 公开是因为 `:app` 的预设要按它挑出「只存颜色与滤镜」的步骤；
  * internal 在 Kotlin 里是**按模块**算的，跨模块用不到。
+ *
+ * 几何四个类型逐条列成 0，不写 else：将来给 identity 加了新变体（那里没有 else，
+ * 编译器会逼你补），却忘了在这里补 rank 的话，else 会把它悄悄归到 0、让它出现在
+ * allSteps 里，再被 ImagePipeline 的逐类型 filterIsInstance 丢掉——用户做了一步却
+ * 永远渲染不出来，且没有任何地方报错。这里也交给编译器兜底。
  */
 val EditStep.rank: Int
     get() = when (this) {
-        is EditStep.Lut -> 2
+        is EditStep.Straighten -> 0
+        is EditStep.Rotate -> 0
+        is EditStep.Flip -> 0
+        is EditStep.Crop -> 0
         is EditStep.Color -> 1
-        else -> 0
+        is EditStep.Lut -> 2
     }
