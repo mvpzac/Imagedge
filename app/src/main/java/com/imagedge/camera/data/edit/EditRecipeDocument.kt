@@ -112,9 +112,14 @@ object EditRecipeDocument {
         }
         // 不变量只有 EditRecipe.init 那一份：这里再抄一遍「同身份至多一步 / rank 非降」就是
         // 两份规则，将来 init 改了自己不会跟着改。所以是**接住它抛的异常并翻译成原因**——
-        // 文件来自磁盘，是不可信输入，一个能解析但不合规矩的文件不该把调用方炸崩
-        val recipe = runCatching { EditRecipe(steps) }
-            .getOrElse { return DecodeResult(null, "预设里的步骤不合规矩：${it.message}") }
+        // 文件来自磁盘，是不可信输入，一个能解析但不合规矩的文件不该把调用方炸崩。
+        // 只接 IllegalArgumentException：init 里真出了 bug（NPE 之类）要往上抛，
+        // 用 runCatching 兜住一切会把程序错误报成「你的预设文件有问题」
+        val recipe = try {
+            EditRecipe(steps)
+        } catch (e: IllegalArgumentException) {
+            return DecodeResult(null, "预设里的步骤不合规矩：${e.message}")
+        }
         return DecodeResult(recipe, null)
     }
 
@@ -135,9 +140,15 @@ object EditRecipeDocument {
 
     private fun StoredStep.toDomain(): EditStep? = when (kind) {
         "straighten" -> degrees?.takeIf { it in -45f..45f }?.let { EditStep.Straighten(it) }
-        "rotate" -> degrees?.takeIf { it in -360f..360f }?.let { EditStep.Rotate(it) }
+        // 只收 90° 的整数倍：界面上唯一写这个槽位的地方就是 `EditStep.Rotate(90f * turns)`，
+        // 而派生状态按 (degrees / 90f).toInt() 取整——收一个手改的 45°，画面真的转 45°，
+        // quarterTurns 却报 0：hasGeometryEdits 说「没动过构图」，裁剪页拿到的是错的画面比例。
+        // 与其让派生值与真值打架，不如在读侧就把这种文件拒掉
+        "rotate" -> degrees?.takeIf { it in -360f..360f && it % 90f == 0f }?.let { EditStep.Rotate(it) }
         "flip" -> horizontal?.let { EditStep.Flip(it) }
         "crop" -> rect?.let {
+            // 定点检查够用：NaN 到不了这一层（isLenient=false 的解析直接拒掉这个 token，
+            // 有用例钉着），而 ±Infinity 会被 sanitized() 钳回边界、与原判据不等 → 拒
             val candidate = NormRect(it.left, it.top, it.right, it.bottom)
             if (candidate.sanitized() != candidate) null else EditStep.Crop(candidate)
         }
