@@ -41,9 +41,16 @@ data class EditRecipe(val steps: List<EditStep> = emptyList()) {
      * 按步骤类型删除（删不掉就是无操作，不抛）。
      *
      * 删的是**类型**，不是身份，所以 `without<EditStep.Flip>()` 会把 `flip:true` 与
-     * `flip:false` 一起删掉——`Flip` 是唯一一个类型对应两个身份的步骤。今天 UI 上只有
-     * 「取消翻转」这一个入口，语义正好；将来要按方向单独撤销，得换带参数的写法，
-     * 别把这条当成方向敏感的 API 用。
+     * `flip:false` 一起删掉——`Flip` 是唯一一个类型对应两个身份的步骤，也是这条 API
+     * 唯一会「删多」的地方（其余类型按类型删至多一步）。
+     *
+     * **别拿它实现按方向的翻转撤销。** 水平与垂直今天是两个独立开关：`PhotoEditScreen`
+     * 的 `edit_flip_h` 与 `edit_flip_v` 两枚 chip 分别接 `PhotoEditViewModel.toggleFlipHorizontal`
+     * 与 `toggleFlipVertical`，两道可以并存，所以「撤销这一步翻转」必须是方向敏感的。
+     * rank-0 只有 `Flip` 一个类型对应两个身份，按类型删正好把它多删一格——撤销一个方向
+     * 会把另一个方向一起清掉，且没有任何地方会报错（`EditRecipeTest` 里那条 Flip 用例钉住
+     * 的就是这个多删行为）。真要按方向删，得在**本模块**加带方向的写法：`identity` 是
+     * internal，调用方连按身份过滤都写不出来，所以别在 :app 里绕，来这里加参数。
      */
     inline fun <reified S : EditStep> without(): EditRecipe =
         EditRecipe(steps.filterNot { it is S })

@@ -126,6 +126,19 @@ class EditRecipeTest {
     }
 
     @Test
+    fun `without Flip clears both directions because it deletes by type, not by identity`() {
+        // `without` 那段注释的实证：Flip 是唯一一个类型对应两个身份的步骤，按类型删就是一次
+        // 清掉两格。UI 上水平与垂直是两个独立开关（edit_flip_h / edit_flip_v 各接一个 toggle），
+        // 所以按方向的撤销不能用这个 API —— 删多了不会报错，只会静默改掉另一个方向。
+        val recipe = EditRecipe.EMPTY
+            .with(EditStep.Flip(horizontal = true))
+            .with(EditStep.Flip(horizontal = false))
+
+        assertEquals(listOf("flip:true", "flip:false"), recipe.steps.map { it.identity })
+        assertEquals(emptyList<String>(), recipe.without<EditStep.Flip>().steps.map { it.identity })
+    }
+
+    @Test
     fun `constructor rejects a list holding two steps of the same identity`() {
         assertThrows(IllegalArgumentException::class.java) {
             EditRecipe(
