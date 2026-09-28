@@ -144,8 +144,11 @@ data class PhotoEditState(
     val comparing: Boolean = false,
     /** 当前编辑分区 */
     val tab: EditTab = EditTab.COLOR,
-    /** 归一化裁剪框（相对「拉直+旋转+翻转」之后的画面） */
-    val crop: NormRect = NormRect.FULL,
+    /**
+     * 裁剪比例预设：**界面选择态**，不是编辑动作——`EditStep` 里没有「比例」这一种步骤。
+     * 选预设改的是裁剪框（[setCropAspect] 走 [croppedRecipe]），而框在配方里，所以它随撤销
+     * 一起回去（用例见 PhotoEditRecipeStateTest 的「a locked ratio refits…」与「undoing a rotate…」）。
+     */
     val cropAspect: CropAspect = CropAspect.FREE,
     /** 裁剪模式的底图（已应用几何、**未裁剪**，裁剪框画在它上面） */
     val cropBase: Bitmap? = null,
@@ -182,10 +185,12 @@ data class PhotoEditState(
 ) {
     val hasImage: Boolean get() = original != null
 
-    // 每个 state 实例只算一次：fields() 是纯映射，同一份 (recipe, crop) 的答案必然相同，
+    // 每个 state 实例只算一次：fields() 是纯映射，同一份配方必然给出同一组值，
     // 而这几个名字在同一个实例上会被反复读（滑条每动一下就 copy 出一个新实例，见各 setter）。
     // 写成 `get()` 就是每次访问重筛一遍步骤列表——量不大，但没有理由白做。
-    private val derived by lazy { recipe.fields(crop) }
+    private val derived by lazy { recipe.fields() }
+    /** 归一化裁剪框（相对「拉直+旋转+翻转」之后的画面）：配方里那条 Crop 步骤，没有就是全图 */
+    val crop: NormRect get() = derived.crop
     val selectedKey: String get() = derived.selectedKey
     val strength: Int get() = derived.strength
     val adjust: ColorAdjust get() = derived.adjust
@@ -224,19 +229,21 @@ data class EditRecipeFields(
 }
 
 /**
- * 折叠成界面字段。
+ * 折叠成界面字段：八份值全部来自配方这一个来源。
  *
- * [crop] 作为参数进来而不是塞进配方：裁剪框是**用户正在拖的实时值**，`cropAspect` 是界面选择态，
- * 两者都不该污染撤销单位（拖动每帧都会写 `setCropRect`，进了配方就是一帧一条历史）；
- * `EditStep.Crop` 只在渲染与导出时按 live 值现拼（见 `applyCurrentFilter` / `save`）。
+ * 裁剪框也在配方里（`EditStep.Crop` 那一步）。它曾是一份**独立于配方**的 live 值，于是
+ * 「旋转 + 撤销」之后配方说没转、框却还停在旋转后的坐标系里，用户导出的就不是他看到的那一块
+ * （`geometryToRender` 与 PhotoEditRecipeStateTest 的「undoing a rotate…」一起钉这件事）。
+ * 「拖动裁剪框不许一帧一条历史」这件事现在靠**写入侧不提交**、手势结束时才提交来做
+ * （见 [PhotoEditViewModel.setCropRect] 与 [PhotoEditViewModel.commitEdit]），不是靠把框放在配方外。
  */
-fun EditRecipe.fields(crop: NormRect = NormRect.FULL): EditRecipeFields {
+fun EditRecipe.fields(): EditRecipeFields {
     val rotate = steps.filterIsInstance<EditStep.Rotate>().firstOrNull()
     return EditRecipeFields(
         selectedKey = lutKeyOrDefault(FILTER_NONE),
         strength = strengthOrDefault(80),
         adjust = colorAdjust,
-        crop = crop,
+        crop = steps.filterIsInstance<EditStep.Crop>().firstOrNull()?.rect ?: NormRect.FULL,
         quarterTurns = rotate?.let { (((it.degrees / 90f).toInt() % 4) + 4) % 4 } ?: 0,
         flipHorizontal = steps.any { it is EditStep.Flip && it.horizontal },
         flipVertical = steps.any { it is EditStep.Flip && !it.horizontal },
@@ -256,6 +263,85 @@ internal fun rotatedRecipe(recipe: EditRecipe, step: Int): EditRecipe {
     return if (turns == 0) recipe.without<EditStep.Rotate>()
     else recipe.with(EditStep.Rotate(90f * turns))
 }
+
+/** 画面在给定配方下的宽高比：转了奇数格就宽高一换（归一后 1 与 3 是竖幅那一侧） */
+internal fun aspectAfterGeometry(baseImageAspect: Float, quarterTurns: Int): Float =
+    if (((quarterTurns % 4) + 4) % 4 % 2 == 1) 1f / baseImageAspect else baseImageAspect
+
+/**
+ * 裁剪框写进配方的那**一份** Crop 槽位：同身份就地替换，第二次拖动不会叠出第二个框。
+ *
+ * 全图时删掉那一步、而不是存一条 `Crop(FULL)`：配方里不留「等效于没裁」的占位，于是
+ * 「没有 Crop 步骤」与「框是全图」变成同一件事——渲染侧就靠这一件事省掉一次全图裁剪
+ * （见 [PhotoEditViewModel] 里 `if (crop.isFull)` 那条短路）。
+ */
+internal fun croppedRecipe(recipe: EditRecipe, rect: NormRect): EditRecipe {
+    val sanitized = rect.sanitized()
+    return if (sanitized.isFull) recipe.without<EditStep.Crop>()
+    else recipe.with(EditStep.Crop(sanitized))
+}
+
+/**
+ * 转一次 90°：配方里那份 rotate 槽位累加，**裁剪框同时换到新的坐标系**，两个值写进同一份配方。
+ *
+ * 成对写入是「撤销这一格能把框一起带回来」的唯一办法——框曾是 state 上另一份 live 值，
+ * 撤销搬得动配方、搬不动它，于是旋转之后再撤销：画面回到未旋转，框却留在旋转后的坐标系里，
+ * 导出的就是另一块区域（用例见 PhotoEditRecipeStateTest 的「undoing a rotate…」）。
+ * 锁了比例预设时不旋转框，而是按旋转后的画面重新贴合该比例：框是预设算出来的，
+ * 画面宽高一换，继续旋转旧框只会得到一个不再贴合预设的矩形。
+ */
+internal fun rotatedGeometry(
+    recipe: EditRecipe,
+    step: Int,
+    aspectRatio: Float?,
+    baseImageAspect: Float,
+): EditRecipe {
+    val turned = rotatedRecipe(recipe, step)
+    val rect = if (aspectRatio == null) {
+        Geometry.rotate90(recipe.fields().crop, step)
+    } else {
+        Geometry.maxRectForAspect(
+            aspectAfterGeometry(baseImageAspect, turned.fields().quarterTurns),
+            aspectRatio
+        )
+    }
+    return croppedRecipe(turned, rect)
+}
+
+/**
+ * 开关一个方向的翻转，裁剪框跟着镜像。
+ *
+ * 开与关都要变换：翻转是自身的逆运算，关掉之后画面回到镜像前，框若原地不动就压在
+ * 被镜像掉的那一块内容上——配对必须对称，否则又变成两份状态互相追。
+ */
+internal fun flippedGeometry(recipe: EditRecipe, horizontal: Boolean): EditRecipe {
+    val rect = if (horizontal) Geometry.flipHorizontal(recipe.fields().crop)
+    else Geometry.flipVertical(recipe.fields().crop)
+    return croppedRecipe(toggledFlip(recipe, horizontal), rect)
+}
+
+/**
+ * 一次几何改动的历史配对：改动前那一格先记进历史，改动后那一格随后记下。
+ *
+ * 少了前一次提交，用户改完第一笔几何就退不回「刚载入」；少了后一次，重做没有落点。
+ * 裁剪框就在配方里，所以撤销这一格时画面与框一起回去——这两样从此不可能脱节。
+ */
+internal fun committedTransform(
+    history: HistoryList<EditRecipe>,
+    recipe: EditRecipe,
+    next: EditRecipe,
+): HistoryList<EditRecipe> = history.record(recipe).record(next)
+
+/**
+ * 交给 `ImagePipeline.renderGeometry` 的那份几何：全部几何步骤（含裁剪框），不含调色与滤镜。
+ *
+ * 之所以要有这个名字：预览与导出要读**同一个值**，而「框选的不是导出的」这个缺陷就长在两份
+ * 来源上——导出曾把 `geometryOnly` 与当时那份 live 裁剪框现拼在末尾，撤销只搬得动配方、
+ * 搬不动那个 live 值，撤销一次旋转之后成品裁的就不是用户看到的那一块。
+ * 取用它的每一处都不许再单独拼一条 `Crop`；契约（有哪些步骤、框是不是界面正在显示的那个）
+ * 由 PhotoEditRecipeStateTest 的「the geometry handed to the renderer…」钉着。
+ */
+internal fun geometryToRender(recipe: EditRecipe): List<EditStep> = recipe.allSteps
 
 /**
  * 翻转开关的写入侧：当前开着就删掉**那一个方向**，关着就占住那一份槽位。
@@ -651,13 +737,12 @@ class PhotoEditViewModel @Inject constructor(
         scheduleApply()
     }
 
-    /** 一键重置：回到原图（清掉滤镜、强度、全部调色与几何） */
+    /** 一键重置：回到原图（清掉滤镜、强度、全部调色与几何，裁剪框跟着配方一起清空） */
     fun resetEdits() {
         applyJob?.cancel()
         _state.update {
             it.copy(
                 recipe = EditRecipe.EMPTY,
-                crop = NormRect.FULL,
                 cropAspect = CropAspect.FREE,
                 // 走 record 而不是直接换配方：重置自己就该是一格可撤销的历史
                 history = it.history.record(EditRecipe.EMPTY),
@@ -714,7 +799,11 @@ class PhotoEditViewModel @Inject constructor(
         val adjust = snapshot.adjust
         val strength = snapshot.strength
         val crop = snapshot.crop
+        // 裁剪模式的底图：几何但**不**裁剪，框要画在它上面
         val geoSteps = snapshot.recipe.geometryOnly
+        // 成品那一份几何：全部几何（含裁剪框）、不含调色；取用只经 geometryToRender 这一处，
+        // 不再在这里单独拼一条 Crop
+        val renderSteps = geometryToRender(snapshot.recipe)
         // 本次渲染是按这份配方起的头；防抖窗口内配方又被改了一次时，旧参数的结果不许进 state
         val requestRecipe = snapshot.recipe
         val request = renderGeneration.incrementAndGet()
@@ -745,11 +834,12 @@ class PhotoEditViewModel @Inject constructor(
                         ImagePipeline(geoSteps).renderGeometry(processSource)
                     }
                     coroutineContext.ensureActive()
-                    // 2) 裁剪（坐标基于几何后的画面）
+                    // 2) 裁剪：配方里没有 Crop 步骤就等于全图（写入侧见 croppedRecipe 的删除分支），
+                    //    此时复用底图那一张，省一次全图裁剪与一张中间位图
                     cropped = if (crop.isFull) {
                         geometryOnly
                     } else {
-                        ImagePipeline(listOf(EditStep.Crop(crop))).renderGeometry(geometryOnly)
+                        ImagePipeline(renderSteps).renderGeometry(processSource)
                     }
                     // 3) 颜色：调色 + LUT（一次像素遍历）
                     coloredCropped = applyPipelineTo(cropped, lut, strength, adjust)
@@ -814,7 +904,12 @@ class PhotoEditViewModel @Inject constructor(
             // 已选比例预设时才重贴比例；自由比例下**不能**重置用户的裁剪框
             if (_state.value.cropAspect.ratio != null) {
                 _state.update {
-                    it.copy(crop = Geometry.maxRectForAspect(effectiveImageAspect(it), it.cropAspect.ratio))
+                    it.copy(
+                        recipe = croppedRecipe(
+                            it.recipe,
+                            Geometry.maxRectForAspect(effectiveImageAspect(it), it.cropAspect.ratio)
+                        )
+                    )
                 }
             }
         }
@@ -822,68 +917,66 @@ class PhotoEditViewModel @Inject constructor(
         applyCurrentFilter()
     }
 
-    /** 拖动裁剪框（不触发重渲染：裁剪模式下显示的是底图 + 覆盖层，松手/离开裁剪页才需要成品） */
+    /**
+     * 拖动裁剪框：写进配方里那一份 Crop 槽位，**不进历史**（一次拖动的提交在手势结束时，
+     * 由界面调 [commitEdit]；理由与用例见 [croppedRecipe]）。
+     *
+     * 必须接上防抖重渲染：配方一变，在途那次渲染就被 `applyCurrentFilter` 的配方闸丢掉，
+     * 而没有后续渲染时 `processing` 就没人复位（闸只「不采纳」，不负责收尾）。
+     */
     fun setCropRect(rect: NormRect) {
-        _state.update { it.copy(crop = rect.sanitized()) }
+        _state.update { it.copy(recipe = croppedRecipe(it.recipe, rect)) }
+        scheduleApply()
     }
 
     /**
-     * 选择裁剪比例：把裁剪框收成该比例能占满画面的最大矩形。
-     * @param silent 进入裁剪页时的初始化调用（不重渲染，覆盖层会自然显示）
+     * 选择裁剪比例：把裁剪框收成该比例能占满画面的最大矩形，写进配方。
+     * @param silent 只写状态、不重渲染。用它就得自己保证随后还有一次渲染，
+     *   否则在途结果会被配方闸丢掉、`processing` 没人复位（见 [setCropRect] 的同一处说明）。
+     *   比例按钮本身不算一格编辑：预设改的是框，框随配方一起被撤销。
      */
     fun setCropAspect(aspect: CropAspect, silent: Boolean = false) {
         val forced = Geometry.maxRectForAspect(effectiveImageAspect(_state.value), aspect.ratio)
-        _state.update { it.copy(cropAspect = aspect, crop = forced) }
+        _state.update { it.copy(cropAspect = aspect, recipe = croppedRecipe(it.recipe, forced)) }
         if (!silent) applyCurrentFilter()
     }
 
-    /** 顺时针/逆时针 90°；裁剪框同步旋转，锁定比例时重新贴合该比例 */
+    /** 顺时针/逆时针 90°；裁剪框跟着换到新坐标系，锁定比例时按新画面重新贴合该比例 */
     fun rotate(clockwise: Boolean) {
         val step = if (clockwise) 1 else -1
-        commitEdit()
-        val nextRecipe = rotatedRecipe(_state.value.recipe, step)
+        val snapshot = _state.value
+        val next = rotatedGeometry(
+            recipe = snapshot.recipe,
+            step = step,
+            aspectRatio = snapshot.cropAspect.ratio,
+            baseImageAspect = baseImageAspect(snapshot)
+        )
         _state.update { s ->
-            val rotated = Geometry.rotate90(s.crop, step)
             s.copy(
-                recipe = nextRecipe,
-                // 旋转后画面宽高互换，比例预设要按新画面重新贴合
-                crop = if (s.cropAspect.ratio == null) rotated
-                else Geometry.maxRectForAspect(
-                    effectiveImageAspect(s.copy(recipe = nextRecipe)),
-                    s.cropAspect.ratio
-                ),
+                recipe = next,
+                history = committedTransform(s.history, s.recipe, next),
                 comparing = false
             )
         }
         applyCurrentFilter()
-        commitEdit()
     }
 
     /** 左右翻转：开→写进那一份 flip:true 槽位；关→只删 flip:true，另一个方向不动 */
     fun toggleFlipHorizontal() {
-        commitEdit()
+        val next = flippedGeometry(_state.value.recipe, horizontal = true)
         _state.update { s ->
-            // 关掉一个方向必须按身份删，理由与用例见 toggledFlip
-            s.copy(
-                recipe = toggledFlip(s.recipe, horizontal = true),
-                crop = Geometry.flipHorizontal(s.crop)
-            )
+            s.copy(recipe = next, history = committedTransform(s.history, s.recipe, next))
         }
         applyCurrentFilter()
-        commitEdit()
     }
 
     /** 上下翻转：与左右翻转各自独立一份槽位，可同时开着 */
     fun toggleFlipVertical() {
-        commitEdit()
+        val next = flippedGeometry(_state.value.recipe, horizontal = false)
         _state.update { s ->
-            s.copy(
-                recipe = toggledFlip(s.recipe, horizontal = false),
-                crop = Geometry.flipVertical(s.crop)
-            )
+            s.copy(recipe = next, history = committedTransform(s.history, s.recipe, next))
         }
         applyCurrentFilter()
-        commitEdit()
     }
 
     /** 拉直角度（-45..45），防抖后重渲染；进历史由调用方在操作结束时调 commitEdit */
@@ -899,13 +992,12 @@ class PhotoEditViewModel @Inject constructor(
         scheduleApply()
     }
 
-    /** 重置几何（保留调色与滤镜） */
+    /** 重置几何（保留调色与滤镜）；裁剪框在配方里，跟着整段几何一起清 */
     fun resetGeometry() {
         _state.update { s ->
             s.copy(
                 // 只留 rank 非 0 的步骤（调色与滤镜），几何整段清空
                 recipe = EditRecipe(s.recipe.steps.filter { it.rank != 0 }),
-                crop = NormRect.FULL,
                 cropAspect = CropAspect.FREE
             )
         }
@@ -915,16 +1007,22 @@ class PhotoEditViewModel @Inject constructor(
 
     /** 只重置裁剪（保留旋转/翻转/拉直与调色） */
     fun resetCrop() {
-        _state.update { it.copy(crop = NormRect.FULL, cropAspect = CropAspect.FREE) }
+        _state.update {
+            it.copy(
+                recipe = croppedRecipe(it.recipe, NormRect.FULL),
+                cropAspect = CropAspect.FREE
+            )
+        }
         applyCurrentFilter()
     }
 
+    /** 未经几何变换的画面宽高比（宽/高）：预览源优先，它本来就是原图的等比缩略 */
+    private fun baseImageAspect(s: PhotoEditState): Float =
+        (previewSource ?: s.original)?.let { it.width.toFloat() / it.height } ?: 4f / 3f
+
     /** 当前几何（旋转/拉直）之后画面的宽高比（宽/高） */
-    private fun effectiveImageAspect(s: PhotoEditState): Float {
-        val base = previewSource ?: s.original ?: return 4f / 3f
-        val aspect = base.width.toFloat() / base.height
-        return if (((s.quarterTurns % 4) + 4) % 4 % 2 == 1) 1f / aspect else aspect
-    }
+    private fun effectiveImageAspect(s: PhotoEditState): Float =
+        aspectAfterGeometry(baseImageAspect(s), s.quarterTurns)
 
     /**
      * 成品预览的亮度直方图。
@@ -1049,10 +1147,11 @@ class PhotoEditViewModel @Inject constructor(
                         val lut = option?.lut ?: option?.key?.let { lutCache[it] }
                         val adjust = editSnapshot.adjust
                         val strength = editSnapshot.strength
-                        // 几何（含裁剪）在全分辨率上先做，再按条带调色——
-                        // 导出必须与预览用同一套几何参数，否则「框选的不是导出的」
-                        // 裁剪仍按 live 的裁剪框现拼在末尾，与预览那条管线同一套参数
-                        val steps = editSnapshot.recipe.geometryOnly + EditStep.Crop(editSnapshot.crop)
+                        // 几何（含裁剪框）在全分辨率上先做，再按条带调色。
+                        // 这一步不许再另外拼一条 Crop：裁剪框就在配方里。这里曾是
+                        // `geometryOnly + 现拼的 live 裁剪框`，而撤销只搬配方、搬不动那个 live 值，
+                        // 撤销一次旋转之后成品裁的就不是用户看到的那一块（说明见 geometryToRender）
+                        val steps = geometryToRender(editSnapshot.recipe)
                         val transformed = ImagePipeline(steps).renderGeometry(decoded)
                         geometryApplied = transformed
                         coroutineContext.ensureActive()

@@ -2,6 +2,7 @@ package com.imagedge.camera.feature.edit.photo
 
 import com.imagedge.camera.image.EditRecipe
 import com.imagedge.camera.image.EditStep
+import com.imagedge.camera.image.Geometry
 import com.imagedge.camera.image.HistoryList
 import com.imagedge.camera.image.NormRect
 import com.imagedge.camera.image.rank
@@ -13,27 +14,31 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 「UI 那组编辑字段变成派生属性」这件事的等价性风险都在这，分三层：
- * - **折叠**：selectedKey / strength / adjust / quarterTurns / flipHorizontal / flipVertical /
- *   straighten 与两个 has*，字段名、默认值与边界（度数超出圈数归一到 0..3、两个翻转方向各读
- *   各的、没选滤镜也要记住强度）必须与 alpha08 直接读那几个字段一致；
- * - **转发**：[PhotoEditState] 上那九个同名属性真的转发折叠结果，并把自己那份 live crop 一起
- *   交给折叠（alpha08 的 hasGeometryEdits 里写着「!crop.isFull」）；
- * - **写入**：同一槽位的第二次写是替换不是叠加（滤镜与调色各一份），旋转度数在那**一份** rotate
- *   槽位上累加，关掉翻转只删那一个方向，换照片时历史里已经播下「刚载入」那一格；
+ * 「UI 那组编辑字段变成派生属性」这件事的等价性风险都在这，分四层：
+ * - **折叠**：selectedKey / strength / adjust / crop / quarterTurns / flipHorizontal /
+ *   flipVertical / straighten 与两个 has*，字段名、默认值与边界（度数超出圈数归一到 0..3、
+ *   两个翻转方向各读各的、没选滤镜也要记住强度、配方里没有 Crop 步骤就读回全图）必须与
+ *   alpha08 直接读那几个字段一致；
+ * - **转发**：[PhotoEditState] 上那八个同名属性真的转发折叠结果——**包括裁剪框**，它现在是
+ *   配方里的 `EditStep.Crop`，不再是 state 自己那份独立 live 值（曾是的：撤销搬得动配方、
+ *   搬不动框，于是「看到的框」与「导出的框」分家，见下面「undoing a rotate…」那条）；
+ * - **写入**：同一槽位的第二次写是替换不是叠加（滤镜、调色、裁剪框各一份），旋转度数在那
+ *   **一份** rotate 槽位上累加，关掉翻转只删那一个方向，换照片时历史里已经播下「刚载入」那一格；
+ *   几何改动与裁剪框成对写进同一份配方，前后各提交一格，撤销这一格时两者一起回去；
  * - **跨照片**：换到下一张时哪些东西跟着人走（调色、强度）、哪些跟着照片走（滤镜选择、几何）。
  *
- * `rotate()` / `toggleFlip*()` / `loadPicked()` 都挂在 ViewModel 上（构造要 Context，重渲染走
- * viewModelScope，而 :app 的测试依赖只有 junit4，没有 mockk 与 Robolectric），JVM 里起不来，
- * 所以把它们的纯算术与纯构造抽成 [rotatedRecipe] / [toggledFlip] / [seededHistoryOf] /
- * [carriedColour] 由这里钉。
- * 这三处都属于「写错了界面不报错、只是行为不对」：90° 不累加就是按了没反应，按类型删翻转会把
- * 另一个方向一起清掉，历史没播种则第一次改动根本退不回去。
+ * `rotate()` / `toggleFlip*()` / `setCropRect()` / `loadPicked()` 都挂在 ViewModel 上（构造要
+ * Context，重渲染走 viewModelScope，而 :app 的测试依赖只有 junit4，没有 mockk 与 Robolectric），
+ * JVM 里起不来，所以把它们的纯算术与纯构造抽成 [rotatedRecipe] / [rotatedGeometry] /
+ * [flippedGeometry] / [croppedRecipe] / [committedTransform] / [geometryToRender] /
+ * [toggledFlip] / [seededHistoryOf] / [carriedColour] 由这里钉。
+ * 这些都属「写错了界面不报错、只是行为不对」：90° 不累加就是按了没反应，按类型删翻转会把
+ * 另一个方向一起清掉，历史没播种则第一次改动根本退不回去，几何与框不成对写则导出的不是看到的。
  * （strength 的**输入**钳制在 `setStrength` 里，那要 ViewModel 实例，不在本文件钉。）
  *
- * 这里**钉不住**的三件事：滑条松手才提交（onValueChangeFinished 的接线）、撤销/重做入口的
- * enabled、在途渲染不采纳过期配方（协程与互斥的时序，JVM 上模拟不出来）——这三条只能靠代码
- * 审查与真机验收，不假装测过。
+ * 这里**钉不住**的几件事：滑条松手与裁剪手势结束才提交（`onValueChangeFinished` /
+ * `onDragFinished` 的接线）、撤销/重做入口的 enabled、在途渲染不采纳过期配方（协程与互斥的
+ * 时序，JVM 上模拟不出来）——这几条只能靠代码审查与真机验收，不假装测过。
  */
 class PhotoEditRecipeStateTest {
 
@@ -171,15 +176,15 @@ class PhotoEditRecipeStateTest {
     }
 
     @Test
-    fun `state reads its edit fields out of the recipe plus its own live crop`() {
+    fun `state reads all eight fields out of the recipe including the crop box`() {
         val crop = NormRect(left = 0.1f, top = 0.2f, right = 0.8f, bottom = 0.9f)
         val state = PhotoEditState(
             recipe = EditRecipe.EMPTY
                 .with(EditStep.Lut("kodak2383", 62))
                 .with(EditStep.Color(ColorAdjust(exposure = 40)))
                 .with(EditStep.Rotate(90f))
-                .with(EditStep.Flip(horizontal = true)),
-            crop = crop,
+                .with(EditStep.Flip(horizontal = true))
+                .let { croppedRecipe(it, crop) },
         )
 
         assertEquals("kodak2383", state.selectedKey)
@@ -188,17 +193,60 @@ class PhotoEditRecipeStateTest {
         assertEquals(1, state.quarterTurns)
         assertTrue(state.flipHorizontal)
         assertFalse("另一个方向不许被牵连", state.flipVertical)
+        assertEquals("裁剪框也来自配方那一份 Crop 步骤", crop, state.crop)
 
-        // 裁剪框不进配方（它是用户正在拖的 live 值），但 alpha08 的 hasGeometryEdits 里写着
-        // 「!crop.isFull」，所以 state 必须把自己那份 crop 一起交给折叠。
         // 下面那条 cropOnly 才是承重的：上面那份配方自己就有旋转与翻转，几何布尔本来就为真，
-        // 写成 `fields()`（丢掉 crop）也照样绿——只有「除了拖框什么都没改」这份状态能认出它丢了。
+        // 折叠里把 crop 写死成 FULL 也照样绿——只有「除拖框什么都没改」这份状态认得出它丢了。
         assertTrue("拖过裁剪框就算改过：重置按钮与离开确认都看这两个布尔", state.hasGeometryEdits)
         assertTrue(state.hasEdits)
 
-        val cropOnly = PhotoEditState(crop = crop)
+        val cropOnly = PhotoEditState(recipe = croppedRecipe(EditRecipe.EMPTY, crop))
+        assertEquals(crop, cropOnly.crop)
         assertTrue("只拖过裁剪框，配方是空的，也必须认出「改过」", cropOnly.hasGeometryEdits)
         assertTrue(cropOnly.hasEdits)
+    }
+
+    @Test
+    fun `the crop box reads back full when the recipe carries no crop step`() {
+        val rect = NormRect(0.2f, 0.1f, 0.9f, 0.7f)
+
+        // 没有 Crop 步骤 = 全图（默认值与 alpha08 的 `crop = NormRect.FULL` 同一个口径）
+        assertEquals(NormRect.FULL, EditRecipe.EMPTY.fields().crop)
+        assertEquals(NormRect.FULL, PhotoEditState().crop)
+        assertFalse(EditRecipe.EMPTY.fields().hasGeometryEdits)
+        // 有那一步就读它，state 与折叠读出来必须是同一个值（两个读法分家就是缺陷的旧形态）
+        assertEquals(rect, croppedRecipe(EditRecipe.EMPTY, rect).fields().crop)
+        assertEquals(rect, PhotoEditState(recipe = croppedRecipe(EditRecipe.EMPTY, rect)).crop)
+    }
+
+    @Test
+    fun `a second crop write replaces the one box instead of stacking a stale one`() {
+        val first = NormRect(0f, 0f, 0.5f, 0.5f)
+        val second = NormRect(0.2f, 0.2f, 0.8f, 0.6f)
+
+        val once = croppedRecipe(EditRecipe.EMPTY, first)
+        val twice = croppedRecipe(once, second)
+
+        assertEquals("裁剪只有一份槽位，第二次拖动是替换", listOf(EditStep.Crop(second)), twice.steps)
+        assertEquals(second, twice.fields().crop)
+
+        // 拖回全图 = 删掉那一步：于是「没有 Crop 步骤」与「框是全图」是同一件事，
+        // 渲染侧就靠这件事省掉一次全图裁剪（见 applyCurrentFilter 里那条 isFull 短路）
+        assertEquals(emptyList<EditStep>(), croppedRecipe(twice, NormRect.FULL).steps)
+
+        // 越界的框先 sanitized() 再进配方：配方里不许留画面外的坐标——那一份值正是撤销与重做
+        // 要复读的东西，留着 1.6 就等于「界面上的框」与「复读出来的框」两个数
+        assertEquals(
+            "拖出画面外的右边要夹回 1.0",
+            NormRect(0.2f, 0.1f, 1f, 0.7f),
+            croppedRecipe(EditRecipe.EMPTY, NormRect(0.2f, 0.1f, 1.6f, 0.7f)).fields().crop
+        )
+        // 整个盖住画面的框等于全图，同样不许占一份槽位
+        assertEquals(
+            "拖出画面外的一整圈等于全图",
+            emptyList<EditStep>(),
+            croppedRecipe(EditRecipe.EMPTY, NormRect(-0.5f, -0.5f, 2f, 2f)).steps
+        )
     }
 
     @Test
@@ -285,8 +333,8 @@ class PhotoEditRecipeStateTest {
         )
         assertEquals("滤镜选择跟着照片走：下一张回到原图", FILTER_NONE, fresh.selectedKey)
 
-        // 几何「一步都不许带」要按配方形状断言，不能只看折叠布尔：
-        // fields(crop) 的裁剪来自参数而不是配方，配方里混进一条 Crop 时 hasGeometryEdits 照样是假的。
+        // 几何「一步都不许带」按配方形状断言，而不是只看折叠布尔：形状说得出**带了哪一步**，
+        // 布尔只说「改过」（裁剪框现在也在配方里，所以两种读法都成立，留直接指名的那个）。
         assertEquals(
             "旋转、翻转、拉直、裁剪框都不跟着人走",
             emptyList<EditStep>(),
@@ -339,6 +387,112 @@ class PhotoEditRecipeStateTest {
             "第一次撤销要退回「带着影调的刚载入」，不是真正的空白",
             carried,
             edited.undo().current
+        )
+    }
+
+    @Test
+    fun `undoing a rotate takes the crop box back with it`() {
+        // 这条就是缺陷本身。旧形态里裁剪框是 state 上另一份 live 值、撤销只搬配方，
+        // 于是「拖框 → 右转 → 撤销」之后画面回到未旋转、框仍停在旋转后的坐标系上，
+        // save() 拿那份框导出的就不是用户看到的那一块（本轮改动前这条是红的，见报告）。
+        val dragged = NormRect(0.1f, 0.2f, 0.5f, 0.6f)
+        val loaded = seededHistoryOf(EditRecipe.EMPTY)
+        // setCropRect：写进配方的 Crop 槽位，不进历史
+        val framed = croppedRecipe(EditRecipe.EMPTY, dragged)
+        // rotate(clockwise = true)：几何与框成对写进同一份配方，前后各提交一格
+        val turned = rotatedGeometry(framed, step = 1, aspectRatio = null, baseImageAspect = 4f / 3f)
+        val afterTurn = committedTransform(loaded, framed, turned)
+
+        // 转完之后框必须已经在新坐标系里，否则「看到的」与「导出的」当场分家
+        assertEquals(
+            "旋转把框带进新坐标系",
+            Geometry.rotate90(dragged, 1),
+            turned.fields().crop
+        )
+        assertEquals(Geometry.rotate90(dragged, 1), PhotoEditState(recipe = turned).crop)
+
+        val undone = afterTurn.undo().current ?: error("撤销落不到配方")
+        assertEquals("撤销的是旋转：画面回到没转", 0, undone.fields().quarterTurns)
+        assertEquals("框跟着一起回到旋转前那一块", dragged, undone.fields().crop)
+        assertEquals("state 读出来的框就是这一格配方里的框", dragged, PhotoEditState(recipe = undone).crop)
+        assertEquals(
+            "重做这一格：框又跟着画面走回新坐标系",
+            Geometry.rotate90(dragged, 1),
+            (afterTurn.undo().redo().current ?: error("重做落不到配方")).fields().crop
+        )
+    }
+
+    @Test
+    fun `undoing a horizontal flip restores the box and leaves the other direction alone`() {
+        val before = NormRect(0.1f, 0.2f, 0.6f, 0.5f)
+        val framed = croppedRecipe(EditRecipe.EMPTY.with(EditStep.Flip(horizontal = false)), before)
+        val history = seededHistoryOf(framed)
+
+        // toggleFlipHorizontal() 走的那一步：槽位按方向开关，框跟着镜像，前后各提交一格
+        val turned = flippedGeometry(framed, horizontal = true)
+        val afterTurn = committedTransform(history, framed, turned)
+
+        assertEquals("镜像把框也翻过去", Geometry.flipHorizontal(before), turned.fields().crop)
+        assertTrue("这一格之后上下翻转还开着", turned.fields().flipVertical)
+        assertTrue("左右翻转也开着", turned.fields().flipHorizontal)
+
+        val undone = afterTurn.undo().current ?: error("撤销落不到配方")
+        assertEquals("撤销左右翻转之后框回到翻转前那一块", before, undone.fields().crop)
+        assertTrue("另一个方向不许被这次开关牵连", undone.fields().flipVertical)
+        assertFalse(undone.fields().flipHorizontal)
+    }
+
+    @Test
+    fun `a locked ratio refits the box to the turned frame instead of rotating the old one`() {
+        val base = 4f / 3f
+        // 用 16:9 而不是 1:1：1:1 的框转 90° 恰好等于按新画面重贴的结果，
+        // 那条分支写错（把旧框转过去）时 1:1 看不出差别，所以拿一个转完必然不同的比例来钉
+        val wide = 16f / 9f
+        val framed = croppedRecipe(EditRecipe.EMPTY, Geometry.maxRectForAspect(base, wide))
+
+        val turned = rotatedGeometry(framed, step = 1, aspectRatio = wide, baseImageAspect = base)
+
+        assertEquals(1, turned.fields().quarterTurns)
+        assertEquals(
+            "画面宽高互换了，框要按**新画面**重贴该比例；把旧框转 90° 会得到不再贴合的矩形",
+            Geometry.maxRectForAspect(1f / base, wide),
+            turned.fields().crop
+        )
+
+        val history = committedTransform(seededHistoryOf(framed), framed, turned)
+        assertEquals(
+            "撤销这一格：画面与框一起回到转换前那一份贴合值",
+            framed.fields().crop,
+            (history.undo().current ?: error("撤销落不到配方")).fields().crop
+        )
+
+        // 自由比例走另一条分支：框跟着转，不做重贴
+        val free = croppedRecipe(EditRecipe.EMPTY, NormRect(0.1f, 0.2f, 0.5f, 0.6f))
+        assertEquals(
+            Geometry.rotate90(NormRect(0.1f, 0.2f, 0.5f, 0.6f), 1),
+            rotatedGeometry(free, step = 1, aspectRatio = null, baseImageAspect = base).fields().crop
+        )
+    }
+
+    @Test
+    fun `the geometry handed to the renderer carries exactly the box the ui shows`() {
+        val rect = NormRect(0.15f, 0.15f, 0.85f, 0.85f)
+        val recipe = EditRecipe.EMPTY
+            .with(EditStep.Straighten(3f))
+            .with(EditStep.Rotate(90f))
+            .with(EditStep.Color(ColorAdjust(exposure = 20)))
+            .with(EditStep.Lut("kodak2383", 55))
+            .let { croppedRecipe(it, rect) }
+
+        assertEquals(
+            "几何 = 拉直 + 旋转 + 裁剪；颜色一步都不许交给 renderGeometry",
+            listOf(EditStep.Straighten(3f), EditStep.Rotate(90f), EditStep.Crop(rect)),
+            geometryToRender(recipe)
+        )
+        assertEquals(
+            "渲染拿到的那条 Crop 就是界面显示的那个框；两者分家时成品裁的不是看到的那一块",
+            PhotoEditState(recipe = recipe).crop,
+            geometryToRender(recipe).filterIsInstance<EditStep.Crop>().single().rect
         )
     }
 }

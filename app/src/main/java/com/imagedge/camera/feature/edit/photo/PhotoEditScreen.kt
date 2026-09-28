@@ -274,7 +274,9 @@ private fun PreviewArea(
                     CropOverlay(
                         rect = state.crop,
                         normTargetAspect = state.cropAspect.ratio?.let { it / state.cropBaseAspect },
-                        onRectChange = viewModel::setCropRect
+                        onRectChange = viewModel::setCropRect,
+                        // 一次拖动算一格：拖动过程中每次写框都不进历史，手势结束才提交
+                        onDragFinished = viewModel::commitEdit
                     )
                 }
                 if (state.processing) {
@@ -564,18 +566,26 @@ private fun ExportPanel(state: PhotoEditState, viewModel: PhotoEditViewModel) {
  *
  * 手势按「拖动起点快照 + 累计位移」计算：若直接以每次的 delta 增量更新并让
  * pointerInput 以 rect 为 key，重组的瞬间手势协程会被重启，拖动会卡住半路。
+ *
+ * [onDragFinished] 挂在 `onDragEnd` 与 `onDragCancel` 两处：拖动途中每一帧写的都是同一份
+ * 配方槽位（见 `croppedRecipe` 的同类替换），一次手势结束提交一次，才是一格历史。
+ * 取消也要提交——半路被打断时那几帧已经进了配方，不提交的话它会被并进下一次提交里，
+ * 于是「一次拖动」忽而一格忽而零格。
  */
 @Composable
 private fun CropOverlay(
     rect: NormRect,
     normTargetAspect: Float?,
-    onRectChange: (NormRect) -> Unit
+    onRectChange: (NormRect) -> Unit,
+    onDragFinished: () -> Unit,
 ) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val wPx = constraints.maxWidth.toFloat().coerceAtLeast(1f)
         val hPx = constraints.maxHeight.toFloat().coerceAtLeast(1f)
         val currentRect = rememberUpdatedState(rect)
         val currentOnChange = rememberUpdatedState(onRectChange)
+        // 手势协程跑在 pointerInput 里，重组不会重启它，所以提交入口也要读最新那一份
+        val currentCommit = rememberUpdatedState(onDragFinished)
         val density = LocalDensity.current
         // 手柄的**触摸目标**取 40dp（视觉圆点仍为 14dp）：28dp 的手指落点太苛刻，
         // 拖角时经常点不中
@@ -632,8 +642,9 @@ private fun CropOverlay(
                             accX = 0f
                             accY = 0f
                         },
-                        onDragEnd = { base = null },
-                        onDragCancel = { base = null }
+                        // 拖动途中每次写都替换同一份 Crop 槽位；手势收尾时提交一格（见函数注释）
+                        onDragEnd = { base = null; currentCommit.value() },
+                        onDragCancel = { base = null; currentCommit.value() }
                     ) { change, drag ->
                         change.consume()
                         val start = base ?: return@detectDragGestures
@@ -669,8 +680,9 @@ private fun CropOverlay(
                                 accX = 0f
                                 accY = 0f
                             },
-                            onDragEnd = { base = null },
-                            onDragCancel = { base = null }
+                            // 拖动途中每次写都替换同一份 Crop 槽位；手势收尾时提交一格（见函数注释）
+                            onDragEnd = { base = null; currentCommit.value() },
+                            onDragCancel = { base = null; currentCommit.value() }
                         ) { change, drag ->
                             change.consume()
                             val start = base ?: return@detectDragGestures
