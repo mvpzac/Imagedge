@@ -51,13 +51,22 @@ All notable changes to this project are documented here. Format follows [Keep a 
   旋转这一步只收 **±360 之内的 90 整倍**：`quarterTurns` 是按整除从度数派生的，收一个 45°
   会「画面真转、状态说没动过构图」，裁剪页还会拿到错的画面比例——读侧宁可拒也不能收下
   一个下游表达不了的值
+- 新增 `data/edit/EditRecipePresetStore.kt` 与界面上的预设区（计划 1 最后一格）：预设落在
+  `filesDir/edit_presets/<名字>.json`，与 `UserLutStore` 同构、**刻意不碰 SAF**（预设是辅助文件，
+  读它不该逼用户选目录授权）。名字直接拼进路径而它是用户输入的，所以含路径分隔符的名字
+  **整名作废**而不是删掉分隔符接着用——「../../etc/passwd」归一化成「etcpasswd」虽然穿不出去，
+  但用户存的那个名字与之后列出来的已经不是同一个，静默改名比拒绝更难查；点号也一并去掉，
+  因为列表走 `File.nameWithoutExtension`，留着点号会让「我的.v2」列回来成「我的」，
+  预设存在了却永远套不出来、且不报任何错。套用只换颜色与滤镜、保留这张照片自己的构图，
+  并按 rotate / 翻转 / 点比例同一条规矩前后各记一格；删除走长按 + 确认框，
+  动的是库不是配方，所以不进撤销历史
 
 零行为变化是被测试钉住的，不是被声明的：`EditRecipeFoldEquivalenceTest` 断言配方折叠出的
 （滤镜 key, 强度, 调色）三元组与 alpha08 直接读三个字段逐位相同，包括「没选滤镜也记住强度」
 这条最容易被顺手优化掉的；换照片时的携带行为也按 alpha08 逐字恢复（带调色与强度、
 滤镜选择回落到原图、几何不带）。
 
-验收：全仓 332 → 406 条单测 + lint + `uiSpecCheck` 通过。撤销/重做/翻转独立性/
+验收：全仓 332 → 415 条单测 + lint + `uiSpecCheck` 通过。撤销/重做/翻转独立性/
 带改动返回确认这几项在模拟器上用 debug 变体实跑过并留了截图。
 
 ### 未验证 / Not yet verified
@@ -70,9 +79,11 @@ All notable changes to this project are documented here. Format follows [Keep a 
   造成的死格子、这套修复自己的错误前提）也已落地。重审中途曾报一条「预览源被回收」的 Critical，
   经独立核对驳回：`finally` 的回收清单按引用排除 `processSource`，`releaseBitmapsLater`
   又显式保留 `previewSource`/`thumbSource`，且模拟器上按它给的时序跑完一轮无异常、无失败提示
-- 预设的**落盘与界面**（Task 6）未做：今天 `EditRecipeDocument` 能读能写，但用户还没有任何
-  入口能存一个预设出来，所以「预设」在界面上仍然不存在
-- 计划 1 剩最后一格：预设的落盘与套用界面（Task 6）。计划 2（度量式排版 + 图层化画框）未开始
+- 预设走的是**模拟器 + debug 包**那一遍（存 → 落盘文件逐字节看过 → 套用把 +62 曝光清回 0 →
+  长按删除 → 目录空了），真机 + release 那一遍仍未做（手机本会话两次掉线，只剩 emulator-5554）
+- 删除成功那条提示（`state.message`）长在预览区，而预设区排在调色分区底部——按得着删除
+  却看不见「已删除」，是个已知的小毛病，没在本次修
+- 计划 1 已完。计划 2（度量式排版 + 图层化画框）未开始；多层 LUT 与 SAF 预设分享刻意留到后面
 
 
 ## [0.2.0-alpha08] - 2026-09-28

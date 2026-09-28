@@ -64,10 +64,13 @@ import com.imagedge.camera.data.lut.LutType
 import com.imagedge.camera.image.Geometry
 import com.imagedge.camera.image.NormRect
 import com.imagedge.camera.ui.components.AppButtonType
+import com.imagedge.camera.ui.components.AppButton
 import com.imagedge.camera.ui.components.AppChip
 import com.imagedge.camera.ui.components.AppChipRow
 import com.imagedge.camera.ui.components.AppDivider
 import com.imagedge.camera.ui.components.AppLink
+import com.imagedge.camera.ui.components.AppTextField
+import com.imagedge.camera.ui.components.ConfirmDialog
 import com.imagedge.camera.ui.layout.EditorFrame
 import com.imagedge.camera.ui.layout.EditorFrameState
 import com.imagedge.camera.ui.layout.EditorBusy
@@ -109,6 +112,7 @@ fun PhotoEditScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val filters by viewModel.filters.collectAsStateWithLifecycle()
+    val presets by viewModel.presets.collectAsStateWithLifecycle()
 
     val imagePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -118,6 +122,10 @@ fun PhotoEditScreen(
     LaunchedEffect(initialUri) {
         if (initialUri != null && state.sourceUri != initialUri) viewModel.loadPicked(initialUri)
     }
+
+    // 预设列表：进页面时刷一次。列目录是磁盘 IO，所以只许走 viewModel.refreshPresets()
+    // （它自己开到 Dispatchers.IO），不许在组合里直接读 viewModel.presets 背后的那个目录
+    LaunchedEffect(Unit) { viewModel.refreshPresets() }
 
     // 说明弹窗开关：打开时标题栏与内容一起模糊，点背景退出
     var showHelp by remember { mutableStateOf(false) }
@@ -192,6 +200,7 @@ fun PhotoEditScreen(
                         EditTab.COLOR -> ColorPanel(
                             state = state,
                             filters = filters,
+                            presets = presets,
                             viewModel = viewModel,
                             onShowHelp = { showHelp = true }
                         )
@@ -312,11 +321,12 @@ private fun PreviewArea(
     }
 }
 
-/** 调色分区：滤镜（缩略图）+ 强度 + 基础参数 */
+/** 调色分区：滤镜（缩略图）+ 强度 + 基础参数 + 预设 */
 @Composable
 private fun ColorPanel(
     state: PhotoEditState,
     filters: List<LutFilterOption>,
+    presets: List<String>,
     viewModel: PhotoEditViewModel,
     onShowHelp: () -> Unit
 ) {
@@ -430,6 +440,15 @@ private fun ColorPanel(
                 )
             }
         }
+
+        // 预设区排在调色分区的**最后**：它存的正是这一屏的两样东西（参数 + 滤镜），
+        // 而导出分区只有格式与元数据，摆在那儿等于把动作放到它管不到的东西后面
+        PresetSection(
+            presets = presets,
+            onSave = viewModel::savePreset,
+            onApply = viewModel::applyPreset,
+            onDelete = viewModel::deletePreset
+        )
     }
 }
 
@@ -528,6 +547,86 @@ private fun RotatePanel(state: PhotoEditState, viewModel: PhotoEditViewModel) {
                 )
             }
         }
+    }
+}
+
+/**
+ * 预设区：把当前这份「调色 + 滤镜」存成一个可复用的名字，或把存过的名字套回这张照片。
+ *
+ * 横向列表用仓库里既有的形状 `LazyRow + items + AppChip`（与 [LutFilterGroup] 的滤镜行同一套）。
+ * **不用 [AppChipRow]**：它没有逐项 modifier 的槽位，长按删除这个动作挂不上去；
+ * 长按要走 `AppChip` 自己的触点（见它的 onLongClick 参数）——外面再套一层可点容器时，
+ * AppChip 内部那个 clickable 会先吃掉 down 事件，长按永远收不到。
+ *
+ * 删除动的是预设库、不是这张照片的配方，所以它**不进撤销历史**（见 deletePreset），
+ * 但它是会丢东西的决定，因此走 [ConfirmDialog] 确认，删完给一条 message 而不是静默。
+ */
+@Composable
+private fun PresetSection(
+    presets: List<String>,
+    onSave: (String) -> Unit,
+    onApply: (String) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    var pendingDelete by remember { mutableStateOf<String?>(null) }
+
+    AppSection(title = stringResource(R.string.edit_preset_apply)) {
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.S)) {
+            if (presets.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.edit_preset_empty),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // key 用名字本身：预设名就是它的文件身份，列表刷新后同一个名字不该换触点
+                    items(presets, key = { it }) { preset ->
+                        AppChip(
+                            label = preset,
+                            selected = false,
+                            onClick = { onApply(preset) },
+                            role = Role.Button,
+                            onLongClick = { pendingDelete = preset },
+                            onLongClickLabel = stringResource(R.string.edit_preset_delete_confirm)
+                        )
+                    }
+                }
+                // 长按是唯一的删除入口，就得把它写出来：不写等于没有这个入口
+                Text(
+                    text = stringResource(R.string.edit_preset_long_press_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            AppTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = stringResource(R.string.edit_preset_name_hint)
+            )
+            // 名字空着不给存：归一化后为空会被存储层拒掉，与其弹一条「名称无效」
+            // 不如让按钮自己看起来就是按不动的
+            AppButton(
+                text = stringResource(R.string.edit_preset_save),
+                onClick = { onSave(name.trim()) },
+                type = AppButtonType.SECONDARY,
+                enabled = name.isNotBlank()
+            )
+        }
+    }
+
+    pendingDelete?.let { target ->
+        ConfirmDialog(
+            title = stringResource(R.string.edit_preset_delete_title),
+            body = stringResource(R.string.edit_preset_delete_body, target),
+            confirmLabel = stringResource(R.string.edit_preset_delete_confirm),
+            onDismiss = { pendingDelete = null },
+            onConfirm = {
+                pendingDelete = null
+                onDelete(target)
+            }
+        )
     }
 }
 

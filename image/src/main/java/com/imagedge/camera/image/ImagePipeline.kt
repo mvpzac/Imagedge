@@ -9,7 +9,7 @@ import kotlinx.coroutines.withContext
  * 几何编辑管线：把一串几何类 [EditStep] 应用到图片上。
  *
  * **非破坏性**：管线本身只是一份配方，[renderGeometry] 每次都从输入重新生成，
- * 因此步骤可以随意增删（撤销 / 回退）、序列化成预设、或整套套用到别的照片。
+ * 因此步骤可以增删、由历史游标回退。预设只携带颜色与滤镜，几何按照片各自保存。
  *
  * **只管几何，不管颜色。** 调色与 LUT 一律走 :lut 的 LutProcessor：那里有线性光的
  * 正确实现，CPU 与 GPU 共用同一套换算（见 :lut 的 SrgbTransfer）。

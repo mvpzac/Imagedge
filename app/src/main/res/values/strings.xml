@@ -250,6 +250,18 @@
     <string name="edit_straighten_tip">拉直会旋转画面并自动裁掉四角空白，适合校正地平线倾斜。</string>
     <string name="edit_geometry_reset">重置几何</string>
 
+    <!-- 编辑预设：存的是「调色 + 滤镜」，几何按照片各自留着 -->
+    <string name="edit_preset_save">存为预设</string>
+    <string name="edit_preset_apply">套用预设</string>
+    <string name="edit_preset_empty">还没有预设</string>
+    <string name="edit_preset_name_hint">预设名称</string>
+    <!-- 删除预设的确认框：body 要说清实际影响（只删预设，不动这张照片） -->
+    <string name="edit_preset_delete_title">删除预设</string>
+    <string name="edit_preset_delete_body">删除「%1$s」？只删掉这个预设，当前照片的改动不受影响。</string>
+    <string name="edit_preset_delete_confirm">删除</string>
+    <!-- 长按是唯一能删的入口，不写出来就等于没有这个入口（设计 §4.7：不可发现的交互要标出来） -->
+    <string name="edit_preset_long_press_hint">长按预设可删除</string>
+
     <!-- LUT 滤镜页：按适用画面类型分排 + 问号说明 -->
     <string name="edit_lut_filter_title">滤镜</string>
     <string name="edit_lut_help">查看 LUT 使用说明</string>

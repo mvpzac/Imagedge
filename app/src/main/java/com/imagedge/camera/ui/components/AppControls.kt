@@ -4,6 +4,7 @@ import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -71,7 +72,18 @@ fun AppChip(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     leadingIcon: Int? = null,
-    role: Role = Role.RadioButton
+    role: Role = Role.RadioButton,
+    /**
+     * 长按动作（默认没有）。给「点一下是一件事、长按是另一件事」的选项用
+     * ——编辑页的预设 chip：点 = 套用，长按 = 删除。
+     *
+     * 必须在本组件里做成**同一个**触点，不能让调用方在外面再套一层可点容器：
+     * 下面那个 `clickable` 会先吃掉 down 事件，外层的 `combinedClickable`（无论
+     * onClick 还是 onLongClick）就再也收不到手势——长按静默失效，比没这个动作更糟。
+     */
+    onLongClick: (() -> Unit)? = null,
+    /** 长按动作给读屏的自定义操作名；不给就等于 TalkBack 用户拿不到删除 */
+    onLongClickLabel: String? = null,
 ) {
     val shape = RoundedCornerShape(Radius.Control)
     val alpha = if (enabled) 1f else 0.38f
@@ -86,12 +98,25 @@ fun AppChip(
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
     }
+    // 只有真给了长按动作才换触点：其余全部调用点（比例、分区、旋转、镜像…）
+    // 走的还是原来那条 `clickable` 路径，行为与语义一字不变
+    val gesture = if (onLongClick == null) {
+        Modifier.clickable(enabled = enabled, role = role, onClick = onClick)
+    } else {
+        Modifier.combinedClickable(
+            enabled = enabled,
+            onClick = onClick,
+            onLongClick = onLongClick,
+            onLongClickLabel = onLongClickLabel,
+            role = role
+        )
+    }
     Box(
         modifier = modifier
             .defaultMinSize(minHeight = 48.dp)
             .clip(shape)
             .background(background, shape)
-            .clickable(enabled = enabled, role = role, onClick = onClick)
+            .then(gesture)
             .padding(horizontal = Spacing.M),
         contentAlignment = Alignment.Center
     ) {

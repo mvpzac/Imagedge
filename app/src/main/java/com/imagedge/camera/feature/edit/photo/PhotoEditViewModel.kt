@@ -8,6 +8,7 @@ import com.imagedge.camera.data.transfer.DownloadLocation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.imagedge.camera.core.common.AppLog
+import com.imagedge.camera.data.edit.EditRecipePresetStore
 import com.imagedge.camera.data.lut.LutType
 import com.imagedge.camera.data.lut.UserLutStore
 import com.imagedge.camera.image.EditRecipe
@@ -411,6 +412,7 @@ class PhotoEditViewModel @Inject constructor(
     @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
     private val processor: LutProcessor,
     private val userLutStore: UserLutStore,
+    private val presetStore: EditRecipePresetStore,
     private val snackbarController: SnackbarController,
     private val haptics: Haptics
 ) : ViewModel() {
@@ -423,6 +425,15 @@ class PhotoEditViewModel @Inject constructor(
         listOf(LutFilterOption(FILTER_NONE, "原图", null))
     )
     val filters: StateFlow<List<LutFilterOption>> = _filters.asStateFlow()
+
+    /**
+     * 已存预设的名字列表（`filesDir/edit_presets`，见 `EditRecipePresetStore`）。
+     *
+     * 与 [filters] 同一类待遇：它来自磁盘，所以只在 [refreshPresets] 里于 Dispatchers.IO
+     * 上填充，界面上读的是这一份快照——组合路径上不碰文件系统。
+     */
+    private val _presets = MutableStateFlow<List<String>>(emptyList())
+    val presets: StateFlow<List<String>> = _presets.asStateFlow()
 
     /**
      * LUT 缓存（P1-9）。
@@ -793,6 +804,65 @@ class PhotoEditViewModel @Inject constructor(
         val next = history.redo()
         _state.update { it.copy(history = next, recipe = next.current ?: EditRecipe.EMPTY) }
         applyCurrentFilter()
+    }
+
+    // ── 编辑预设（存为 / 套用 / 删除）──────────────────────────────
+    // 列表本身（_presets / presets）与 filters 并排声明在类体开头，这里只放动作
+
+    /** 列目录是磁盘 IO，不许发生在组合路径上（LaunchedEffect 里直接调就是主线程读盘） */
+    fun refreshPresets() {
+        viewModelScope.launch(Dispatchers.IO) { _presets.value = presetStore.list() }
+    }
+
+    /** 存的是「调色 + 滤镜」，不含几何：几何属于这张照片的构图，换一张就没意义 */
+    fun savePreset(name: String) {
+        val colourOnly = EditRecipe(_state.value.recipe.steps.filter { it.rank > 0 })
+        presetStore.save(name, colourOnly)
+            .onSuccess { refreshPresets() }
+            .onFailure { error ->
+                _state.update { it.copy(message = "预设保存失败：${error.message}") }
+            }
+    }
+
+    /**
+     * 套用预设：保留当前照片的几何步骤，只换颜色与滤镜。
+     *
+     * 走 [committedTransform] 而不是「前后各调一次 commitEdit」：那两次提交与 rotate / 翻转 /
+     * 点比例是同一件事（一次离散改动、前后各一格），用同一个函数才不会出现第二种历史形状。
+     * 中间再读一次 `_state.value` 更是白送一个「改过配方却没进历史」的窗口。
+     */
+    fun applyPreset(name: String) {
+        val result = presetStore.read(name)
+        val preset = result.recipe
+        if (preset == null) {
+            _state.update { it.copy(message = result.failure ?: "预设读取失败") }
+            return
+        }
+        _state.update { s ->
+            val geometry = s.recipe.steps.filter { it.rank == 0 }
+            val next = preset.steps.filter { it.rank > 0 }
+                .fold(EditRecipe(geometry)) { acc, step -> acc.with(step) }
+            s.copy(
+                recipe = next,
+                history = committedTransform(s.history, s.recipe, next),
+                message = null
+            )
+        }
+        applyCurrentFilter()
+    }
+
+    /**
+     * 删除预设。**不动配方**：预设是库，不是这张照片上的一步编辑，所以它不进历史。
+     *
+     * 删的是用户自己存的东西，成败都要说得出结果——`delete` 返回 false（名字无效、文件删不掉）
+     * 时给一条原因，不静默。
+     */
+    fun deletePreset(name: String) {
+        val deleted = presetStore.delete(name)
+        _state.update {
+            it.copy(message = if (deleted) "已删除预设「$name」" else "预设「$name」删除失败")
+        }
+        refreshPresets()
     }
 
     /** 长按预览：true = 显示原图（撤销全部效果） */
