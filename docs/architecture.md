@@ -118,7 +118,7 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
   骨架不认识 `PhotoEditState`，所以它不会退化成参数是一堆 String 的通用壳。
   三条不可让：导出期间返回**不假装取消**（没有安全取消点，按钮存在就是撒谎）、
   重置过确认对话框、导出失败保留全部编辑参数（四个 ViewModel 本来就保留，骨架负责说出来）。
-  目前只有「编辑调节」迁完，其余三个编辑器仍用旧骨架。
+  目前四个编辑器（编辑调节 / 边框水印 / LIVE 三拼 / 视频转动态）都已迁到这套骨架上。
 - **相册刷新**：事件流（`StoreAdded/Removed/ObjectAdded`）触发即时静默刷新，
   4 秒轮询兜底；`MediaSessionCache` 让相册与二级页（大图/编辑）共享列表。
 - **配网与连接向导（重构批次 D）**：`feature/connection/ConnectWizardScreen` 是一条完整子流程
@@ -128,6 +128,37 @@ ConnectionStateHolder（@Singleton 共享状态：主页/设置页任一入口�
   **不画百分比**，且五种走不通的情况各有一个能点的出口。
   `QrScanViewModel` → `CameraWifiManager.connectToCameraHotspot`（WifiNetworkSpecifier）这条实现未动。
   关键约束见下节。
+
+## 编辑管线
+
+`feature/edit/photo`（编辑调节）是改动最频繁的子系统，单独一节。核心是**编辑状态只有一份**：
+
+```
+用户手势 ──▶ EditRecipe（有序 EditStep 列表）
+                 │
+                 ├─▶ HistoryList（不可变条目 + 游标）── undo / redo
+                 │      条目在手势结束时提交（滑条松手），离散点击前后各一格；
+                 │      载入照片时先播下 EditRecipe.EMPTY 那一格，否则「回到刚载入」不存在
+                 │
+                 ├─▶ 预览：applyPipelineTo()  → 几何 → :lut 一次像素遍历
+                 └─▶ 导出：renderFullResolution() → 几何 → :lut 按条带遍历
+```
+
+- **`EditStep` 的不变量由构造器守**（`EditRecipe.init`）：同一身份至多一步、rank 非降。
+  预设解码与套用都会直接用构造器造列表，坏列表必须在构造时炸，而不是渲染出一张错照片。
+  `identity` / `rank` 都写成**没有 `else` 的穷举 `when`**：加了新变体却忘了补 rank，
+  编译器会拦下；写成 `else` 则会静默归到 0 然后被丢弃。
+- **`:image` 不做像素运算**。`ImagePipeline.renderGeometry` 只处理几何（拉直 → 旋转 → 翻转 → 裁剪），
+  调色 / LUT / 局部调整全部交给 `:lut`，CPU 与 GPU 共用 `SrgbTransfer` 与 `RangeKeyWeight` 那一份数学。
+- **裁剪框是配方的最后一个几何步骤**，不是配方外的 live 字段。它与几何必须同进同退：
+  留在外面的话，撤销一次旋转就会把框的归一化坐标对着一个已经不存在的画面重新解释，
+  静默换掉用户框住的那块内容。要加新的可编辑几何值，先问它能不能进配方。
+- **预览与导出是两段独立代码**，各自调 processor。给渲染加参数时两条都要改，否则就是
+  「预览里有、导出成品里没有」且无任何报错。要让两条读同一份来源，共享的纯函数放在
+  `PhotoEditViewModel.kt` 顶层（`geometryToRender` / `renderInputsOf` / `presetAppliedTo` /
+  `presetLookMissing`），那里本来就是「JVM 上可测的那部分规则」的所在地。
+- **在途渲染的闸比的是 `renderInputsOf(recipe)`**（整份配方去掉裁剪框）：裁剪页显示的是
+  刻意不含裁剪的底图，把裁剪框算成输入会让拖框把在途结果判废、自己又不发起渲染。
 
 ## 线程与可靠性
 

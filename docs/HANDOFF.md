@@ -1,7 +1,9 @@
 # 交接说明（HANDOFF）
 
-> 面向接手本项目的开发者 / AI Agent。最后更新：2026-09-11，对应版本 **0.2.0-alpha03**。
-> 需求与决策历史见 `.workbuddy/memory/`（按日期的工作日志 + `MEMORY.md` 长期备忘）。
+> 面向接手本项目的开发者 / AI Agent。最后更新：2026-09-29，对应版本 **0.2.0-alpha08**
+> （外加一批尚未发布的区间键控，见 CHANGELOG 的 Unreleased）。
+> 需求与决策历史看 [CHANGELOG.md](../CHANGELOG.md) 的条目与「未验证」清单——
+> 那里记着每一批**实际验证到哪一步**，比任何一句「已完成」都可信。
 
 ## 这是什么
 
@@ -9,8 +11,9 @@ Sony 相机无线传输 / 遥控 Android 应用。Kotlin + Jetpack Compose (Mate
 目标是一站式「连接 → 传输 → 编辑 → 分享」工作流。
 
 - applicationId：`com.imagedge.camera`
-- minSdk 29 / targetSdk 36 / compileSdk 37，**仅 64 位**（arm64-v8a、x86_64）
-- 仓库：`mvpzac/Imagedge`（`main` 为稳定线，`alpha` 为当前开发线）
+- minSdk 29 / **targetSdk 37** / compileSdk 37，**仅 64 位**（arm64-v8a、x86_64）
+- 仓库：`mvpzac/Imagedge`。**只有一条线 `alpha`**（本地与 origin 都是它），
+  没有 `main` 分支，CI 也只对 `alpha` 与 `main` 的名字生效——实际上只有 alpha 会跑
 
 ## 首次构建
 
@@ -43,9 +46,9 @@ Sony 相机无线传输 / 遥控 Android 应用。Kotlin + Jetpack Compose (Mate
 | `upnp` | UPnP 发现（备用传输通道） |
 | `liveview` | 实时取景 |
 | `raw` | RAW / 内嵌 JPEG 解码 |
-| `lut` | .cube LUT 解析与 CPU 应用 |
+| `lut` | .cube 解析 + LUT 处理（GPU GLES 3.0 3D 纹理 / CPU 三线性兜底）；调色与键控数学的**唯一一份 Kotlin 定义**在这里，GLSL 是它的手写镜像 |
 | `motionphoto` | 动态照片（移植自 SuoxingTech/MotionPhotoLab，MIT） |
-| `image` | 非破坏性编辑管线（`EditStep` + `ImagePipeline`）——**已被 `feature/edit/photo/PhotoEditViewModel` 使用** |
+| `image` | 编辑配方与几何：`EditStep` / `EditRecipe` / 游标历史 / `ImagePipeline`——**不做像素运算**，逐像素的活儿全在 `:lut` |
 | `share` | 导出配置 / 导出器 / 分享 Intent |
 
 `app` 内部：
@@ -75,8 +78,12 @@ com.imagedge.camera/
   一屏 5~10 个就是每次进页面 5~10 次 Binder 调用（切页卡顿的固定开销）。
   参数分档用 `GlassProfile.SMALL`（按钮/开关/标签：3dp/16dp）与 `CONTAINER`（卡片/导航/弹窗：8dp/24dp），
   取值对齐上游官方示例——**玻璃要"几乎看得清背后"，靠边缘折射出彩，而不是把背景糊掉**。
-- **提交信息**：英文、简洁、中性。README 用 shields.io 徽章 + 目录 + 结构化 feature 段。
-- **每改必真机验证**，零崩溃才继续。
+- **提交信息**：中文，写清「为什么」与「怎么验的」，不写「改了 A/B/C」这种 diff 复读。
+  计数与「已验证」的措辞都要复核——「八条拒绝点」写成七条、模拟器实跑写成真机实测，
+  这两类错本仓库都犯过，且它们是后来人唯一的验收依据。README 用 shields.io 徽章 + 目录 + 结构化 feature 段。
+- **改动要能验**：真机在线就在真机上走一遍并留截图；**手机经常不在总线**（中途掉线是常事，
+  动手前先 `adb devices`），这时用模拟器 + debug 包走，并把没验的那部分**逐条写进 CHANGELOG
+  的未验证清单**。别把「模拟器 + debug」写成「真机实测」，也别因为设备不在就不写。
 
 ## 已知坑（务必先读，都会浪费你半天）
 
@@ -234,19 +241,29 @@ $SDK/platform-tools/adb exec-out screencap -p > /tmp/s.png
 $SDK/platform-tools/adb shell "run-as com.imagedge.camera sqlite3 /data/data/com.imagedge.camera/databases/profile.db 'select * from parameter_preset;'"
 ```
 
-模拟器能验：Room 建表与读写、SAF 导入导出、重启后数据存活、Compose 布局与深浅两主题。
+模拟器能验：Room 建表与读写、SAF 导入导出、重启后数据存活、Compose 布局与深浅两主题、
+编辑器的撤销/重做与预设的存/套/删（落盘文件可用 `run-as … cat files/edit_presets/<名字>.json` 逐字节看）。
 **验不了**任何相机往返——那需要真机 + 真相机，属于兼容矩阵的 `未验证` 范围。
 
-## 编辑功能现状（2026-09-11 完善后）
+## 编辑功能现状（截至 2026-09-29）
 
 | 编辑器 | 能力 |
 |---|---|
+| 编辑调节 | 编辑状态是**一份配方**（`EditRecipe` = 有序 `EditStep` 列表），撤销/重做是配方上的游标。调色分区：三类滤镜 + 用自己照片渲染的实时缩略图、滑条上方的亮度直方图、强度与**七轴**（曝光/高光/阴影/色调/对比度/饱和度/色温）单遍处理、长按或按钮对比**调色前**、预设存/套/删；裁剪分区：比例预设 + 可拖动框（框是配方的最后一个几何步骤，随几何一起进历史）；旋转分区：左右 90°、水平/垂直翻转（各自独立）、拉直 −45..45 自动裁角；导出按原分辨率重算，格式/画质/EXIF 三组与分享面板共用一套控件。下载页「编辑」与创作页入口都指向它 |
 | 边框水印 | 5 套模板（经典白边 / 暗色底栏 / 白框悬浮 / 双行签名 / 极简叠字）、Inter 字体、两行信息层级、拍摄时间 + 自定义文字、逐字段开关、LOGO 与圆角开关、导出保留 EXIF、实况图保留动态 |
-| 编辑调节（原「LUT 调色」） | 三分区：**调色**（三类滤镜 + 实时缩略图、长按对比原图、强度与曝光/对比度/饱和度/色温单遍处理）、**裁剪**（比例预设 + 可拖动裁剪框）、**旋转**（左右 90° / 水平垂直翻转 / 拉直 -45..45 自动裁角）；按原分辨率导出并保留 EXIF。下载页「编辑」与编辑中枢入口都指向它 |
 | LIVE 三拼 | 三张实况图统一比例/对齐、逐段重选封面与声音开关、拼接预览 + 真机导出、结果页确认 |
+| 视频转动态照片 | 选视频 → 逐段裁剪（≤5s）→ 选封面 → 封装为单文件动态照片 |
 
-> 调色算法集中在 `:lut`（`ColorAdjust` + `CpuLutProcessor`，带单测）；几何换算集中在
-> `:image`（`Geometry` + `ImagePipeline`，带单测）；画框排版集中在 `ExifFrameViewModel`
+> **撤销与预算是这一轮的关键结论**：以前调色参数散在 ViewModel 的三个字段、几何在调用时现场拼，
+> 两者不是一种东西，所以没有任何一个值可以整体倒回、整体存盘、整体套到别的照片上。
+> 现在它们是一份配方，撤销与预设都是它的副产品。要加新的编辑能力，加一个 `EditStep` 变体
+> 并让 `identity` / `rank` 的穷举 `when` 逼你补全（编译器兜底，漏了会静默不渲染）。
+>
+> **裁剪框为什么在配方里**：它原先是配方外的 live 字段，而旋转/翻转会变换它的坐标系、历史却只搬配方，
+> 于是「撤销旋转 → 导出」得到的是用户当初没框住的那块内容，且全程无报错。框与它依附的几何必须同进同退。
+>
+> 调色算法集中在 `:lut`（`ColorAdjust` + `CpuLutProcessor`/`GpuLutProcessor`，带单测）；
+> 几何换算集中在 `:image`（`Geometry` + `ImagePipeline`，带单测）；画框排版集中在 `ExifFrameViewModel`
 > 的 render 区。改视觉/交互只需动这几处，不必碰解码与导出链路。
 >
 > **LUT 的两条实现路径**：`GpuLutProcessor`（默认绑定，GLES 3.0 + 3D 纹理，硬件三线性）
@@ -258,21 +275,33 @@ $SDK/platform-tools/adb shell "run-as com.imagedge.camera sqlite3 /data/data/com
 > ⚠️ **几何顺序不可随意调换**：`ImagePipeline` 固定为「拉直 → 旋转 → 翻转 → 裁剪」，
 > 裁剪坐标是相对**几何之后**的画面。UI 侧旋转/翻转画面时，必须同时用
 > `Geometry.rotate90 / flipHorizontal / flipVertical` 变换裁剪框，否则框会与内容错位。
-> 原来的「基础调整」（`BasicEditScreen/ViewModel`）已删除——它是编辑调节的子集。
+> 找 `BasicEditScreen` 的人别找了：那一套「基础调整」已删除，它是现在这个编辑器的子集。
+>
+> ⚠️ **预览与导出是两段独立代码**：预览走 `applyPipelineTo`、导出走 `renderFullResolution`，
+> 两者各自调 processor。给渲染加参数时**两条都要改**，只改一条的结果是「预览里有、成品里没有」
+> 且无任何报错。稳妥做法是让两条路径读**同一个**来源（配方的同一份派生值），
+> 而不是各自从配方里各读一次。
 
 ## 待办（按优先级）
 
-1. **app 层无测试**：现有 8 个单测都在底层模块（ptp/upnp/lut/raw/motionphoto），
-   `app` 连 `src/test` 目录都还没有。建议先补 `DownloadManager` / `AlbumViewModel`
-   等状态机测试（需引入 mock 库），再加「启动 + 导航」的 instrumented 冒烟测试，
-   把「零崩溃」从人工验证变成自动回归。
-2. **编辑实现仍是 5 套并存**：`Basic` 已跑在 `:image` 非破坏性管线上，但
-   `ExifFrame / LutEdit / LiveTriptych / VideoToLive` 仍各自为战。建议逐步收敛到统一管线。
-3. **分享链路需补端到端验证**：`app/share` + `share` 模块（导出 → 系统分享 → 相册落盘）
-   的端到端路径要真机走一遍，尤其是 PNG/WebP 无 EXIF 容器时的提示是否准确。
-4. **lint baseline 36 条（app）/ 57 条（motionphoto）**：多为 `UseKtx` 类低危项，可清理；
-   其中 `InsecureBaseConfiguration` 1 条建议核实。
-5. **CI 只 lint `:app`**：`motionphoto` 的 57 条 baseline 从未被检查，建议改跑根任务 `lint`。
+> 这一节此前有五条，其中四条已经不成立了，为免下次接手的人再去追一遍，划掉的都写清了实际状态。
+
+1. ~~**app 层无测试**~~ **已做**：`app/src/test` 现有 22 个测试类、约 267 条单测，
+   另有 2 个仪器化类在 `app/src/androidTest`。仍未覆盖的是 **ViewModel 的接线**——
+   滑条松手提交、三个预设动作都只有被抽出来的纯函数有用例，测试框架能在 JVM 里起 ViewModel 之前，
+   这一类只能靠设备走查兜住。
+2. ~~**编辑实现仍是多套并存**~~ **已收敛**：`Basic` 已删；编辑调节走一份配方 + 游标历史 +
+   预设编解码，裁剪框也在配方里。剩下的三个是**不同功能**（画框 / 三拼 / 视频转动态），
+   不是同一件事的三套实现，不必合并。
+3. **分享链路需补端到端验证**（仍然有效）：`app/share` + `share` 模块的导出 → 系统分享 →
+   相册落盘要真机走一遍，尤其是 PNG/WebP 无 EXIF 容器时的提示是否准确。
+   创作页的导出与预设那一遍也仍是模拟器 + debug，详见 CHANGELOG 未验证清单。
+4. **Room 迁移测试从未执行过**（新增，仍然有效）：`DownloadDatabaseMigrationTest` 编译通过、
+   schema 也打进测试 APK，但**跑它要装 debug 变体**，而真机上装的是 release——
+   覆盖安装会因签名不符失败，唯一出路是卸载，那会清掉传输账本。要么起模拟器，要么明确接受清库。
+5. ~~**CI 只 lint `:app`**~~ **已做**：CI 现在跑根任务 `./gradlew lint`（全部 Android 模块）。
+   `app/lint.xml` 与 `motionphoto/lint.xml` 的 baseline 也已各清到 1 条
+   （`ObsoleteSdkInt` / `UnsafeOptInUsageError`），不再是 36 / 57。
 
 > 完整审查结论与路线图见 [REVIEW-2026-09-11.md](REVIEW-2026-09-11.md)。
 > 第三方组件与许可声明见根目录 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。

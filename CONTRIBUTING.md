@@ -14,11 +14,14 @@ Open an issue with:
 
 ## How to contribute code / 如何提交代码
 
-1. Fork → create a branch from `main` (`feat/xxx` or `fix/xxx`)
+1. Fork → create a branch from `alpha` (`feat/xxx` or `fix/xxx`) — `alpha` 是本仓库唯一的一条线（没有 `main`）
 2. Follow the existing code style (see below) — the project uses PBF (package by feature) and ktlint-friendly formatting
 3. Keep protocol-level changes documented: if you discover a device quirk or a new opcode/event, add it to `docs/sony-protocol-notes.md` in the same PR
-4. Make sure `./gradlew :app:assembleDebug` passes
-5. Open a PR describing what changed and how you verified it on real hardware
+4. Make sure `./gradlew :app:assembleDebug test :app:uiSpecCheck` passes — `uiSpecCheck` rejects raw Material 3
+   controls under `feature/`; use the `App*` components instead
+5. Open a PR describing what changed **and how it was verified**. If you could not test on a
+   real camera/phone, say so explicitly and say what you did test — an unverified claim
+   written as a verified one is worse than an honest gap
 
 ## Code style / 代码风格
 

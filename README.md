@@ -14,7 +14,8 @@
 
 A third-party, open-source Android app for wireless transfer and remote control of Sony cameras, built with **Kotlin + Jetpack Compose (Material 3)**.
 
-> **Tested with Sony ZV-E10 (firmware 2.03).** Most features should also work on other Sony models with the same wireless modes — contributions and compatibility reports are welcome.
+> **Transfer, remote control and provisioning are field-tested on a Sony ZV-E10 (firmware 2.03).** Most features should also work on other Sony models with the same wireless modes — contributions and compatibility reports are welcome.
+> The editor's newest batch (undo/redo, presets, crop frame folded into the recipe) has only been exercised on an **emulator with a debug build**; the real-device + release pass is still outstanding. See the [unverified list in the CHANGELOG](CHANGELOG.md) item by item.
 
 ## Table of Contents
 
@@ -48,11 +49,14 @@ A third-party, open-source Android app for wireless transfer and remote control 
 - 10 s keep-alive against the camera's 30 s idle disconnect, transaction timeouts with socket force-close self-healing, automatic reconnect
 
 **Editing**
-- **Edit & Adjust** (the main editor; `EditStep`-based non-destructive geometry from `:image`) — three sections in one screen:
-  - **Color** — built-in film-style creative presets + S-Log2/S-Log3 → Rec.709 conversion LUTs, `.cube` import/export/delete. Filters are shown as **live thumbnails rendered from your own photo**; press and hold the preview to compare against the original; strength plus exposure / contrast / saturation / temperature are applied in a single pixel pass
-  - **Crop** — aspect presets (free / 1:1 / 4:3 / 3:2 / 16:9 / 9:16) and a draggable crop frame (corner handles + move by dragging inside; the frame follows rotations and mirrors so the selection never drifts off the content)
-  - **Rotate** — 90° left/right, horizontal/vertical mirror, and **straighten** (−45°..45°, auto-cropping the blank corners)
-  - Export re-renders at **full resolution** (geometry first, then color) and preserves EXIF
+- **Edit & Adjust** (the main editor) — the editing state collapses into **one recipe** (`EditRecipe`, an ordered `EditStep` list), and undo/redo is a **cursor over that recipe** rather than a second command stack. Three sections in one screen:
+  - **Color** — built-in film-style creative presets + S-Log2/S-Log3 → Rec.709 conversion LUTs, `.cube` import/export/delete. Filters are shown as **live thumbnails rendered from your own photo**; a **luminance histogram** sits above the sliders (normalised by the tallest bucket, so clipping is obvious); strength plus **seven axes** — exposure / highlights / shadows / tint / contrast / saturation / temperature — are applied together with the filter in a single pixel pass
+  - **Crop** — aspect presets (free / 1:1 / 4:3 / 3:2 / 16:9 / 9:16) and a draggable crop frame (corner handles + move by dragging inside). The frame is the recipe's **last geometry step** and travels with rotate/flip through history — kept outside the recipe, "undo the rotation, then export" silently produces a region you never framed
+  - **Rotate** — 90° left/right, horizontal/vertical mirror (the two directions toggle independently), and **straighten** (−45°..45°, auto-cropping the blank corners)
+  - **Undo / redo** — one entry per slider release, aspect pick, flip or mirror; loading a photo seeds the "as loaded" entry, so your very first edit can be undone
+  - **Presets** — save the colour + filter look, apply it to another photo (its geometry is kept), long-press to delete; overwriting a same-named preset asks first. On disk it is one recipe as text (`filesDir/edit_presets/<name>.json`); unknown keys, unknown steps and out-of-range numbers are **refused with a reason**
+  - The preview can be compared against the **colour-applied-off** version (long-press is the shortcut, and there is an explicit button too — long-press is undiscoverable and unreachable for screen readers)
+  - Export re-renders at **full resolution** (geometry first, then color), with format / quality / EXIF policy shared verbatim with the share sheet, and preserves EXIF
 - **GPU-accelerated**: LUT is applied through an OpenGL ES 3.0 3D texture (hardware trilinear filtering, no NDK), with an automatic pure-Kotlin CPU fallback when EGL / shaders / texture limits are unavailable
 - **LIVE-photo triptych** — stitch up to 3 LIVE photos/videos into a single motion photo (unified aspect ratio + per-slot alignment, cover frame, audio toggle and order), with a WYSIWYG preview and a result screen
 - **EXIF camera frame** — 5 templates (classic white border / dark bar / floating polaroid / two-line signature / minimal overlay) with brand logo, model, focal length, aperture, shutter, ISO and capture time auto-filled from EXIF, plus custom text (signature / location / ©), per-field toggles, rounded corners and EXIF preserved on export
@@ -76,9 +80,9 @@ Gradle multi-module, feature-first packaging (PBF):
 | `:upnp` | UPnP/SOAP stack (camera "Send to Smartphone" service) |
 | `:liveview` | LiveView stream (raw 60152 socket), pure Kotlin — Sony Camera Web API not used (ZV-E10 exposes no such service) |
 | `:raw` | RAW decoding: embedded-JPEG extraction (TIFF container parse); libraw NDK planned |
-| `:lut` | LUT engine: `.cube` parser + GPU processor (OpenGL ES 3.0 3D texture) with CPU trilinear fallback |
+| `:lut` | LUT engine: `.cube` parser + GPU processor (OpenGL ES 3.0 3D texture) with CPU trilinear fallback; holds the **single Kotlin definition** of the colour/keying maths — the GLSL is a hand-written mirror of it |
 | `:motionphoto` | Video → Motion Photo (LIVE Photo) packaging (Media3 `MuxerUtil`) |
-| `:image` | Non-destructive edit pipeline (adjustments + geometry, `EditStep` list) |
+| `:image` | Edit recipe + geometry pipeline: ordered `EditStep` list, cursor-based history (undo/redo), normalised crop coordinates. **No pixel work here** — everything per-pixel belongs to `:lut` |
 | `:share` | Export & share: size tiers, formats, EXIF privacy policy, system share sheet |
 | `:app` | Compose UI (MVVM + Hilt), BLE shutter, download manager, settings |
 
@@ -89,7 +93,7 @@ Deep dives:
 
 ## Requirements
 
-- Android 10+ (minSdk 29), targetSdk 36
+- Android 10+ (minSdk 29), targetSdk 37
 - **64-bit devices only** (arm64-v8a / x86_64); 32-bit ABIs are not supported
 - A Sony camera with Wi-Fi "Send to Smartphone" / "PC Remote" / "Bluetooth Remote" functions
 - JDK 21, Android SDK (compileSdk 37)
@@ -111,9 +115,14 @@ Or simply open the project in **Android Studio** (Ladybug or newer) and press Ru
 - [x] BLE remote shutter, QR provisioning, LUT editing
 - [x] Video → Motion Photo (LIVE Photo) export (`:motionphoto`)
 - [x] Export & share with size tiers, formats and EXIF privacy policy (`:share`)
-- [x] Non-destructive basic adjustments (`:image`)
+- [x] Non-destructive edit recipe + geometry (`:image`)
+- [x] Undo / redo (a cursor over the recipe) and preset save / apply / delete
 - [x] Video preview in the fullscreen viewer
 - [x] Auto pull-back of remotely captured photos (PTP path)
+- [ ] Local range keying (exposure / contrast / saturation applied only inside a
+      luma / hue / saturation range) — the keying maths and the preset codec are in,
+      but the **UI and the export path are not wired yet**, and the CPU/GPU parity
+      test has been written without ever being run on a device
 - [ ] libraw-based true RAW decoding (NDK)
 - [x] GPU LUT processor (OpenGL ES 3.0 3D texture, CPU fallback)
 
