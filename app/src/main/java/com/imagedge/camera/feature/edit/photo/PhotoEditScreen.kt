@@ -1,6 +1,7 @@
 package com.imagedge.camera.feature.edit.photo
 
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -78,6 +79,8 @@ import com.imagedge.camera.ui.components.AppSection
 import com.imagedge.camera.ui.components.Histogram
 import com.imagedge.camera.ui.components.AppSlider
 import com.imagedge.camera.ui.components.EmptyState
+import com.imagedge.camera.data.hdr.HdrExport
+import com.imagedge.camera.ui.components.AppSwitchRow
 import com.imagedge.camera.ui.components.ExportConfigControls
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.LucideIcon
@@ -678,6 +681,26 @@ private fun ExportPanel(state: PhotoEditState, viewModel: PhotoEditViewModel) {
                 onQualityChange = { viewModel.setExportConfig(config.copy(quality = it)) },
                 onExifChange = { viewModel.setExportConfig(config.copy(exif = it)) }
             )
+            // HDR 只在「真能做」时亮着，并把不能做的理由摆出来。
+            // 摆一个亮着但按了没反应的开关，比不摆这个功能更坏——
+            // 那是本文件顶部那条「改了也没用的档位等于骗人」的具体形态
+            val hdrUnavailable = HdrExport.availability(
+                Build.VERSION.SDK_INT, config.format, state.sourceHasGainMap
+            )
+            AppSwitchRow(
+                title = stringResource(R.string.edit_hdr),
+                subtitle = stringResource(R.string.edit_hdr_hint),
+                checked = state.hdr,
+                enabled = hdrUnavailable == null,
+                onCheckedChange = viewModel::setHdr
+            )
+            if (hdrUnavailable != null) {
+                Text(
+                    text = hdrUnavailable.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             Text(
                 text = stringResource(R.string.edit_export_note),
                 style = MaterialTheme.typography.bodySmall,

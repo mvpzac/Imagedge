@@ -233,6 +233,8 @@
     <string name="edit_compare_hint">长按对比调色前</string>
     <string name="edit_compare_original">调色前</string>
     <string name="edit_export_note">保存为全分辨率副本，原图不被改写；文件后缀与 MIME 跟随所选格式</string>
+    <string name="edit_hdr">HDR（高动态范围）</string>
+    <string name="edit_hdr_hint">把源照片自带的 HDR 信息一并带进导出文件。这一版只透传、不从普通照片反推——凭空补出的高光不是还原，是加滤镜</string>
 
     <!-- 编辑调节（几何 + 调色） -->
     <string name="edit_photo_title">编辑调节</string>

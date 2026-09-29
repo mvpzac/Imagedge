@@ -141,12 +141,25 @@ class ExportManager(private val context: Context) {
         exifSource: Uri?,
         config: ExportConfig,
         nameBase: String,
+        /**
+         * **别用 ExifInterface 重写这个文件。**
+         *
+         * Ultra HDR 的增益图不在 EXIF 里，它在 **MPF 段**（另有 XMP）。而 [applyMetadata]
+         * 走的是 `ExifInterface.saveAttributes()`，那会把 JPEG 的段重写一遍——
+         * 它保住哪些、丢掉哪些没有依据可查。丢了的后果最坏：导出**成功**，
+         * 只留一行「不影响分享」的日志，而用户拿到的是一张普通 JPEG，以为它是 HDR。
+         * 与其赌，不如这里明确不重写；EXIF 的缺失是可以补的，HDR 悄悄没了用户看不出来。
+         * `UltraHdrMetadataTest` 会在设备上回答「到底会不会丢」——若证明会保住，这个开关就可以撤掉。
+         */
+        skipMetadataRewrite: Boolean = false,
     ): File = withContext(Dispatchers.IO) {
         val dir = File(context.cacheDir, EXPORT_DIR).apply { mkdirs() }
         val file = File(dir, "$nameBase.${config.format.extension}")
         try {
             writeBitmap(bitmap, file, config)
-            if (exifSource != null) applyMetadata(exifSource, file, config)
+            if (exifSource != null && !skipMetadataRewrite) {
+                applyMetadata(exifSource, file, config)
+            }
             file
         } catch (e: Exception) {
             // 写坏一半的文件留着没有任何意义：调用方拿到的是异常，不会引用它

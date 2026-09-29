@@ -2,15 +2,19 @@ package com.imagedge.camera.feature.edit.photo
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Gainmap
 import android.graphics.Matrix
 import android.net.Uri
+import android.os.Build
 import com.imagedge.camera.data.transfer.DownloadLocation
+import androidx.annotation.RequiresApi
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.imagedge.camera.core.common.AppLog
 import com.imagedge.camera.data.edit.EditRecipeDocument
 import com.imagedge.camera.data.edit.EditRecipePresetStore
 import com.imagedge.camera.data.edit.sanitizePresetName
+import com.imagedge.camera.data.hdr.HdrExport
 import com.imagedge.camera.data.lut.LutType
 import com.imagedge.camera.data.lut.UserLutStore
 import com.imagedge.camera.image.EditRecipe
@@ -186,7 +190,21 @@ data class PhotoEditState(
      * 默认与原实现一致（JPEG），但质量与 EXIF 策略不再写死：相机照片的 EXIF 里
      * 常有 GPS 坐标与机身信息，「导出即保留全部」对分享到公开平台是不安全的。
      */
-    val exportConfig: ExportConfig = ExportConfig()
+    val exportConfig: ExportConfig = ExportConfig(),
+    /**
+     * 用户要不要 HDR 导出。
+     *
+     * 界面上的开关在不可用时是灰的（并显示原因），所以这里为 true 一定意味着**真能做**；
+     * 导出时仍会再判一次——两道判的是同一份规则 [HdrExport.availability]。
+     */
+    val hdr: Boolean = false,
+    /**
+     * 源照片本身是否带增益图（`Bitmap.hasGainmap()`）。
+     *
+     * v1 的 HDR **只透传、不伪造**：源照片没有 HDR 数据就没有可带的，
+     * 从 SDR 反推出来的高光是用户照片里本来没有的东西。
+     */
+    val sourceHasGainMap: Boolean = false,
 ) {
     val hasImage: Boolean get() = original != null
 
@@ -595,6 +613,7 @@ class PhotoEditViewModel @Inject constructor(
                     return@launch
                 }
                 coroutineContext.ensureActive()
+                val sourceHasGainMap = decoded!!.hasGainmapSafely()
                 preview = createPreviewSource(decoded!!)
                 thumb = createScaled(decoded!!, LUT_THUMB_MAX_DIM)
                 coroutineContext.ensureActive()
@@ -623,6 +642,10 @@ class PhotoEditViewModel @Inject constructor(
                         // 换下一张就悄悄回到 KEEP_ALL——用户以为自己在保护隐私，
                         // 而 GPS 只是晚了一张照片才跟着出去
                         exportConfig = it.exportConfig,
+                        // HDR 只在「换一张也还做得成」时带着走：增益图是**每张照片各一份**的，
+                        // 上一张能做不代表这一张能做。带着走就是「开关亮着、导出被拒」
+                        hdr = it.hdr && sourceHasGainMap,
+                        sourceHasGainMap = sourceHasGainMap,
                         thumbnails = emptyMap()
                     )
                 }
@@ -688,6 +711,21 @@ class PhotoEditViewModel @Inject constructor(
                 }
             }
         }.onFailure { AppLog.w("lut", "ImageDecoder 解码失败：${it.message}") }.getOrNull()
+    }
+
+    /**
+     * `hasGainmap()` / `getGainmap()` / `setGainmap()` 都是 API 34 才有的方法。
+     * 低版本上直接调不是返回错值，是 `NoSuchMethodError`——所以这三处都必须先过版本闸。
+     */
+    private fun Bitmap.hasGainmapSafely(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && hasGainmap()
+
+    private fun Bitmap.gainmapOrNull(): Gainmap? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) gainmap else null
+
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    private fun Bitmap.attachGainmap(map: Gainmap) {
+        gainmap = map
     }
 
     /** 按角度旋转（0 度原样返回；旋转后的新位图接管所有权） */
@@ -803,6 +841,25 @@ class PhotoEditViewModel @Inject constructor(
      */
     fun setExportConfig(config: ExportConfig) {
         _state.update { it.copy(exportConfig = config) }
+    }
+
+    /**
+     * HDR 导出开关。界面上的开关在不可用时是灰的，正常走不到这里的拒绝分支；
+     * 留着它是因为「能带 HDR 的格式」这一位会随格式选择而变——用户可以先把 HDR 打开、
+     * 再把格式改成 PNG，那时这一位就失效了，而这里正是那条回执该出的地方。
+     */
+    fun setHdr(value: Boolean) {
+        if (value) {
+            val s = _state.value
+            val unavailable = HdrExport.availability(
+                Build.VERSION.SDK_INT, s.exportConfig.format, s.sourceHasGainMap
+            )
+            if (unavailable != null) {
+                snackbarController.show(unavailable.message)
+                return
+            }
+        }
+        _state.update { it.copy(hdr = value) }
     }
 
     /** 基础调色变化（增益/分区/对比度/饱和度任一，防抖同强度） */
@@ -1345,6 +1402,10 @@ class PhotoEditViewModel @Inject constructor(
                         val decoded = decodeFromUri(uri, exportMaxDim())
                             ?: throw IllegalStateException("源图解码失败，请重新选择照片")
                         exportSource = decoded
+                        // 增益图必须在**解码之后、几何之前**取：applyRotation 若没把它带过来，
+                        // 这里就是 null，导出按 HdrExport 的规则拒绝——失败即封闭，
+                        // 不能「没有就算了」导出一张悄悄少了 HDR 的文件
+                        val sourceGainMap = decoded.gainmapOrNull()
                         coroutineContext.ensureActive()
                         val option = _filters.value.firstOrNull { it.key == editSnapshot.selectedKey }
                         val lut = option?.lut ?: option?.key?.let { lutCache[it] }
@@ -1367,9 +1428,28 @@ class PhotoEditViewModel @Inject constructor(
                         // 格式 / 质量 / 元数据策略交给 ExportManager 统一处理（与分享导出同一套），
                         // 文件名扩展名必须跟着格式走，否则相册里会出现一个后缀是 .jpg 的 WebP
                         val config = editSnapshot.exportConfig
+                        // HDR：只把源照片自带的那份增益图挂到成品上。
+                        // 判定与界面灰掉开关时用的是**同一份**规则，所以这里拒了，
+                        // 界面上不可能是亮的——两处各判一次就会出现那种情况
+                        if (editSnapshot.hdr) {
+                            val unavailable = HdrExport.availability(
+                                Build.VERSION.SDK_INT, config.format, sourceGainMap != null
+                            )
+                            if (unavailable != null) throw IllegalStateException(unavailable.message)
+                            // 这一句版本判断看着多余——上面 availability() 里已经判过同一件事。
+                            // 它是给 lint 看的：NewApi 认不出「我们自己的判断函数」，
+                            // 只认写在调用点上的 SDK_INT 比较。删掉它 lint 会红，
+                            // 而把 NewApi 压掉等于让低版本真跑到 setGainmap 上崩
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                                result.attachGainmap(sourceGainMap!!)
+                            }
+                        }
                         val exported = ExportManager(context).exportRendered(
                             bitmap = result,
                             exifSource = uri,
+                            // HDR 打开时不许用 ExifInterface 重写那个文件：
+                            // 增益图在 MPF 段里，而重写会不会保住它没有依据可查（见 ExportManager）
+                            skipMetadataRewrite = editSnapshot.hdr,
                             config = config,
                             nameBase = "IMAGEDGE_EDIT_${System.currentTimeMillis()}",
                         )
