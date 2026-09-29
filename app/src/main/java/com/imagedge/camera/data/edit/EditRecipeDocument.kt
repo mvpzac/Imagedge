@@ -42,6 +42,14 @@ private data class StoredStep(
     val color: StoredColor? = null,
     val key: String? = null,
     val strength: Int? = null,
+    val sel: StoredSelective? = null,
+)
+
+@Serializable
+private data class StoredSelective(
+    val exposure: Int = 0,
+    val contrast: Int = 0,
+    val saturation: Int = 0,
 )
 
 @Serializable
@@ -138,6 +146,9 @@ object EditRecipeDocument {
             )
         )
         is EditStep.Lut -> StoredStep("lut", key = key, strength = strength)
+        // 键与三轴的线格式字段在 T5 一次补齐（解码侧与失败即封闭的校验同批）；这里先把编码侧
+        // 的位置占住——它是穷举 when，编译器逼着每个新步骤都表态，不能靠「以后再说」
+        is EditStep.Selective -> StoredStep("selective", sel = StoredSelective(adjust.exposure, adjust.contrast, adjust.saturation))
     }
 
     private fun StoredStep.toDomain(): EditStep? = when (kind) {

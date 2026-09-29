@@ -1,6 +1,8 @@
 package com.imagedge.camera.image
 
 import com.imagedge.camera.lut.ColorAdjust
+import com.imagedge.camera.lut.RangeKey
+import com.imagedge.camera.lut.SelectiveAdjust
 
 /**
  * 编辑步骤 —— 一次编辑的原子单位（几何 / 调色 / 滤镜）。
@@ -45,6 +47,15 @@ sealed interface EditStep {
     data class Color(val adjust: ColorAdjust) : EditStep
 
     /**
+     * 局部调整：一个区间键 + 三个轴（曝光/对比度/饱和度）。
+     *
+     * 与 [Color] 是**两个身份**：全局一份、局部一份，由「同一身份至多一步」直接保证，
+     * 不需要新规则，也没有开放多层叠加（那是本轮为 [Lut] 明确拒掉的事）。
+     * 键控数学只有 `:lut` 的 RangeKeyWeight 一份，CPU 与 GPU 分别调它与镜像它。
+     */
+    data class Selective(val key: RangeKey, val adjust: SelectiveAdjust) : EditStep
+
+    /**
      * 滤镜：资产 key + 强度。
      *
      * key 为编辑器的「原图」占位值时它仍然占位——那是**故意的**：强度是用户滑出来的值，
@@ -73,6 +84,7 @@ internal val EditStep.identity: String
         is EditStep.Crop -> "crop"
         is EditStep.Color -> "color"
         is EditStep.Lut -> "lut"
+        is EditStep.Selective -> "selective"
     }
 
 /**
@@ -93,5 +105,6 @@ val EditStep.rank: Int
         is EditStep.Flip -> 0
         is EditStep.Crop -> 0
         is EditStep.Color -> 1
-        is EditStep.Lut -> 2
+        is EditStep.Selective -> 2
+        is EditStep.Lut -> 3
     }

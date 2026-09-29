@@ -1,6 +1,9 @@
 package com.imagedge.camera.image
 
 import com.imagedge.camera.lut.ColorAdjust
+import com.imagedge.camera.lut.KeyAxis
+import com.imagedge.camera.lut.RangeKey
+import com.imagedge.camera.lut.SelectiveAdjust
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
@@ -197,5 +200,32 @@ class EditRecipeTest {
 
         assertEquals(4, recipe.steps.size)
         assertEquals(listOf("rotate", "flip:true", "color", "lut"), recipe.steps.map { it.identity })
+    }
+
+    @Test
+    fun `a second selective step replaces the first instead of stacking`() {
+        val a = RangeKey.of(KeyAxis.LUMA, 0.2f, 0.5f, feather = 0.1f)
+        val b = RangeKey.of(KeyAxis.HUE, 0.8f, 1.2f, feather = 0.1f)
+        val recipe = EditRecipe.EMPTY
+            .with(EditStep.Selective(a, SelectiveAdjust(exposure = 10)))
+            .with(EditStep.Selective(b, SelectiveAdjust(exposure = -10)))
+
+        assertEquals(
+            listOf(EditStep.Selective(b, SelectiveAdjust(exposure = -10))),
+            recipe.steps.filterIsInstance<EditStep.Selective>()
+        )
+    }
+
+    @Test
+    fun `selective sorts between colour and lut`() {
+        val recipe = EditRecipe.EMPTY
+            .with(EditStep.Lut("kodak2383", 50))
+            .with(EditStep.Selective(RangeKey.of(KeyAxis.LUMA, 0.2f, 0.5f, feather = 0.1f), SelectiveAdjust(contrast = 5)))
+            .with(EditStep.Color(ColorAdjust(exposure = 3)))
+
+        assertEquals(
+            listOf(1, 2, 3),
+            recipe.steps.map { it.rank }
+        )
     }
 }

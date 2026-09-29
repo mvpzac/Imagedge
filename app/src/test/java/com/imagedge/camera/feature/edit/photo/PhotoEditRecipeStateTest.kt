@@ -8,6 +8,9 @@ import com.imagedge.camera.image.NormRect
 import com.imagedge.camera.image.rank
 import com.imagedge.camera.image.strengthOrDefault
 import com.imagedge.camera.lut.ColorAdjust
+import com.imagedge.camera.lut.KeyAxis
+import com.imagedge.camera.lut.RangeKey
+import com.imagedge.camera.lut.SelectiveAdjust
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -597,5 +600,21 @@ class PhotoEditRecipeStateTest {
                 croppedRecipe(plain.with(EditStep.Rotate(90f)), NormRect(0.1f, 0.1f, 0.5f, 0.5f))
             ).steps
         )
+    }
+
+    @Test
+    fun `the selective step folds back into the fields the sliders read`() {
+        val key = RangeKey.of(KeyAxis.HUE, 0.8f, 1.2f, feather = 0.15f, inverted = true)
+        val adjust = SelectiveAdjust(exposure = 12, contrast = -4, saturation = 8)
+
+        val fields = EditRecipe.EMPTY.with(EditStep.Selective(key, adjust)).fields()
+
+        assertEquals(adjust, fields.selective)
+        assertEquals(key, fields.selectiveKey)
+        // hasEdits 是 VM 侧的 val（JVM 起不了 VM），它计入 selective 的那一半由 Task 7 的走查截图负责；
+        // 这里只钉折叠本身
+        val empty = EditRecipe.EMPTY.fields()
+        assertEquals(SelectiveAdjust(), empty.selective)
+        assertEquals(null, empty.selectiveKey)
     }
 }

@@ -31,6 +31,8 @@ import com.imagedge.camera.lut.ColorAdjust
 import com.imagedge.camera.lut.CubeLut
 import com.imagedge.camera.lut.CubeLutParser
 import com.imagedge.camera.lut.LutProcessor
+import com.imagedge.camera.lut.RangeKey
+import com.imagedge.camera.lut.SelectiveAdjust
 import com.imagedge.camera.ui.feedback.Haptics
 import com.imagedge.camera.ui.feedback.SnackbarController
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -221,6 +223,8 @@ data class EditRecipeFields(
     val flipHorizontal: Boolean,
     val flipVertical: Boolean,
     val straighten: Float,
+    val selective: SelectiveAdjust,
+    val selectiveKey: RangeKey?,
 ) {
     val hasGeometryEdits: Boolean
         get() = quarterTurns % 4 != 0 || flipHorizontal || flipVertical ||
@@ -228,7 +232,7 @@ data class EditRecipeFields(
 
     /** 有没有「还没存盘的改动」——强度单独改不算（与 alpha08 的 hasEdits 同语义） */
     val hasEdits: Boolean
-        get() = selectedKey != FILTER_NONE || !adjust.isIdentity || hasGeometryEdits
+        get() = selectedKey != FILTER_NONE || !adjust.isIdentity || hasGeometryEdits || !selective.isIdentity
 }
 
 /**
@@ -253,6 +257,8 @@ fun EditRecipe.fields(): EditRecipeFields {
         flipHorizontal = steps.any { it is EditStep.Flip && it.horizontal },
         flipVertical = steps.any { it is EditStep.Flip && !it.horizontal },
         straighten = steps.filterIsInstance<EditStep.Straighten>().firstOrNull()?.degrees ?: 0f,
+        selective = steps.filterIsInstance<EditStep.Selective>().firstOrNull()?.adjust ?: SelectiveAdjust(),
+        selectiveKey = steps.filterIsInstance<EditStep.Selective>().firstOrNull()?.key,
     )
 }
 
