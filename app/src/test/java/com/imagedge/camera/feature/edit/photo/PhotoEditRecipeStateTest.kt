@@ -561,6 +561,36 @@ class PhotoEditRecipeStateTest {
     }
 
     @Test
+    fun `applying a preset carries the local adjustment across as well`() {
+        // 这条**钉的是裁定，不是新行为**：`presetAppliedTo` 筛 `rank > 0`、Selective 的 rank 是 2，
+        // 所以它今天就成立——没有哪条实现改动会让它变红，除了有人把口径改回「只有颜色与滤镜」。
+        // 值得钉住是因为裁定是反直觉的那一个：存了局部调整的预设套到别的照片上却只还原全局调色，
+        // 用户没有任何办法察觉少了什么。
+        // 变异：`presetAppliedTo` 的 `it.rank > 0` 改成 `it.rank == 1` → 本条红
+        val photo = EditRecipe.EMPTY
+            .with(EditStep.Selective(RangeKey.of(KeyAxis.LUMA, 0.2f, 0.5f, feather = 0.1f), SelectiveAdjust(exposure = 5)))
+            .with(EditStep.Crop(NormRect(0.1f, 0.1f, 0.6f, 0.6f)))
+        val preset = EditRecipe.EMPTY
+            .with(EditStep.Selective(RangeKey.of(KeyAxis.HUE, 0.8f, 1.2f, feather = 0.1f), SelectiveAdjust(exposure = -30)))
+            .with(EditStep.Color(ColorAdjust(exposure = 10)))
+            .with(EditStep.Crop(NormRect(0f, 0f, 0.2f, 0.2f)))
+
+        val applied = presetAppliedTo(photo, preset)
+
+        assertEquals(
+            "几何留着这张照片自己的",
+            listOf(EditStep.Crop(NormRect(0.1f, 0.1f, 0.6f, 0.6f))),
+            applied.steps.filter { it.rank == 0 }
+        )
+        assertEquals(
+            "局部调整按裁定跟着预设换掉",
+            SelectiveAdjust(exposure = -30),
+            applied.steps.filterIsInstance<EditStep.Selective>().single().adjust
+        )
+        assertEquals(ColorAdjust(exposure = 10), applied.colorAdjust)
+    }
+
+    @Test
     fun `a preset naming a filter that is not available is detected before anything changes`() {
         val known = setOf(FILTER_NONE, "kodak2383")
 

@@ -3,6 +3,9 @@ package com.imagedge.camera.data.edit
 import com.imagedge.camera.image.EditRecipe
 import com.imagedge.camera.image.EditStep
 import com.imagedge.camera.lut.ColorAdjust
+import com.imagedge.camera.lut.KeyAxis
+import com.imagedge.camera.lut.RangeKey
+import com.imagedge.camera.lut.SelectiveAdjust
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -227,5 +230,104 @@ class EditRecipeDocumentTest {
 
         assertFalse(refused.isUsable)
         assertNull(refused.recipe)
+    }
+
+    @Test
+    fun `a selective step round trips through the preset format`() {
+        val recipe = EditRecipe.EMPTY.with(
+            EditStep.Selective(
+                RangeKey.of(KeyAxis.HUE, 0.85f, 1.15f, feather = 0.12f, inverted = true),
+                SelectiveAdjust(exposure = 12, contrast = -4, saturation = 8)
+            )
+        )
+
+        assertEquals(recipe, EditRecipeDocument.decode(EditRecipeDocument.encode(recipe)).recipe)
+    }
+
+    @Test
+    fun `an encoded selective step carries its key fields into the file`() {
+        // 与上面那条 round trip 配对使用：编码器少写一个字段时解码器会拒掉它，round trip 照样红，
+        // 但那时给出的理由是「预设含未知或不完整的步骤」——而实际是应用自己存的东西。
+        // 键一旦不在文件里，轴/反选/羽化就在往返中静默变成默认值
+        val recipe = EditRecipe.EMPTY.with(
+            EditStep.Selective(
+                RangeKey.of(KeyAxis.HUE, 0.85f, 1.15f, feather = 0.12f, inverted = true),
+                SelectiveAdjust(exposure = 12)
+            )
+        )
+
+        val text = EditRecipeDocument.encode(recipe)
+
+        assertTrue("键的轴必须真的写进文件", text.contains("\"axis\":1"))
+        assertTrue("反选必须真的写进文件", text.contains("\"inverted\":true"))
+        assertTrue("羽化必须真的写进文件", text.contains("\"feather\":0.12"))
+    }
+
+    @Test
+    fun `a degenerate selective key in a file is refused with a reason`() {
+        // feather 0 在写入侧构造不出来，但文件可以手改。收下它等于让 GLSL 的
+        // smoothstep(e0, e0, x) 除零——行为逐驱动不同，而用户只看到一层忽有忽无的色带
+        //
+        // 这条与上面那条 round trip 是一对：解码侧**还没有** selective 分支时，
+        // 任何 selective 文件都被 `else -> null` 兜住而本条照样绿。真正让它有意义的是
+        // 那条红的——它证明这条分支存在之后，本条才是「分支在拒绝坏键」而不是「什么都没读」
+        val text =
+            """{"format":1,"steps":[{"kind":"selective","axis":0,"from":0.4,"to":0.6,"feather":0.0,"inverted":false,"sel":{"exposure":10,"contrast":0,"saturation":0}}]}"""
+
+        val result = EditRecipeDocument.decode(text)
+        assertNotNull(result.failure)
+        assertNull(result.recipe)
+    }
+
+    @Test
+    fun `a luma range whose upper knot exceeds one is refused`() {
+        // 亮度/饱和度的上拐点锁在 1 内（色相才允许到 2 跨红端接缝）。to + feather = 1.05
+        // 会让第二个梯形在暗端绕回，而那正是本仓抓过的「颜色在暗部忽然反着走」
+        val text =
+            """{"format":1,"steps":[{"kind":"selective","axis":0,"from":0.95,"to":0.95,"feather":0.1,"inverted":false,"sel":{"exposure":10,"contrast":0,"saturation":0}}]}"""
+
+        assertNotNull(EditRecipeDocument.decode(text).failure)
+    }
+
+    @Test
+    fun `a selective step with an unknown axis is refused rather than read as luma`() {
+        // axis 是线格式里的整数，ordinal 会被直接喂给 KeyAxis.entries[a]。
+        // 读到 3 就该拒：entries[3] 越界要么抛、要么被谁悄悄夹成最后一个（色相），
+        // 后者意味着用户存的是亮度、套出来是色相
+        // 钉的是「axis=3 被拒」，而拒绝**必须**由 toDomain 自己判：
+        // 那里只接 IllegalArgumentException，entries[3] 的越界异常不该被吞掉
+        val text =
+            """{"format":1,"steps":[{"kind":"selective","axis":3,"from":0.4,"to":0.6,"feather":0.1,"inverted":false,"sel":{"exposure":10,"contrast":0,"saturation":0}}]}"""
+
+        assertNotNull(EditRecipeDocument.decode(text).failure)
+    }
+
+    @Test
+    fun `a selective step with an out-of-range axis value is refused`() {
+        // -1 那一支同样要拒：ordinal 越界在 Kotlin 里是抛，runCatching 之外的路径会炸掉调用方
+        val text =
+            """{"format":1,"steps":[{"kind":"selective","axis":-1,"from":0.4,"to":0.6,"feather":0.1,"inverted":false,"sel":{"exposure":10,"contrast":0,"saturation":0}}]}"""
+
+        assertNotNull(EditRecipeDocument.decode(text).failure)
+    }
+
+    @Test
+    fun `an out-of-range selective slider is refused rather than coerced`() {
+        // 三轴与全局调色同一条规矩：-100..100。渲染侧 selectiveGain 里有 coerceIn，
+        // 收下 101 的话用户存的是 101、渲染出来的是 100，两份配方不是同一个东西
+        val text =
+            """{"format":1,"steps":[{"kind":"selective","axis":0,"from":0.4,"to":0.6,"feather":0.1,"inverted":false,"sel":{"exposure":101,"contrast":0,"saturation":0}}]}"""
+
+        assertNotNull(EditRecipeDocument.decode(text).failure)
+    }
+
+    @Test
+    fun `a selective step without its inverted flag is refused`() {
+        // inverted 不给默认值：默认成 false 的话，存的是「只推红色之外」的文件会读成
+        // 「只推红色」——方向整个反过来，而预览上只看得见颜色变了
+        val text =
+            """{"format":1,"steps":[{"kind":"selective","axis":0,"from":0.4,"to":0.6,"feather":0.1,"sel":{"exposure":10,"contrast":0,"saturation":0}}]}"""
+
+        assertNotNull(EditRecipeDocument.decode(text).failure)
     }
 }

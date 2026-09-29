@@ -4,6 +4,9 @@ import com.imagedge.camera.image.EditRecipe
 import com.imagedge.camera.image.EditStep
 import com.imagedge.camera.image.NormRect
 import com.imagedge.camera.lut.ColorAdjust
+import com.imagedge.camera.lut.KeyAxis
+import com.imagedge.camera.lut.RangeKey
+import com.imagedge.camera.lut.SelectiveAdjust
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -42,6 +45,11 @@ private data class StoredStep(
     val color: StoredColor? = null,
     val key: String? = null,
     val strength: Int? = null,
+    val axis: Int? = null,
+    val from: Float? = null,
+    val to: Float? = null,
+    val feather: Float? = null,
+    val inverted: Boolean? = null,
     val sel: StoredSelective? = null,
 )
 
@@ -146,9 +154,15 @@ object EditRecipeDocument {
             )
         )
         is EditStep.Lut -> StoredStep("lut", key = key, strength = strength)
-        // 键与三轴的线格式字段在 T5 一次补齐（解码侧与失败即封闭的校验同批）；这里先把编码侧
-        // 的位置占住——它是穷举 when，编译器逼着每个新步骤都表态，不能靠「以后再说」
-        is EditStep.Selective -> StoredStep("selective", sel = StoredSelective(adjust.exposure, adjust.contrast, adjust.saturation))
+        // 键的四个字段与三轴一起进文件。少写任何一个，decode 就会因为「不完整」拒掉它，
+        // 而那时的理由是「预设含未知或不完整的步骤」——听起来像用户的文件坏了，
+        // 实际是应用自己存的东西
+        is EditStep.Selective -> StoredStep(
+            "selective",
+            axis = key.axis.ordinal, from = key.from, to = key.to,
+            feather = key.feather, inverted = key.inverted,
+            sel = StoredSelective(adjust.exposure, adjust.contrast, adjust.saturation)
+        )
     }
 
     private fun StoredStep.toDomain(): EditStep? = when (kind) {
@@ -182,6 +196,47 @@ object EditRecipeDocument {
             val lutKey = key?.takeIf { it.isNotBlank() && it.length <= MAX_KEY_CHARS }
             val value = strength?.takeIf { it in 0..100 }
             if (lutKey == null || value == null) null else EditStep.Lut(lutKey, value)
+        }
+        // `inverted` 缺失即拒：它是语义的一部分（默认成 false 会把「只推红色之外」的文件
+        // 读成「只推红色」，方向整个反过来，而界面上只看得出颜色变了）
+        "selective" -> {
+            val a = axis
+            val f = from
+            val t = to
+            val fe = feather
+            val inv = inverted
+            val s = sel
+            // axis 的范围闸不是冗余：下面那个 catch 只接 IllegalArgumentException，
+            // 而 entries[3] 抛的是 IndexOutOfBoundsException——不判就会一路抛到 decode 的调用方，
+            // 把一个畸形文件变成一次崩溃。（实测：删掉它，两条 axis 用例都红，抛的是越界而不是断言失败）
+            if (a == null || a !in KeyAxis.entries.indices || f == null || t == null ||
+                fe == null || s == null || inv == null
+            ) {
+                null
+            } else {
+                // 退化羽化、越界上拐点、from > to 全部由 RangeKey.of 抛 IllegalArgumentException，
+                // 这里翻译成「拒绝」。**读侧不抄一遍那些规则**——规则只有一份，
+                // 抄一份就会在 RangeKey.of 改了之后静默留在旧边界上（与 EditRecipe.init 同一口径）
+                //
+                // 只接 IllegalArgumentException，与本文件下面 EditRecipe 构造那处同一条纪律：
+                // 用 runCatching 兜住一切，会把这段代码里的真 bug 报成「你的预设文件有问题」。
+                // 也正因如此，上面的 axis 范围闸必须自己判——越界下标是程序错误，不该被吞掉
+                try {
+                    EditStep.Selective(
+                        RangeKey.of(KeyAxis.entries[a], f, t, fe, inv),
+                        SelectiveAdjust(
+                            s.exposure.takeIf { it in -100..100 }
+                                ?: throw IllegalArgumentException("sel.exposure"),
+                            s.contrast.takeIf { it in -100..100 }
+                                ?: throw IllegalArgumentException("sel.contrast"),
+                            s.saturation.takeIf { it in -100..100 }
+                                ?: throw IllegalArgumentException("sel.saturation"),
+                        )
+                    )
+                } catch (e: IllegalArgumentException) {
+                    null
+                }
+            }
         }
         else -> null
     }

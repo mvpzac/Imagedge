@@ -372,7 +372,11 @@ internal fun geometryToRender(recipe: EditRecipe): List<EditStep> = recipe.allSt
 internal fun renderInputsOf(recipe: EditRecipe): EditRecipe = recipe.without<EditStep.Crop>()
 
 /**
- * 把一份预设套到当前配方上：留下这张照片自己的几何，只换颜色与滤镜。
+ * 把一份预设套到当前配方上：留下这张照片自己的几何，**换掉颜色、局部与滤镜**。
+ *
+ * 局部调整也一起换，是一条裁定而不是「rank > 0 顺手带上的」：存了局部调整的预设套到别的照片上
+ * 却只还原全局调色，用户没有任何办法察觉少了什么（PhotoEditRecipeStateTest 有对应的钉）。
+ * 几何保留、颜色与滤镜同类替换而不是叠加这两条不变量仍然成立。
  *
  * 抽成纯函数是因为这里守着计划点名的两条不变量——**几何保留**、**同类替换而不是叠加**——
  * 而 `applyPreset` 本体要 ViewModel 实例，JVM 里起不来（同 [carriedColour] 的理由）。

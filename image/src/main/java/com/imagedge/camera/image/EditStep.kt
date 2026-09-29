@@ -88,9 +88,9 @@ internal val EditStep.identity: String
     }
 
 /**
- * 规范顺序：几何 → 调色 → LUT。同 rank 内保持原相对次序（sortedBy 是稳定排序）。
+ * 规范顺序：几何 → 调色 → 局部 → 滤镜。同 rank 内保持原相对次序（sortedBy 是稳定排序）。
  *
- * 公开是因为 `:app` 的预设要按它挑出「只存颜色与滤镜」的步骤；
+ * 公开是因为 `:app` 的预设要按它挑出「不要几何」的那部分步骤（`rank > 0`）；
  * internal 在 Kotlin 里是**按模块**算的，跨模块用不到。
  *
  * 几何四个类型逐条列成 0，不写 else：将来给 identity 加了新变体（那里没有 else，
