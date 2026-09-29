@@ -89,12 +89,12 @@ class GpuLutProcessor(
         maskMode: Boolean,
     ): Bitmap? {
         if (disabled) return null
-        // 局部/掩码：GPU 内核尚未认识这两个参数，交回 CPU 走同一条数学——
-        // 宁可慢，也不能**静默丢掉**局部调整（那正是本特性要防的形状）。T4 让内核接手。
-        if (selective != null || maskMode) return null
+
         if (source.width * source.height < minPixels) return null // 交给调用方的 CPU 路径
         return try {
-            withContext(glDispatcher) { engine().process(source, lutData, lutSize, strength, adjust) }
+            withContext(glDispatcher) {
+                engine().process(source, lutData, lutSize, strength, adjust, selective, maskMode)
+            }
         } catch (e: kotlin.coroutines.cancellation.CancellationException) {
             throw e
         } catch (e: SizeUnsupportedException) {
@@ -183,6 +183,13 @@ class GpuLutProcessor(
         private val uLutScale: Int
         private val uLutOffset: Int
         private val uHasLut: Int
+        // 局部键控：与 RangeKeyWeight 一一对应（x0/from/to/x3 打包进 uKnots）
+        private val uMaskMode: Int
+        private val uHasSelective: Int
+        private val uKeyAxis: Int
+        private val uInverted: Int
+        private val uKnots: Int
+        private val uSelGcs: Int
 
         init {
             var eglDisplay = EGL14.EGL_NO_DISPLAY
@@ -249,6 +256,12 @@ class GpuLutProcessor(
                 uLutScale = glGetUniform(program, "uLutScale")
                 uLutOffset = glGetUniform(program, "uLutOffset")
                 uHasLut = glGetUniform(program, "uHasLut")
+                uMaskMode = glGetUniform(program, "uMaskMode")
+                uHasSelective = glGetUniform(program, "uHasSelective")
+                uKeyAxis = glGetUniform(program, "uKeyAxis")
+                uInverted = glGetUniform(program, "uInverted")
+                uKnots = glGetUniform(program, "uKnots")
+                uSelGcs = glGetUniform(program, "uSelGcs")
 
                 // 全屏四边形：顶点坐标 [-1,1]，纹理坐标在顶点着色器里换算
                 val quad = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
@@ -293,6 +306,8 @@ class GpuLutProcessor(
             lutSize: Int,
             strength: Int,
             adjust: ColorAdjust,
+            selective: SelectiveSpec? = null,
+            maskMode: Boolean = false,
         ): Bitmap {
             val w = source.width
             val h = source.height
@@ -326,7 +341,7 @@ class GpuLutProcessor(
                 val strip = if (rows == h) input else Bitmap.createBitmap(input, 0, y, w, rows)
                 val rendered = renderStrip(
                     strip, w, rows,
-                    if (hasLut) lutSize else 0, strengthF, u
+                    if (hasLut) lutSize else 0, strengthF, u, selective, maskMode
                 )
                 canvas.drawBitmap(rendered, 0f, y.toFloat(), null)
                 rendered.recycle()
@@ -345,6 +360,8 @@ class GpuLutProcessor(
             lutSize: Int,
             strength: Float,
             u: AdjustUniforms,
+            selective: SelectiveSpec?,
+            maskMode: Boolean,
         ): Bitmap {
             ensureSourceTexture(w, h)
             ensureTargetTexture(w, h)
@@ -377,6 +394,25 @@ class GpuLutProcessor(
             uniform1f(uHighlights, u.highlights)
             uniform1f(uStrength, strength)
             uniform1f(uHasLut, if (lutSize >= 2) 1f else 0f)
+            // 局部键控的 uniform：即使没有 selective 也要**显式写一遍**，
+            // 未赋值的 uniform 会被驱动优化掉，取到的是上一次绘制留下的值——那种错只在某台设备上出现
+            uniform1f(uMaskMode, if (maskMode) 1f else 0f)
+            uniform1f(uHasSelective, if (selective != null) 1f else 0f)
+            uniform1f(uKeyAxis, selective?.key?.axis?.ordinal?.toFloat() ?: 0f)
+            uniform1f(uInverted, if (selective?.key?.inverted == true) 1f else 0f)
+            if (uKnots >= 0) {
+                val k = selective?.key
+                GLES30.glUniform4f(uKnots, k?.x0 ?: 0f, k?.from ?: 0f, k?.to ?: 0f, k?.x3 ?: 0f)
+            }
+            if (uSelGcs >= 0) {
+                val a = selective?.adjust
+                GLES30.glUniform3f(
+                    uSelGcs,
+                    a?.let { RangeKeyWeight.selectiveGain(it.exposure) } ?: 1f,
+                    a?.let { RangeKeyWeight.selectiveContrastF(it.contrast) } ?: 1f,
+                    a?.let { RangeKeyWeight.selectiveSatF(it.saturation) } ?: 1f,
+                )
+            }
             if (lutSize >= 2) {
                 // 端点对齐：LUT 的第 0 个采样点对应输入 0，第 N-1 个对应输入 1
                 uniform1f(uLutScale, (lutSize - 1).toFloat() / lutSize)
@@ -616,6 +652,13 @@ class GpuLutProcessor(
                 uniform float uLutScale;
                 uniform float uLutOffset;
                 uniform float uHasLut;
+                // 局部键控：与 Kotlin 的 RangeKeyWeight 逐项对应。轴的序号即 KeyAxis 的 ordinal
+                uniform float uMaskMode;
+                uniform float uHasSelective;
+                uniform float uKeyAxis;
+                uniform float uInverted;
+                uniform vec4 uKnots;      // x0, from, to, x3
+                uniform vec3 uSelGcs;     // 局部 gain / contrastF / saturationF
 
                 vec3 srgbToLinear(vec3 c) {
                     return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
@@ -634,6 +677,56 @@ class GpuLutProcessor(
                     return fract((p3.x + p3.y) * p3.z);
                 }
 
+                // ── 区间键控：RangeKeyWeight 的 GLSL 镜像 ────────────────────────────
+                // 逐行对应 Kotlin 那一侧。**两侧分支结构必须一致**（这里按 uniform 的轴分支，
+                // 不按像素分支），否则「一边算了另一边没算」就是 CPU/GPU 分家的起点。
+                float rkt_smoothstep(float e0, float e1, float x) {
+                    float t = clamp((x - e0) / (e1 - e0), 0.0, 1.0);
+                    return t * t * (3.0 - 2.0 * t);
+                }
+
+                float rkt_trap(float x, vec4 k) {
+                    return rkt_smoothstep(k.x, k.y, x) * (1.0 - rkt_smoothstep(k.z, k.w, x));
+                }
+
+                vec3 rkt_hsv(vec3 c) {
+                    float mx = max(c.r, max(c.g, c.b));
+                    float mn = min(c.r, min(c.g, c.b));
+                    float d = mx - mn;
+                    float h = 0.0;
+                    if (d > 0.0) {
+                        if (mx == c.r) h = mod(mod((c.g - c.b) / d, 6.0) + 6.0, 6.0) / 6.0;
+                        else if (mx == c.g) h = ((c.b - c.r) / d + 2.0) / 6.0;
+                        else h = ((c.r - c.g) / d + 4.0) / 6.0;
+                    }
+                    float s = mx > 0.0 ? d / mx : 0.0;
+                    return vec3(h, s, mx);
+                }
+
+                float rkt_weight(vec3 lin) {
+                    float x;
+                    if (uKeyAxis < 0.5) {
+                        // 亮度：线性光 → 对数刻度，地板以下是 2^-12。
+                        // 地板在着色器里是**必需**的：log2(0.0) 未定义，max(NaN, x) 逐驱动不同
+                        float l = dot(lin, vec3(${SrgbTransfer.LUMA_R}, ${SrgbTransfer.LUMA_G}, ${SrgbTransfer.LUMA_B}));
+                        float floorLin = exp2(${RangeKeyWeight.LUMA_LOG_FLOOR});
+                        x = clamp((log2(max(l, floorLin)) - (${RangeKeyWeight.LUMA_LOG_FLOOR})) / ${RangeKeyWeight.LUMA_LOG_SPAN}, 0.0, 1.0);
+                    } else {
+                        vec3 hsv = rkt_hsv(lin);
+                        x = uKeyAxis < 1.5 ? hsv.x : hsv.y;
+                    }
+                    float v = rkt_trap(x, uKnots);
+                    if (uKeyAxis > 0.5 && uKeyAxis < 1.5) {
+                        // 色相：跨过 h=0 的接缝（区间允许 x3 > 1）
+                        v = max(v, rkt_trap(x + 1.0, uKnots));
+                        // 纯灰没有色相：不属于任何色相区间
+                        float mx = max(lin.r, max(lin.g, lin.b));
+                        float mn = min(lin.r, min(lin.g, lin.b));
+                        if (mx == mn) v = 0.0;
+                    }
+                    return uInverted > 0.5 ? 1.0 - v : v;
+                }
+
                 void main() {
                     vec4 src = texture(uSrc, vUv);
                     vec3 lin = srgbToLinear(src.rgb) * uGain;
@@ -644,6 +737,26 @@ class GpuLutProcessor(
                     lin = max((lin - uPivot) * uContrast + uPivot, vec3(0.0));
                     float luma = dot(lin, vec3(0.2126, 0.7152, 0.0722));
                     lin = max(mix(vec3(luma), lin, uSaturation), vec3(0.0));
+                    // 局部调整：在「全局调色之后、LUT 之前」这一段，与 CPU 侧同一位置、
+                    // 同一顺序。键控量在当前像素上测（pre-mix）
+                    if (uHasSelective > 0.5) {
+                        float w = rkt_weight(lin);
+                        if (uMaskMode > 0.5) {
+                            // 掩码预览：输出权重灰度，跳过 LUT 与抖动（CPU 侧同样不过）
+                            fragColor = vec4(vec3(w), 1.0);
+                            return;
+                        }
+                        if (w > 0.0) {
+                            vec3 pre = lin;
+                            vec3 post = max((pre * uSelGcs.x - uPivot) * uSelGcs.y + uPivot, 0.0);
+                            float l2 = dot(post, vec3(${SrgbTransfer.LUMA_R}, ${SrgbTransfer.LUMA_G}, ${SrgbTransfer.LUMA_B}));
+                            post = max(l2 + (post - l2) * uSelGcs.z, 0.0);
+                            lin = mix(pre, post, w);
+                        }
+                    } else if (uMaskMode > 0.5) {
+                        fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                        return;
+                    }
                     // 回到 sRGB 编码：3D LUT 的输入域定义在这里
                     vec3 c = clamp(linearToSrgb(lin), 0.0, 1.0);
                     if (uHasLut > 0.5) {
