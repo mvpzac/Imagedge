@@ -34,9 +34,11 @@ import com.imagedge.camera.share.ExportManager
 import com.imagedge.camera.lut.ColorAdjust
 import com.imagedge.camera.lut.CubeLut
 import com.imagedge.camera.lut.CubeLutParser
+import com.imagedge.camera.lut.KeyAxis
 import com.imagedge.camera.lut.LutProcessor
 import com.imagedge.camera.lut.RangeKey
 import com.imagedge.camera.lut.SelectiveAdjust
+import com.imagedge.camera.lut.SelectiveSpec
 import com.imagedge.camera.ui.feedback.Haptics
 import com.imagedge.camera.ui.feedback.SnackbarController
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -205,6 +207,13 @@ data class PhotoEditState(
      * 从 SDR 反推出来的高光是用户照片里本来没有的东西。
      */
     val sourceHasGainMap: Boolean = false,
+    /**
+     * 「显示作用范围」：把区间权重画成灰度图。
+     *
+     * **不是配方的一部分**——它是一个查看手段，存进配方会让导出的成品变成一张灰度图。
+     * 也因此它不占历史的一格：开关它不该能被撤销。
+     */
+    val showKeyMask: Boolean = false,
 ) {
     val hasImage: Boolean get() = original != null
 
@@ -222,6 +231,8 @@ data class PhotoEditState(
     val flipVertical: Boolean get() = derived.flipVertical
     val straighten: Float get() = derived.straighten
     val hasGeometryEdits: Boolean get() = derived.hasGeometryEdits
+    val selective: SelectiveAdjust get() = derived.selective
+    val selectiveKey: RangeKey? get() = derived.selectiveKey
 
     /** 有没有「还没存盘的改动」；判定只在 [EditRecipeFields.hasEdits] 一处 */
     val hasEdits: Boolean get() = derived.hasEdits
@@ -388,6 +399,69 @@ internal fun geometryToRender(recipe: EditRecipe): List<EditStep> = recipe.allSt
  * 撤销与重做各自 `applyCurrentFilter`、导出直读配方而非预览位图。
  */
 internal fun renderInputsOf(recipe: EditRecipe): EditRecipe = recipe.without<EditStep.Crop>()
+
+/**
+ * 这一份配方要的局部调整。**预览与导出读的是同一个函数**。
+ *
+ * 两条渲染路径各读一次配方、各自决定要不要往下传，是「预览与成品分家」最省事的写法：
+ * 局部调整只出现在预览里，导出的成品原封不动，而两边都不报错。放进这个纯函数是因为
+ * 它在 JVM 上可测——接线本身仍测不到（ViewModel 起不来），那条边界记在
+ * PhotoEditRecipeStateTest 的类注释里。
+ */
+internal fun EditRecipe.selectiveSpec(): SelectiveSpec? =
+    steps.filterIsInstance<EditStep.Selective>().firstOrNull()?.let { SelectiveSpec(it.key, it.adjust) }
+
+/** 滑条的刻度上限：0..200 对应 0.00..2.00（[AppSlider] 只收整数，用它把浮点值搬上去） */
+internal const val SELECTIVE_STEPS = 200
+
+/**
+ * 局部区间的默认羽化。**界面的起手值与 [setSelectiveAdjust] 的兜底用同一个数**——
+ * 两处各写一个 0.1 的结果就是「先动滑条再切维度」与「先切维度再动滑条」得到两种边界。
+ */
+internal const val DEFAULT_FEATHER = 0.1f
+private const val SELECTIVE_STEP_SCALE = 100f
+
+internal fun selectiveStepToFloat(step: Int): Float = step / SELECTIVE_STEP_SCALE
+internal fun selectiveFloatToStep(value: Float): Int =
+    (value * SELECTIVE_STEP_SCALE).toInt().coerceIn(0, SELECTIVE_STEPS)
+
+/**
+ * 把滑条上的四个值收敛成一个**合法**的区间键。
+ *
+ * 它存在的理由是 [RangeKey.of] 会抛：羽化低于下限、`from > to`、上拐点越过该轴的容量，
+ * 这三样用户用滑条随手就能拖出来（两条区间滑条交叉、或者在亮部把羽化拉满）。
+ * 一个「滑到某个位置就崩」的编辑器比一个会自己收敛的差得多。
+ *
+ * 收敛之后保证：[from, to] 非空（`to > from`）、羽化不小于下限、上拐点不越界。
+ * 用 `coerceIn` 时**必须先保证 min ≤ max**——Kotlin 的 `coerceIn(min, max)` 在 min > max 时
+ * 抛 IllegalArgumentException，也就是这个函数自己会崩在它本该防的那种地方。
+ */
+internal fun rangeKeyOf(
+    axis: KeyAxis,
+    from: Float,
+    to: Float,
+    feather: Float,
+    inverted: Boolean,
+): RangeKey {
+    val cap = if (axis == KeyAxis.HUE) 2f else 1f
+    val f = feather.coerceAtLeast(RangeKey.MIN_FEATHER)
+    val top = cap - f
+    val safeTo = to.coerceIn(f, top.coerceAtLeast(f))
+    val safeFrom = from.coerceIn(0f, (safeTo - f).coerceAtLeast(0f))
+    return RangeKey.of(axis, safeFrom, safeTo, f, inverted)
+}
+
+/**
+ * 换轴时给的一段起手区间。**每条轴各给各的**：把亮度那条原样搬到色相上，
+ * 出来的是一个合法但几乎肯定不是用户想要的「只键黄色」。
+ */
+internal fun defaultRangeOf(axis: KeyAxis): Pair<Float, Float> = when (axis) {
+    // 亮部偏中调：最常被局部调整的是天空与墙面
+    KeyAxis.LUMA -> 0.35f to 0.75f
+    // 色相跨过红端接缝：这是「只键红色」唯一能命中的写法（终点 > 1）
+    KeyAxis.HUE -> 0.90f to 1.15f
+    KeyAxis.SATURATION -> 0.30f to 0.80f
+}
 
 /**
  * 把一份预设套到当前配方上：留下这张照片自己的几何，**换掉颜色、局部与滤镜**。
@@ -862,6 +936,53 @@ class PhotoEditViewModel @Inject constructor(
         _state.update { it.copy(hdr = value) }
     }
 
+    /** 局部区间 / 反选 / 模式是离散点击：前后各记一格（与翻转、点比例同一条规矩） */
+    fun setSelectiveKey(key: RangeKey) {
+        _state.update { s ->
+            val next = s.recipe.with(EditStep.Selective(key, s.selective))
+            s.copy(recipe = next, history = committedTransform(s.history, s.recipe, next))
+        }
+        applyCurrentFilter()
+    }
+
+    /**
+     * 局部三轴：防抖重渲染，松手由界面调 [commitEdit]。
+     *
+     * 没有 Selective 步骤时先落一个默认键，而不是把这三个值丢掉：界面初始就选中
+     * 「亮度」，所以正常路径上不存在这种状态；这个兜底只防直接调 API 的顺序错。
+     */
+    fun setSelectiveAdjust(adjust: SelectiveAdjust) {
+        _state.update { s ->
+            val key = s.selectiveKey ?: RangeKey.of(KeyAxis.LUMA, 0.4f, 0.6f, feather = DEFAULT_FEATHER)
+            s.copy(recipe = s.recipe.with(EditStep.Selective(key, adjust)))
+        }
+        scheduleApply()
+    }
+
+    /**
+     * 关掉局部调整：把这一步从配方里摘掉。
+     *
+     * 需要它是因为**进得去出不来**：打开局部调整后把三轴拖回 0，那一步仍然在配方里
+     * （对照片没有任何影响，所以 `hasEdits` 为假、编辑器那个「重置」是灰的），
+     * 而拖滑条也摘不掉它——已经是 0 了。没有这个出口，这一格就永远留在配方里。
+     */
+    fun clearSelective() {
+        _state.update { s ->
+            val next = s.recipe.without<EditStep.Selective>()
+            s.copy(recipe = next, history = committedTransform(s.history, s.recipe, next))
+        }
+        applyCurrentFilter()
+    }
+
+    /**
+     * 「显示作用范围」直连 [applyCurrentFilter]，**不走防抖**：
+     * 那是 200ms 的延迟，而开关该是即时的——用户按下去等半秒才变，读起来就是「没生效」。
+     */
+    fun setShowKeyMask(show: Boolean) {
+        _state.update { it.copy(showKeyMask = show) }
+        applyCurrentFilter()
+    }
+
     /** 基础调色变化（增益/分区/对比度/饱和度任一，防抖同强度） */
     fun setAdjust(adjust: ColorAdjust) {
         _state.update { it.copy(recipe = it.recipe.with(EditStep.Color(adjust)), message = null) }
@@ -1077,13 +1198,19 @@ class PhotoEditViewModel @Inject constructor(
                         ImagePipeline(listOf(EditStep.Crop(crop))).renderGeometry(geometryOnly)
                     }
                     // 3) 颜色：调色 + LUT（一次像素遍历）
-                    coloredCropped = applyPipelineTo(cropped, lut, strength, adjust)
+                    coloredCropped = applyPipelineTo(
+                        cropped, lut, strength, adjust,
+                        requestInputs.selectiveSpec(), snapshot.showKeyMask
+                    )
                     coroutineContext.ensureActive()
                     // 裁剪模式的底图 = 几何 + 颜色（让用户带着最终观感去框选）
                     coloredFull = if (cropped === geometryOnly) {
                         coloredCropped
                     } else {
-                        applyPipelineTo(geometryOnly, lut, strength, adjust)
+                        applyPipelineTo(
+                            geometryOnly, lut, strength, adjust,
+                            requestInputs.selectiveSpec(), snapshot.showKeyMask
+                        )
                     }
                     coroutineContext.ensureActive()
                     if (sourceGeneration.get() != expectedGeneration ||
@@ -1313,6 +1440,8 @@ class PhotoEditViewModel @Inject constructor(
         lut: CubeLut?,
         strength: Int,
         adjust: ColorAdjust,
+        selective: SelectiveSpec?,
+        maskMode: Boolean,
     ): Bitmap {
         // GPU 直通路径：一次完成「调色 + LUT」，省掉 Bitmap→IntArray→RGBA→IntArray→Bitmap
         // 的两趟 CPU 拷贝（GPU 实现见 GpuLutProcessor；不支持时返回 null 走下面的 CPU 实现）
@@ -1322,7 +1451,9 @@ class PhotoEditViewModel @Inject constructor(
                 lut?.data ?: LutProcessor.EMPTY_LUT,
                 lut?.size ?: 0,
                 strength,
-                adjust
+                adjust,
+                selective = selective,
+                maskMode = maskMode,
             )
             if (gpu != null) return gpu
         }
@@ -1339,10 +1470,18 @@ class PhotoEditViewModel @Inject constructor(
             rgba[i * 4 + 2] = (px and 0xFF).toByte()
             rgba[i * 4 + 3] = (px shr 24 and 0xFF).toByte()
         }
+        // 无 LUT 那一支**不能**再用 applyAdjustOnly：它没有 selective 参数，
+        // 「没选滤镜」时局部调整会被整段丢掉，而且不报错
         val out = if (lut == null) {
-            processor.applyAdjustOnly(rgba, w, h, adjust)
+            processor.apply(
+                rgba, w, h, LutProcessor.EMPTY_LUT, 0, 100, adjust,
+                selective = selective, maskMode = maskMode,
+            )
         } else {
-            processor.apply(rgba, w, h, lut.data, lut.size, strength, adjust)
+            processor.apply(
+                rgba, w, h, lut.data, lut.size, strength, adjust,
+                selective = selective, maskMode = maskMode,
+            )
         }
         val result = createBitmap(w, h)
         val outPixels = reuseIntArray(convOutPixels, size) ?: IntArray(size).also { convOutPixels = it }
@@ -1420,7 +1559,12 @@ class PhotoEditViewModel @Inject constructor(
                         val transformed = ImagePipeline(steps).renderGeometry(decoded)
                         geometryApplied = transformed
                         coroutineContext.ensureActive()
-                        val result = renderFullResolution(transformed, lut, strength, adjust)
+                        val result = renderFullResolution(
+                            transformed, lut, strength, adjust,
+                            // 与预览读同一个函数（见 selectiveSpec）：两条路径各读一次配方，
+                            // 就会出现「预览里有、成品里没有」而两边都不报错
+                            editSnapshot.recipe.selectiveSpec(),
+                        )
                         rendered = result
                         coroutineContext.ensureActive()
 
@@ -1509,6 +1653,7 @@ class PhotoEditViewModel @Inject constructor(
         lut: CubeLut?,
         strength: Int,
         adjust: ColorAdjust,
+        selective: SelectiveSpec?,
     ): Bitmap {
         // GPU 直通：大图正是 GPU 收益最大的场景（实现内部按条带渲染，避免一次性申请两张全尺寸纹理）
         if (processor.supportsBitmapPath) {
@@ -1517,7 +1662,10 @@ class PhotoEditViewModel @Inject constructor(
                 lut?.data ?: LutProcessor.EMPTY_LUT,
                 lut?.size ?: 0,
                 strength,
-                adjust
+                adjust,
+                selective = selective,
+                // 掩码**不进导出**：showKeyMask 是 state 字段、不在配方里。
+                // 导出的是配方，不是屏幕上那张灰度图
             )
             if (gpu != null) return gpu
         }
@@ -1540,9 +1688,15 @@ class PhotoEditViewModel @Inject constructor(
                 rgba[i * 4 + 3] = (px shr 24 and 0xFF).toByte()
             }
             val processed = if (lut == null) {
-                processor.applyAdjustOnly(rgba, w, rows, adjust)
+                processor.apply(
+                    rgba, w, rows, LutProcessor.EMPTY_LUT, 0, 100, adjust,
+                    selective = selective,
+                )
             } else {
-                processor.apply(rgba, w, rows, lut.data, lut.size, strength, adjust)
+                processor.apply(
+                    rgba, w, rows, lut.data, lut.size, strength, adjust,
+                    selective = selective,
+                )
             }
             val outPixels = IntArray(count)
             packRgba(processed, outPixels, count)

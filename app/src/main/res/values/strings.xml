@@ -234,6 +234,19 @@
     <string name="edit_compare_original">调色前</string>
     <string name="edit_export_note">保存为全分辨率副本，原图不被改写；文件后缀与 MIME 跟随所选格式</string>
     <string name="edit_hdr">HDR（高动态范围）</string>
+    <string name="edit_selective_title">局部调整</string>
+    <string name="edit_selective_off">关闭</string>
+    <string name="edit_selective_pick_hint">选一个维度再动滑条，即只在那一段里生效；不想用了把三轴都归零</string>
+    <string name="edit_selective_axis_luma">亮度</string>
+    <string name="edit_selective_axis_hue">色相</string>
+    <string name="edit_selective_axis_sat">饱和度</string>
+    <string name="edit_selective_invert">反选（只作用于区间之外）</string>
+    <string name="edit_selective_from">起点</string>
+    <string name="edit_selective_to">终点</string>
+    <string name="edit_selective_feather">边缘柔和度</string>
+    <string name="edit_selective_mask">显示作用范围</string>
+    <string name="edit_selective_hue_hint">色相可以跨过红色接缝（终点大于 1.00）</string>
+    <string name="edit_selective_tip">滑条的取值会被收敛成一个合法区间，交叉或越界拖动会自动修正</string>
     <string name="edit_hdr_hint">把源照片自带的 HDR 信息一并带进导出文件。这一版只透传、不从普通照片反推——凭空补出的高光不是还原，是加滤镜</string>
 
     <!-- 编辑调节（几何 + 调色） -->

@@ -80,6 +80,9 @@ import com.imagedge.camera.ui.components.Histogram
 import com.imagedge.camera.ui.components.AppSlider
 import com.imagedge.camera.ui.components.EmptyState
 import com.imagedge.camera.data.hdr.HdrExport
+import com.imagedge.camera.lut.KeyAxis
+import com.imagedge.camera.lut.RangeKey
+import com.imagedge.camera.lut.SelectiveAdjust
 import com.imagedge.camera.ui.components.AppSwitchRow
 import com.imagedge.camera.ui.components.ExportConfigControls
 import com.imagedge.camera.ui.components.Lucide
@@ -444,6 +447,8 @@ private fun ColorPanel(
             }
         }
 
+        SelectiveSection(state, viewModel)
+
         // 预设区排在调色分区的**最后**：它存的正是这一屏的两样东西（参数 + 滤镜），
         // 而导出分区只有格式与元数据，摆在那儿等于把动作放到它管不到的东西后面
         PresetSection(
@@ -659,6 +664,156 @@ private fun PresetSection(
         )
     }
 }
+
+/**
+ * 局部调整：圈一段区间，只在那一段里施加曝光 / 对比度 / 饱和度。
+ *
+ * 三件事是这个分区成立的前提：
+ *
+ * 1. **滑条值一律经 [rangeKeyOf] 收敛**。用户把两条区间滑条交叉拖、把羽化拖到 0、
+ *    或者在亮部把羽化拉满，都会拖出 `RangeKey.of` 会抛的组合——那是个「滑到某个位置
+ *    就崩」的编辑器。收敛是纯函数且被穷举测过。
+ * 2. **还没有这一步时只给三枚维度 chip**。一上来就摆六个滑条（全 0），
+ *    用户分不清「这是当前值」还是「没设过」。
+ * 3. **「显示作用范围」不是配方的一部分**。它是查看手段，存进配方会让导出的成品
+ *    变成一张灰度图；它也不进导出路径（见 PhotoEditViewModel.renderFullResolution）。
+ */
+@Composable
+private fun SelectiveSection(state: PhotoEditState, viewModel: PhotoEditViewModel) {
+    val key = state.selectiveKey
+    val adjust = state.selective
+    val axis = key?.axis ?: KeyAxis.LUMA
+    // AppChipRow 的 label 是普通函数类型、不接受 @Composable，所以标签先在组合期算好
+    val axisLabels = KeyAxis.entries.associateWith { entry ->
+        stringResource(
+            when (entry) {
+                KeyAxis.LUMA -> R.string.edit_selective_axis_luma
+                KeyAxis.HUE -> R.string.edit_selective_axis_hue
+                KeyAxis.SATURATION -> R.string.edit_selective_axis_sat
+            }
+        )
+    }
+    // 收敛是唯一的写法：滑条、chip 切换、开关反选都走它
+    fun applyKey(
+        nextAxis: KeyAxis = axis,
+        from: Float = key?.from ?: defaultRangeOf(nextAxis).first,
+        to: Float = key?.to ?: defaultRangeOf(nextAxis).second,
+        feather: Float = key?.feather ?: DEFAULT_FEATHER,
+        inverted: Boolean = key?.inverted ?: false,
+    ) = viewModel.setSelectiveKey(rangeKeyOf(nextAxis, from, to, feather, inverted))
+
+    AppSection(
+        title = stringResource(R.string.edit_selective_title),
+        trailing = {
+            // 关闭出口：只把三轴拖回 0 摘不掉这一步（它本来就是 0），
+            // 而没有它这一格会永远留在配方里且关不掉
+            AppLink(
+                text = stringResource(R.string.edit_selective_off),
+                onClick = viewModel::clearSelective,
+                enabled = key != null
+            )
+        }
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.XS)) {
+            AppChipRow(
+                items = KeyAxis.entries.toList(),
+                selected = axis,
+                label = { axisLabels[it] ?: it.name },
+                onSelect = { picked ->
+                    // 换轴时换到**那条轴自己的**起手区间：把亮度那条原样带过去，
+                    // 出来的是一个合法但几乎肯定不是用户想要的「只键黄色」
+                    val (from, to) = defaultRangeOf(picked)
+                    applyKey(nextAxis = picked, from = from, to = to)
+                }
+            )
+            if (key == null) {
+                Text(
+                    text = stringResource(R.string.edit_selective_pick_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                return@Column
+            }
+
+            AppSwitchRow(
+                title = stringResource(R.string.edit_selective_mask),
+                checked = state.showKeyMask,
+                onCheckedChange = viewModel::setShowKeyMask
+            )
+            AppSwitchRow(
+                title = stringResource(R.string.edit_selective_invert),
+                checked = key.inverted,
+                onCheckedChange = { applyKey(inverted = it) }
+            )
+            // 滑条**自己就拖不出非法值**：上限随轴与羽化浮动。
+            // 固定 0..200 的话，在亮度轴把终点拖过 1.00 会被 rangeKeyOf 收敛回 1.00、
+            // 滑条下一帧又弹回来——读起来就是「我拖到哪它就跳回哪」。
+            // rangeKeyOf 仍然保留：换维度、反选、以及直接调 API 都还要它兜着
+            val featherStep = selectiveFloatToStep(key.feather)
+            val capStep = selectiveFloatToStep(if (axis == KeyAxis.HUE) 2f else 1f)
+            val toMax = (capStep - featherStep).coerceAtLeast(featherStep)
+            val fromMax = (toMax - featherStep).coerceAtLeast(0)
+
+            AppSlider(
+                label = stringResource(R.string.edit_selective_from),
+                value = selectiveFloatToStep(key.from),
+                onValueChange = { applyKey(from = selectiveStepToFloat(it)) },
+                range = 0..fromMax,
+                valueText = formatRange(key.from)
+            )
+            AppSlider(
+                label = stringResource(R.string.edit_selective_to),
+                value = selectiveFloatToStep(key.to),
+                onValueChange = { applyKey(to = selectiveStepToFloat(it)) },
+                range = featherStep..toMax,
+                valueText = formatRange(key.to)
+            )
+            if (axis == KeyAxis.HUE) {
+                Text(
+                    text = stringResource(R.string.edit_selective_hue_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            AppSlider(
+                label = stringResource(R.string.edit_selective_feather),
+                value = selectiveFloatToStep(key.feather),
+                onValueChange = { applyKey(feather = selectiveStepToFloat(it)) },
+                range = selectiveFloatToStep(RangeKey.MIN_FEATHER)..SELECTIVE_STEPS / 5,
+                valueText = formatRange(key.feather)
+            )
+            // 滑条顺序 = 处理顺序：曝光 → 对比度 → 饱和度
+            AppSlider(
+                label = stringResource(R.string.edit_exposure),
+                value = adjust.exposure,
+                onValueChange = { viewModel.setSelectiveAdjust(adjust.copy(exposure = it)) },
+                onValueChangeFinished = viewModel::commitEdit,
+                range = -100..100
+            )
+            AppSlider(
+                label = stringResource(R.string.edit_contrast),
+                value = adjust.contrast,
+                onValueChange = { viewModel.setSelectiveAdjust(adjust.copy(contrast = it)) },
+                onValueChangeFinished = viewModel::commitEdit,
+                range = -100..100
+            )
+            AppSlider(
+                label = stringResource(R.string.edit_saturation),
+                value = adjust.saturation,
+                onValueChange = { viewModel.setSelectiveAdjust(adjust.copy(saturation = it)) },
+                onValueChangeFinished = viewModel::commitEdit,
+                range = -100..100
+            )
+            Text(
+                text = stringResource(R.string.edit_selective_tip),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+private fun formatRange(value: Float): String = String.format(java.util.Locale.US, "%.2f", value)
 
 /**
  * 导出分区：格式 / 元数据与隐私 / 画质。

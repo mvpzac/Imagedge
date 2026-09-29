@@ -13,7 +13,9 @@ import com.imagedge.camera.lut.RangeKey
 import com.imagedge.camera.lut.SelectiveAdjust
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import com.imagedge.camera.lut.SelectiveSpec
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -646,5 +648,31 @@ class PhotoEditRecipeStateTest {
         val empty = EditRecipe.EMPTY.fields()
         assertEquals(SelectiveAdjust(), empty.selective)
         assertEquals(null, empty.selectiveKey)
+    }
+
+    @Test
+    fun `the selective spec is read from the recipe and absent without the step`() {
+        val key = RangeKey.of(KeyAxis.LUMA, 0.2f, 0.5f, feather = 0.1f)
+        val recipe = EditRecipe.EMPTY.with(EditStep.Selective(key, SelectiveAdjust(exposure = 12)))
+
+        assertEquals(SelectiveSpec(key, SelectiveAdjust(exposure = 12)), recipe.selectiveSpec())
+        // 没有这一步就该是 null，而不是「三轴全 0 的 SelectiveAdjust」——
+        // 后者会让渲染侧每像素都白算一遍权重，只为得到 0
+        assertNull(EditRecipe.EMPTY.selectiveSpec())
+    }
+
+    @Test
+    fun `the selective spec survives the colour step that sits before it`() {
+        // rank：Color=1 → Selective=2 → Lut=3。局部调整量到的是**调色之后**的像素，
+        // 所以「配方里有没有 Color」不该改变读出来的那一份；这条钉住的是
+        // 「两条渲染路径读同一个函数」——只预览接线、导出没接的形状正是在这里裂开
+        val key = RangeKey.of(KeyAxis.HUE, 0.85f, 1.15f, feather = 0.12f, inverted = true)
+        val adjust = SelectiveAdjust(contrast = 8)
+        val withColor = EditRecipe.EMPTY
+            .with(EditStep.Color(com.imagedge.camera.lut.ColorAdjust(exposure = 40)))
+            .with(EditStep.Selective(key, adjust))
+        val bare = EditRecipe.EMPTY.with(EditStep.Selective(key, adjust))
+
+        assertEquals(bare.selectiveSpec(), withColor.selectiveSpec())
     }
 }
