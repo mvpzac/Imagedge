@@ -75,7 +75,9 @@ class GpuLutProcessor(
         lutSize: Int,
         strength: Int,
         adjust: ColorAdjust,
-    ): ByteArray = fallback.apply(pixels, width, height, lutData, lutSize, strength, adjust)
+        selective: SelectiveSpec?,
+        maskMode: Boolean,
+    ): ByteArray = fallback.apply(pixels, width, height, lutData, lutSize, strength, adjust, selective, maskMode)
 
     override suspend fun applyToBitmap(
         source: Bitmap,
@@ -83,8 +85,13 @@ class GpuLutProcessor(
         lutSize: Int,
         strength: Int,
         adjust: ColorAdjust,
+        selective: SelectiveSpec?,
+        maskMode: Boolean,
     ): Bitmap? {
         if (disabled) return null
+        // 局部/掩码：GPU 内核尚未认识这两个参数，交回 CPU 走同一条数学——
+        // 宁可慢，也不能**静默丢掉**局部调整（那正是本特性要防的形状）。T4 让内核接手。
+        if (selective != null || maskMode) return null
         if (source.width * source.height < minPixels) return null // 交给调用方的 CPU 路径
         return try {
             withContext(glDispatcher) { engine().process(source, lutData, lutSize, strength, adjust) }

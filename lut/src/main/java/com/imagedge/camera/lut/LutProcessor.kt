@@ -41,6 +41,8 @@ interface LutProcessor {
         lutSize: Int,
         strength: Int,
         adjust: ColorAdjust = ColorAdjust.NONE,
+        selective: SelectiveSpec? = null,
+        maskMode: Boolean = false,
     ): Bitmap? = null
 
     /**
@@ -66,6 +68,10 @@ interface LutProcessor {
         lutSize: Int,
         strength: Int,
         adjust: ColorAdjust = ColorAdjust.NONE,
+        /** 局部调整（区间键 + 三轴）；null 表示不启用。带默认值，既有调用点一律不动 */
+        selective: SelectiveSpec? = null,
+        /** 掩码预览：输出区间权重灰度、跳过 LUT 与抖动。默认 false */
+        maskMode: Boolean = false,
     ): ByteArray
 
     /**

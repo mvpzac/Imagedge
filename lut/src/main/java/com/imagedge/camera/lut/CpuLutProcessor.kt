@@ -23,6 +23,8 @@ class CpuLutProcessor : LutProcessor {
         lutSize: Int,
         strength: Int,
         adjust: ColorAdjust,
+        selective: SelectiveSpec?,
+        maskMode: Boolean,
     ): ByteArray {
         val out = ByteArray(pixels.size)
 
@@ -35,12 +37,14 @@ class CpuLutProcessor : LutProcessor {
         // 同时避免 maxIndex = 0 时 `coerceAtMost(maxIndex - 1)` 得到 -1
         // 造成 lutData 负索引越界崩溃。
         val hasLut = lutSize >= 2 && lutData.size >= lutSize * lutSize * lutSize * 3
-        if (!hasLut && table == null) {
+        // 局部调整与掩码模式也要走下面的循环，所以它们在场时这两条早退都得让路：
+        // 否则「只开局部、不动全局、不套滤镜」会整块拷贝返回，局部调整静默消失
+        if (!hasLut && table == null && selective == null && !maskMode) {
             System.arraycopy(pixels, 0, out, 0, pixels.size)
             return out
         }
 
-        if (!hasLut) {
+        if (!hasLut && selective == null && !maskMode) {
             applyAdjustOnlyInPlace(pixels, out, table!!, adjust)
             return out
         }
@@ -50,6 +54,9 @@ class CpuLutProcessor : LutProcessor {
         val n = lutSize
         val n2 = n * n
         val saturationF = AdjustUniforms.of(adjust).saturation
+        // 局部键控与局部调整的中间值：循环外分配一次，逐像素新建 FloatArray 在 1080p 上
+        // 是每帧两百万次分配
+        val scratch = FloatArray(3)
 
         var p = 0
         while (p < pixels.size) {
@@ -75,66 +82,110 @@ class CpuLutProcessor : LutProcessor {
                 gf = luma + (gf - luma) * saturationF
                 bf = luma + (bf - luma) * saturationF
             }
-            // 回到 sRGB 编码：3D LUT 的输入域定义在这里，往下就必须一直是编码值
-            val r = SrgbTransfer.encode(rf).coerceIn(0f, 1f)
-            val g = SrgbTransfer.encode(gf).coerceIn(0f, 1f)
-            val b = SrgbTransfer.encode(bf).coerceIn(0f, 1f)
-            // 调色后的基准值（0..255）——强度混合的「0% 端」。
-            // 必须用它而不是原始像素：否则 strength=0 会把刚调好的曝光/白平衡一起丢掉。
-            val baseR = r * 255f
-            val baseG = g * 255f
-            val baseB = b * 255f
-
-            // 三线性插值：8 个角点
-            val fx = r * maxIndex
-            val fy = g * maxIndex
-            val fz = b * maxIndex
-            val x0 = fx.toInt().coerceIn(0, maxIndex - 1)
-            val y0 = fy.toInt().coerceIn(0, maxIndex - 1)
-            val z0 = fz.toInt().coerceIn(0, maxIndex - 1)
-            val tx = fx - x0
-            val ty = fy - y0
-            val tz = fz - z0
-
-            // 8 个角点在 lutData 中的基址（每点 3 个连续 float = RGB）。
-            // 原先这里在**每像素**的循环体内声明一个 Function4 lambda `idx` 并调用 24 次：
-            // 1080p 意味着 200 万个临时 lambda 对象 + 约 5000 万次装箱虚调用，
-            // 光 GC 抖动就让处理时间从"1~2 秒"膨胀到数十秒。改为预先算基址 + 直接数组访问。
-            val i000 = (x0 + y0 * n + z0 * n2) * 3
-            val i100 = (x0 + 1 + y0 * n + z0 * n2) * 3
-            val i010 = (x0 + (y0 + 1) * n + z0 * n2) * 3
-            val i110 = (x0 + 1 + (y0 + 1) * n + z0 * n2) * 3
-            val i001 = (x0 + y0 * n + (z0 + 1) * n2) * 3
-            val i101 = (x0 + 1 + y0 * n + (z0 + 1) * n2) * 3
-            val i011 = (x0 + (y0 + 1) * n + (z0 + 1) * n2) * 3
-            val i111 = (x0 + 1 + (y0 + 1) * n + (z0 + 1) * n2) * 3
-
-            // 三通道（R/G/B）逐个插值，结果直接写回 out，省去中间变量
-            var c = 0
-            while (c < 3) {
-                val c000 = lutData[i000 + c]; val c100 = lutData[i100 + c]
-                val c010 = lutData[i010 + c]; val c110 = lutData[i110 + c]
-                val c001 = lutData[i001 + c]; val c101 = lutData[i101 + c]
-                val c011 = lutData[i011 + c]; val c111 = lutData[i111 + c]
-
-                val c00 = c000 + (c100 - c000) * tx
-                val c10 = c010 + (c110 - c010) * tx
-                val c01 = c001 + (c101 - c001) * tx
-                val c11 = c011 + (c111 - c011) * tx
-                val c0 = c00 + (c10 - c00) * ty
-                val c1 = c01 + (c11 - c01) * ty
-                val v = c0 + (c1 - c0) * tz
-
-                // 强度混合：strength=0 输出「已调色但未套 LUT」，strength=100 输出完整 LUT 结果
-                val base = when (c) {
-                    0 -> baseR
-                    1 -> baseG
-                    else -> baseB
-                }
-                out[p + c] = mixFloat(base, v * 255f, strengthF)
-                c++
+            // 键控量在这个像素上测（pre-mix：全局调色之后、局部混合之前）——用户看到的画面就是
+            // 他键的东西，且与 LUT 顺序无关。掩码模式读的也是这个 pre-mix 权重。
+            val w = if (selective != null) RangeKeyWeight.weight(selective.key, rf, gf, bf, scratch) else 0f
+            if (maskMode) {
+                // 掩码预览：输出权重灰度，**不过 dither**（抖动是给渐变消色带的，
+                // 而这里要的是权重本身的可读值）
+                val g8 = quantize(w, dither = false)
+                out[p] = g8
+                out[p + 1] = g8
+                out[p + 2] = g8
+                out[p + 3] = pixels[p + 3]
+                p += 4
+                continue
             }
-            out[p + 3] = pixels[p + 3]
+            if (w > 0f) {
+                val gain = RangeKeyWeight.selectiveGain(selective!!.adjust.exposure)
+                val cf = RangeKeyWeight.selectiveContrastF(selective.adjust.contrast)
+                val sf = RangeKeyWeight.selectiveSatF(selective.adjust.saturation)
+                scratch[0] = RangeKeyWeight.gainContrastLinear(rf, gain, cf)
+                scratch[1] = RangeKeyWeight.gainContrastLinear(gf, gain, cf)
+                scratch[2] = RangeKeyWeight.gainContrastLinear(bf, gain, cf)
+                RangeKeyWeight.saturateLinear(scratch, sf)
+                rf += (scratch[0] - rf) * w
+                gf += (scratch[1] - gf) * w
+                bf += (scratch[2] - bf) * w
+            }
+            if (!hasLut && table == null && w <= 0f) {
+                // 没有 LUT、没有全局调色、这一像素又不在局部区间里 → 原样透传。
+                // 不这么短路的话，8 位像素会白走一趟 sRGB 解码-编码 + 抖动，
+                // 「未命中区与不施加时逐位相同」就不成立了（计划 §6.3 的底线）
+                System.arraycopy(pixels, p, out, p, 4)
+                p += 4
+                continue
+            }
+                // 回到 sRGB 编码：3D LUT 的输入域定义在这里，往下就必须一直是编码值
+            if (hasLut) {
+                val r = SrgbTransfer.encode(rf).coerceIn(0f, 1f)
+                val g = SrgbTransfer.encode(gf).coerceIn(0f, 1f)
+                val b = SrgbTransfer.encode(bf).coerceIn(0f, 1f)
+                // 调色后的基准值（0..255）——强度混合的「0% 端」。
+                // 必须用它而不是原始像素：否则 strength=0 会把刚调好的曝光/白平衡一起丢掉。
+                val baseR = r * 255f
+                val baseG = g * 255f
+                val baseB = b * 255f
+
+                // 三线性插值：8 个角点
+                val fx = r * maxIndex
+                val fy = g * maxIndex
+                val fz = b * maxIndex
+                val x0 = fx.toInt().coerceIn(0, maxIndex - 1)
+                val y0 = fy.toInt().coerceIn(0, maxIndex - 1)
+                val z0 = fz.toInt().coerceIn(0, maxIndex - 1)
+                val tx = fx - x0
+                val ty = fy - y0
+                val tz = fz - z0
+
+                // 8 个角点在 lutData 中的基址（每点 3 个连续 float = RGB）。
+                // 原先这里在**每像素**的循环体内声明一个 Function4 lambda `idx` 并调用 24 次：
+                // 1080p 意味着 200 万个临时 lambda 对象 + 约 5000 万次装箱虚调用，
+                // 光 GC 抖动就让处理时间从"1~2 秒"膨胀到数十秒。改为预先算基址 + 直接数组访问。
+                val i000 = (x0 + y0 * n + z0 * n2) * 3
+                val i100 = (x0 + 1 + y0 * n + z0 * n2) * 3
+                val i010 = (x0 + (y0 + 1) * n + z0 * n2) * 3
+                val i110 = (x0 + 1 + (y0 + 1) * n + z0 * n2) * 3
+                val i001 = (x0 + y0 * n + (z0 + 1) * n2) * 3
+                val i101 = (x0 + 1 + y0 * n + (z0 + 1) * n2) * 3
+                val i011 = (x0 + (y0 + 1) * n + (z0 + 1) * n2) * 3
+                val i111 = (x0 + 1 + (y0 + 1) * n + (z0 + 1) * n2) * 3
+
+                // 三通道（R/G/B）逐个插值，结果直接写回 out，省去中间变量
+                var c = 0
+                while (c < 3) {
+                    val c000 = lutData[i000 + c]; val c100 = lutData[i100 + c]
+                    val c010 = lutData[i010 + c]; val c110 = lutData[i110 + c]
+                    val c001 = lutData[i001 + c]; val c101 = lutData[i101 + c]
+                    val c011 = lutData[i011 + c]; val c111 = lutData[i111 + c]
+
+                    val c00 = c000 + (c100 - c000) * tx
+                    val c10 = c010 + (c110 - c010) * tx
+                    val c01 = c001 + (c101 - c001) * tx
+                    val c11 = c011 + (c111 - c011) * tx
+                    val c0 = c00 + (c10 - c00) * ty
+                    val c1 = c01 + (c11 - c01) * ty
+                    val v = c0 + (c1 - c0) * tz
+
+                    // 强度混合：strength=0 输出「已调色但未套 LUT」，strength=100 输出完整 LUT 结果
+                    val base = when (c) {
+                        0 -> baseR
+                        1 -> baseG
+                        else -> baseB
+                    }
+                    out[p + c] = mixFloat(base, v * 255f, strengthF)
+                    c++
+                }
+                out[p + 3] = pixels[p + 3]
+            } else {
+                // 没有 LUT：编码回去再量化。**抖动策略与 applyAdjustOnlyInPlace 一致（抖）**——
+                // 那条快路径在有 selective 时走不到，这里是 no-LUT + selective 唯一的出口，
+                // 两边不一致就会让「同一张图开不开局部」在暗部差几个级
+                out[p] = quantize(SrgbTransfer.encode(rf), dither = true)
+                out[p + 1] = quantize(SrgbTransfer.encode(gf), dither = true)
+                out[p + 2] = quantize(SrgbTransfer.encode(bf), dither = true)
+                out[p + 3] = pixels[p + 3]
+            }
             p += 4
         }
         return out
