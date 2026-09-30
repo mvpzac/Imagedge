@@ -75,7 +75,12 @@ class SelectiveParityTest {
         return Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888)
     }
 
-    private fun worstDelta(a: ByteArray, b: Bitmap): Int {
+    /**
+     * 逐通道最差差。[compareAlpha] 为真时把 alpha 也算进去——原来的版本只看 RGB，
+     * 所以「掩码模式把 alpha 写死成 1.0、CPU 侧却透传」这条差异它**结构上看不见**。
+     * RGB 的位移是 `shr (16 - 8c)`，alpha 是 `ushr 24`，两者不是一个式子。
+     */
+    private fun worstDelta(a: ByteArray, b: Bitmap, compareAlpha: Boolean = false): Int {
         val w = b.width
         val px = IntArray(w * b.height)
         b.getPixels(px, 0, w, 0, 0, w, b.height)
@@ -83,6 +88,9 @@ class SelectiveParityTest {
         for (i in px.indices) {
             for (c in 0..2) {
                 worst = maxOf(worst, abs((a[i * 4 + c].toInt() and 0xFF) - (px[i] shr (16 - 8 * c) and 0xFF)))
+            }
+            if (compareAlpha) {
+                worst = maxOf(worst, abs((a[i * 4 + 3].toInt() and 0xFF) - (px[i] ushr 24 and 0xFF)))
             }
         }
         return worst
@@ -105,8 +113,40 @@ class SelectiveParityTest {
         )
         assertNotNull("模拟器上 GPU 路径必须可用，否则这条测试没有意义", gpu)
 
-        val worst = worstDelta(cpuBytes, gpu!!)
+        val worst = worstDelta(cpuBytes, gpu!!, compareAlpha = true)
         assertTrue("CPU/GPU 掩码最大差 $worst LSB（容差 1）", worst <= 1)
+    }
+
+    /**
+     * 调整路径（掩码关）——掩码那两条**测不到**这一半。
+     *
+     * 它们比的是权重 `rkt_weight`，而用户真正看见的是权重之后改变像素的那一段：
+     * 增益、绕支点的对比度、线性光饱和度、按 w 混合。GLSL 里那四行（`GpuLutProcessor.kt`
+     * 的 751-754 附近）在 afb88d6 之前一次都没被对比过。
+     *
+     * 容差 1 的来历：CPU 无 LUT 的出口走 `quantize(..., dither = true)`，三角抖动落在
+     * (-1, 1) 个码值；GPU 无 LUT 时不抖（那段被 `uHasLut > 0.5` 挡掉）。两侧**算法**结果相同，
+     * 差的只是量化前那一个 ±1 码值。所以 `<= 1` 可证，`< 1` 会把一条真同值的图判红。
+     * 三个轴都给非零值，少给一个就有一整段没被走到。
+     */
+    @Test
+    fun cpu_and_gpu_agree_on_the_adjusted_pixels_within_one_lsb() = runBlocking {
+        val spec = SelectiveSpec(
+            RangeKey.of(KeyAxis.LUMA, 0.3f, 0.7f, feather = 0.1f),
+            SelectiveAdjust(exposure = 40, contrast = 12, saturation = -20)
+        )
+        val src = gradient()
+        val cpuBytes = CpuLutProcessor().apply(
+            rgbaBytes(src), src.width, src.height, LutProcessor.EMPTY_LUT, 0, 100,
+            ColorAdjust.NONE, selective = spec
+        )
+        val gpu = GpuLutProcessor().applyToBitmap(
+            src, LutProcessor.EMPTY_LUT, 0, 100, ColorAdjust.NONE, selective = spec
+        )
+        assertNotNull("模拟器上 GPU 路径必须可用", gpu)
+
+        val worst = worstDelta(cpuBytes, gpu!!)
+        assertTrue("CPU/GPU 调整后最大差 $worst LSB（容差 1，见本用例的注释）", worst <= 1)
     }
 
     @Test
@@ -125,7 +165,7 @@ class SelectiveParityTest {
         )
         assertNotNull("模拟器上 GPU 路径必须可用", gpu)
 
-        val worst = worstDelta(cpuBytes, gpu!!)
+        val worst = worstDelta(cpuBytes, gpu!!, compareAlpha = true)
         assertTrue("CPU/GPU 亮度掩码最大差 $worst LSB（容差 1）", worst <= 1)
     }
 }

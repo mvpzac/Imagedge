@@ -743,7 +743,9 @@ class GpuLutProcessor(
                         float w = rkt_weight(lin);
                         if (uMaskMode > 0.5) {
                             // 掩码预览：输出权重灰度，跳过 LUT 与抖动（CPU 侧同样不过）
-                            fragColor = vec4(vec3(w), 1.0);
+                            // alpha 与 CPU 侧一样透传（src.a），别写死 1.0：掩码只是一张预览图，
+                            // 别的所有出口都透传 alpha，只有这里不传
+                            fragColor = vec4(vec3(w), src.a);
                             return;
                         }
                         if (w > 0.0) {
@@ -754,7 +756,7 @@ class GpuLutProcessor(
                             lin = mix(pre, post, w);
                         }
                     } else if (uMaskMode > 0.5) {
-                        fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                        fragColor = vec4(0.0, 0.0, 0.0, src.a);
                         return;
                     }
                     // 回到 sRGB 编码：3D LUT 的输入域定义在这里
