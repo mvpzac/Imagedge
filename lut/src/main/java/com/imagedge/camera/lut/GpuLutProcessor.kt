@@ -614,7 +614,14 @@ class GpuLutProcessor(
                 runCatching { EGL14.eglTerminate(eglDisplay) }
             }
 
-            private const val VERTEX_SHADER = """
+            // ⚠️ **末尾的 `.trimIndent()` 不可删**。这两个着色器是用带缩进的 Kotlin 原始字符串
+            // 写的，不 trim 的话源码里第一行是空行、第二行是「16 个空格 + #version」——
+            // 而 GLSL 要求 `#version` 出现在**第一行**，驱动见不到它就按 GLSL ES 1.00 解析，
+            // 于是 `in`/`out` 全部报错（"storage qualifier supported in GLSL ES 3.00 and above
+            // only"）。实测在模拟器上就是这条：**GPU 路径在所有设备上都没编译成功过**，
+            // 每一台都静默回退 CPU，而 README 与 CHANGELOG 都写着「GPU 加速」。
+            // `const val` 用不了 trimIndent（它不是编译期常量），所以这里是 `val`。
+            private val VERTEX_SHADER = """
                 #version 300 es
                 in vec2 aPos;
                 out vec2 vUv;
@@ -622,7 +629,7 @@ class GpuLutProcessor(
                     vUv = aPos * 0.5 + 0.5;
                     gl_Position = vec4(aPos, 0.0, 1.0);
                 }
-            """
+            """.trimIndent()
 
             /**
              * 与 [CpuLutProcessor] 相同的处理顺序：解码到线性光 → 逐通道增益 → 对比度
@@ -771,7 +778,7 @@ class GpuLutProcessor(
                     }
                     fragColor = vec4(c, src.a);
                 }
-            """
+            """.trimIndent()
         }
     }
 

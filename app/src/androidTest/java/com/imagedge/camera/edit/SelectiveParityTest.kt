@@ -29,18 +29,27 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class SelectiveParityTest {
 
+    /**
+     * 512×512 = 262 144 像素，**必须**跨过 `GpuLutProcessor.minPixels`（200 000）。
+     *
+     * 第一版这张图是 256×4 = 1024 像素，于是 GPU 路径按设计拒绝了小图、`applyToBitmap`
+     * 返回 null，而断言拒绝了一次空跑——三条用例全红，理由却与同值毫无关系。
+     * 一道「小图不走 GPU」的合理闸，正好能把一条测不到东西的测试照出来。
+     */
     private fun gradient(): Bitmap {
-        val w = 256
-        val h = 4
+        val w = 512
+        val h = 512
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val px = IntArray(w * h)
         for (y in 0 until h) {
+            // 四类像素各占四分之一屏，沿 x 重复同一模式以便每一行都被充分采样
+            val band = y / (h / 4)
             for (x in 0 until w) {
-                px[y * w + x] = when (y) {
-                    0 -> Color.rgb(x, x, x)                                   // 亮度全量程，含纯灰列
-                    1 -> Color.rgb(255, (x * 7) % 256, (x * 13) % 256)        // 色相环带，含跨接缝
-                    2 -> Color.rgb(128, 128, 128)                             // 全灰行（无色相）
-                    else -> Color.rgb(2, 2, 2)                                // 亮度地板以下
+                px[y * w + x] = when (band) {
+                    0 -> Color.rgb(x * 255 / (w - 1), x * 255 / (w - 1), x * 255 / (w - 1)) // 亮度全量程，含纯灰列
+                    1 -> Color.rgb(255, (x * 7) % 256, (x * 13) % 256)                         // 色相环带，含跨接缝
+                    2 -> Color.rgb(128, 128, 128)                                          // 全灰（无色相）
+                    else -> Color.rgb(2, 2, 2)                                             // 亮度地板以下
                 }
             }
         }
