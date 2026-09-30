@@ -219,7 +219,9 @@ fun AppSlider(
             text = label,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(48.dp)
+            // 48dp 只放得下两个汉字：四字标签（「横向色差」）会折成两行，把整行撑高。
+            // 加到 60dp 是实测出来的最小值——设备上看到折行才量得出这个
+            modifier = Modifier.width(60.dp)
         )
         Slider(
             value = value.toFloat(),
@@ -238,7 +240,9 @@ fun AppSlider(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = androidx.compose.ui.text.style.TextAlign.End,
-            modifier = Modifier.width(40.dp)
+            // 40dp 放得下「+100」，放不下带小数的「+0.000」——后者会折成「+0.00」+「0」两行，
+            // 读起来像两个数。同样是设备走查才发现的，60dp 足够六字符
+            modifier = Modifier.width(60.dp)
         )
     }
 }

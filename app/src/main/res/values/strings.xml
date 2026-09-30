@@ -235,8 +235,8 @@
     <string name="edit_export_note">保存为全分辨率副本，原图不被改写；文件后缀与 MIME 跟随所选格式</string>
     <string name="edit_hdr">HDR（高动态范围）</string>
     <string name="edit_lens_title">镜头校正</string>
-    <string name="edit_lens_k1">畸变 k1</string>
-    <string name="edit_lens_tca">横向色差</string>
+    <string name="edit_lens_k1">畸变</string>
+    <string name="edit_lens_tca">色差</string>
     <string name="edit_lens_note">两项都是 0 时不做任何处理。k1 大于 0 修桶形、小于 0 修枕形——本版不带镜头数据库，数值要你自己按镜头调；填错不会崩，只会把一种畸变修成另一种。</string>
     <string name="edit_selective_title">局部调整</string>
     <string name="edit_selective_off">关闭</string>
