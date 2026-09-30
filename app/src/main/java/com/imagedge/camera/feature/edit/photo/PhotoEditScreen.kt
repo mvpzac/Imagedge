@@ -80,6 +80,11 @@ import com.imagedge.camera.ui.components.Histogram
 import com.imagedge.camera.ui.components.AppSlider
 import com.imagedge.camera.ui.components.EmptyState
 import com.imagedge.camera.data.hdr.HdrExport
+import com.imagedge.camera.image.LensCorrectionParams
+import com.imagedge.camera.image.lensK1Of
+import com.imagedge.camera.image.lensK1StepOf
+import com.imagedge.camera.image.lensTcaOf
+import com.imagedge.camera.image.lensTcaStepOf
 import com.imagedge.camera.lut.KeyAxis
 import com.imagedge.camera.lut.RangeKey
 import com.imagedge.camera.lut.SelectiveAdjust
@@ -447,6 +452,7 @@ private fun ColorPanel(
             }
         }
 
+        LensSection(state, viewModel)
         SelectiveSection(state, viewModel)
 
         // 预设区排在调色分区的**最后**：它存的正是这一屏的两样东西（参数 + 滤镜），
@@ -662,6 +668,45 @@ private fun PresetSection(
                 onDelete(target)
             }
         )
+    }
+}
+
+/**
+ * 镜头校正：畸变 + 横向色差。
+ *
+ * **没有开关，只有两条滑条**——两项都是 0 时 `LensCorrectionParams.isIdentity` 为真，
+ * 整条链一次都不跑（见 `applyLensCorrection`）。一个「关着也能看见」的多余开关，
+ * 会让人以为关掉之后仍然有处理在发生。
+ *
+ * 也**没有镜头数据库**：k1 是用户给的量，滑条上标的就是 k1 本身而不是「校正强度」。
+ * 编一个「通用 k1」比不给更坏——偏一点点不会崩、不会很明显，
+ * 它只是把一种畸变修成另一种，而用户分辨不出来。
+ */
+@Composable
+private fun LensSection(state: PhotoEditState, viewModel: PhotoEditViewModel) {
+    val lens = state.lens
+    AppSection(title = stringResource(R.string.edit_lens_title)) {
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.XS)) {
+            AppSlider(
+                label = stringResource(R.string.edit_lens_k1),
+                value = lensK1StepOf(lens.k1),
+                onValueChange = { viewModel.setLens(lens.copy(k1 = lensK1Of(it))) },
+                range = 0..LensCorrectionParams.K1_STEPS,
+                valueText = String.format(java.util.Locale.US, "%+.3f", lens.k1)
+            )
+            AppSlider(
+                label = stringResource(R.string.edit_lens_tca),
+                value = lensTcaStepOf(lens.tca),
+                onValueChange = { viewModel.setLens(lens.copy(tca = lensTcaOf(it))) },
+                range = 0..LensCorrectionParams.TCA_STEPS,
+                valueText = String.format(java.util.Locale.US, "%.4f", lens.tca)
+            )
+            Text(
+                text = stringResource(R.string.edit_lens_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 

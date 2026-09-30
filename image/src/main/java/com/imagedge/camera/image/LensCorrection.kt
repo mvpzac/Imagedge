@@ -19,7 +19,31 @@ data class LensCorrectionParams(
 ) {
     /** 两个系数都是 0 时整条校正链是一次恒等映射，不该为它付一次全图重采样 */
     val isIdentity: Boolean get() = k1 == 0f && tca == 0f
+
+    companion object {
+        /** k1 滑条的刻度：-100..100 ↔ -0.1..0.1（步长 0.001，真实镜头的量级就在 0.001 上下） */
+        const val K1_STEPS = 200
+
+        /** 色差滑条的刻度：0..100 ↔ 0..0.02。色差的真实量级比 k1 小一到两个数量级 */
+        const val TCA_STEPS = 100
+    }
 }
+
+/** k1 滑条刻度 → k1 */
+fun lensK1Of(step: Int): Float =
+    (step - LensCorrectionParams.K1_STEPS / 2) / 1000f
+
+/** k1 → k1 滑条刻度 */
+// 两个方向都用**四舍五入**而不是截断：7/5000f 在 float32 下再乘回 5000f 是 6.9999995，
+// `toInt()` 把它截成 6，于是滑条读回的值比用户拖到的少一格——表现是「松手之后数字自己动了一下」
+fun lensK1StepOf(k1: Float): Int =
+    Math.round(k1 * 1000f) + LensCorrectionParams.K1_STEPS / 2
+
+/** 色差滑条刻度 → 色差强度 */
+fun lensTcaOf(step: Int): Float = step / 5000f
+
+/** 色差强度 → 色差滑条刻度 */
+fun lensTcaStepOf(tca: Float): Int = Math.round(tca * 5000f)
 
 /**
  * 镜头畸变与横向色差校正：**把校正后画面上的一个像素，映射回畸变图里的取样坐标**。

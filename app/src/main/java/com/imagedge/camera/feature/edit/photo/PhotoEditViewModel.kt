@@ -22,6 +22,8 @@ import com.imagedge.camera.image.EditStep
 import com.imagedge.camera.image.ExposureAnalysis
 import com.imagedge.camera.image.Geometry
 import com.imagedge.camera.image.HistoryList
+import com.imagedge.camera.image.LensCorrectionParams
+import com.imagedge.camera.image.LensResample
 import com.imagedge.camera.image.ImagePipeline
 import com.imagedge.camera.image.LumaHistogram
 import com.imagedge.camera.image.NormRect
@@ -214,6 +216,16 @@ data class PhotoEditState(
      * 也因此它不占历史的一格：开关它不该能被撤销。
      */
     val showKeyMask: Boolean = false,
+    /**
+     * 镜头校正（畸变 + 横向色差）。
+     *
+     * **刻意不进 [recipe]**：镜头校正是**镜头**的属性，不是用户在这张照片上做的一步编辑。
+     * 进了配方它就会跟着预设一起走、跟着撤销一起滚——而它真正的依据是镜头本身，
+     * 那一版还不带任何镜头数据库（见 LensCorrection 顶上关于 k1 的说明）。
+     *
+     * 所以它和 [showKeyMask] 一样只是 ViewModel 状态：影响预览与导出，不进历史、不进预设。
+     */
+    val lens: LensCorrectionParams = LensCorrectionParams(),
 ) {
     val hasImage: Boolean get() = original != null
 
@@ -791,6 +803,42 @@ class PhotoEditViewModel @Inject constructor(
      * `hasGainmap()` / `getGainmap()` / `setGainmap()` 都是 API 34 才有的方法。
      * 低版本上直接调不是返回错值，是 `NoSuchMethodError`——所以这三处都必须先过版本闸。
      */
+    /**
+     * 镜头校正：**预览与导出共用的唯一入口**。
+     *
+     * 走位图前处理而不是塞进 `:lut` 那一趟，是因为 CPU 双线性与 GPU 硬件双线性对不到
+     * 1 LSB——塞进去会直接打破本仓库最贵的那条同值不变量，而打破它的表现是
+     * 「同一张照片在不同机器上边缘差半个像素」，极难察觉（理由详见 LensResample）。
+     *
+     * 零系数时 [LensResample.correctRgba] **原样返回入参**，所以这条在没开校正时零成本。
+     * 它也**不改**入参：返回的一定是新建的位图，`original` 不会被踩（踩了就成二次校正了）。
+     */
+    private fun applyLensCorrection(source: Bitmap, params: LensCorrectionParams): Bitmap {
+        if (params.isIdentity) return source
+        val w = source.width
+        val h = source.height
+        val pixels = IntArray(w * h)
+        source.getPixels(pixels, 0, w, 0, 0, w, h)
+        val rgba = ByteArray(w * h * 4)
+        for (i in pixels.indices) {
+            val px = pixels[i]
+            rgba[i * 4] = (px shr 16 and 0xFF).toByte()
+            rgba[i * 4 + 1] = (px shr 8 and 0xFF).toByte()
+            rgba[i * 4 + 2] = (px and 0xFF).toByte()
+            rgba[i * 4 + 3] = (px ushr 24 and 0xFF).toByte()
+        }
+        val out = LensResample.correctRgba(rgba, w, h, params)
+        val packed = IntArray(w * h)
+        for (i in packed.indices) {
+            val o = i * 4
+            packed[i] = (rgba.getOrNull(o + 3)?.toInt()?.and(0xFF) ?: 255 shl 24) or
+                ((out[o].toInt() and 0xFF) shl 16) or
+                ((out[o + 1].toInt() and 0xFF) shl 8) or
+                (out[o + 2].toInt() and 0xFF)
+        }
+        return Bitmap.createBitmap(packed, w, h, Bitmap.Config.ARGB_8888)
+    }
+
     private fun Bitmap.hasGainmapSafely(): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && hasGainmap()
 
@@ -960,7 +1008,16 @@ class PhotoEditViewModel @Inject constructor(
     }
 
     /**
-     * 关掉局部调整：把这一步从配方里摘掉。
+     * 改镜头校正的参数。防抖重渲染——拖 k1 滑条不该每帧都重采样一整张图。
+     *
+     * **不进配方、不进历史**（理由见 [PhotoEditState.lens]）：它不是用户做的一步编辑。
+     */
+    fun setLens(params: LensCorrectionParams) {
+        _state.update { it.copy(lens = params) }
+        scheduleApply()
+    }
+
+    /** 关掉局部调整：把这一步从配方里摘掉。
      *
      * 需要它是因为**进得去出不来**：打开局部调整后把三轴拖回 0，那一步仍然在配方里
      * （对照片没有任何影响，所以 `hasEdits` 为假、编辑器那个「重置」是灰的），
@@ -1144,7 +1201,10 @@ class PhotoEditViewModel @Inject constructor(
         val snapshot = _state.value
         val original = snapshot.original ?: return
         // 预览源优先：交互式处理在降采样副本上跑，比全分辨率快约 6 倍
-        val processSource = previewSource ?: original
+        // 镜头校正在这里，**在几何之前**：先校正再裁剪，裁剪框才对得上最终画面。
+        // 放在几何之后会浪费四角，而且裁剪框指的是畸变图上的位置。
+        // 幂等性靠的是它不改动入参——每次都从 previewSource/original 重新算
+        val processSource = applyLensCorrection(previewSource ?: original, snapshot.lens)
         val option = _filters.value.firstOrNull { it.key == snapshot.selectedKey }
             ?: return
         val lut = option.lut ?: lutCache[option.key]
@@ -1556,7 +1616,10 @@ class PhotoEditViewModel @Inject constructor(
                         // 框在配方里，撤销一次旋转会把「几何 + 框」一起搬回去，成品裁的才是用户
                         // 当初框住的那块内容（说明见 geometryToRender）
                         val steps = geometryToRender(editSnapshot.recipe)
-                        val transformed = ImagePipeline(steps).renderGeometry(decoded)
+                        // 与预览**同一个** helper、同一份参数：两条路径各写一遍的结果是
+                        // 「预览里校正了、成品里没有」，而两边都不报错
+                        val corrected = applyLensCorrection(decoded, editSnapshot.lens)
+                        val transformed = ImagePipeline(steps).renderGeometry(corrected)
                         geometryApplied = transformed
                         coroutineContext.ensureActive()
                         val result = renderFullResolution(

@@ -156,6 +156,29 @@ class LensCorrectionTest {
     }
 
     @Test
+    fun `the slider scale round trips`() {
+        // 两个方向的换算各写一遍就会慢慢分家：滑条读回的值不是用户刚拖到的那个，
+        // 表现是「松手之后数字自己动了一下」
+        for (step in 0..LensCorrectionParams.K1_STEPS) {
+            val back = lensK1StepOf(lensK1Of(step))
+            assertEquals("k1 滑条刻度 $step 往返成了 $back", step, back)
+        }
+        for (step in 0..LensCorrectionParams.TCA_STEPS) {
+            assertEquals("色差滑条刻度 $step 往返", step, lensTcaStepOf(lensTcaOf(step)))
+        }
+    }
+
+    @Test
+    fun `the slider scale covers the range real lenses need`() {
+        // 真实镜头的 k1 量级是 0.001 上下（上游点名那支 500mm 是 0.00108），
+        // 而常见桶形能到 0.05。滑条要够细也要够宽
+        assertEquals("k1 = 0 应在滑条正中", 100, lensK1StepOf(0f))
+        assertEquals("刻度 0 是 -0.1", -0.1f, lensK1Of(0), 1e-6f)
+        assertEquals("刻度末位是 +0.1", 0.1f, lensK1Of(LensCorrectionParams.K1_STEPS), 1e-6f)
+        assertEquals("色差刻度末位是 0.02", 0.02f, lensTcaOf(LensCorrectionParams.TCA_STEPS), 1e-6f)
+    }
+
+    @Test
     fun `a pixel near the corner maps back inside the picture`() {
         // 最容易出问题的地方：角落。半径最大，系数影响最重，越界一点点就会
         // 取到画面外的像素——要么被钳成边缘（出现一圈拉伸的糊边），要么越界读出垃圾
