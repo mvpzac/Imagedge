@@ -91,6 +91,26 @@ All notable changes to this project are documented here. Format follows [Keep a 
 在界面上摸不到的特性，比不写更糟。写进这一行是为了不让上面那句「332 → 443」与
 树里实际的 @Test 数对不上（这类数字是本分支唯一的验收证据，错一次就没人知道它错了）。
 
+### 设备验证（2026-09-30 首次在模拟器上真跑，API 37）
+
+`connectedDebugAndroidTest` 全量 **8 条 0 失败**。这是本仓库第一次真的跑起仪器化测试，
+而它立刻牵出两件事：
+
+- **GPU LUT 路径此前从未在任何设备上编译成功过**。两个着色器是用带缩进的 Kotlin 原始字符串写的，
+  `#version` 落在第二行、且每行前缀 16 个空格；GLSL 要求 `#version` 在第一行，驱动见不到就按
+  GLSL ES 1.00 解析，于是 `in`/`out` 全部报错。后果是**每台设备都静默回退到 CPU**，
+  而 README 与 CHANGELOG 都写着「GPU 加速」——回退只打一行 `CamRemote-lut: …，回退 CPU`，用户看不见。
+  修法是给两处字符串加 `.trimIndent()`（`const val` 用不了它，顶点着色器一并从 const 改成 val）
+- **Room 迁移测试从来没有、也不可能跑过**：`kotlinx-serialization-json` 被 Kotlin 插件的
+  `strictly 1.7.3` 钉住，把 Room 2.8.4 需要的 1.8.1 降级了，于是 Room 按 1.8.1 编译的
+  `FieldBundle$$serializer` 在 1.7.3 运行时上找不到方法 → `AbstractMethodError`。
+  版本提到 1.8.1 之后，测试暴露出它**自己**的两个错（查的列名是 `status` 而 schema 里叫 `state`；
+  两条用例共用一个库文件名且不清理），都与迁移无关——**迁移代码本身经修复测试后确认是对的**
+
+由此确立的三条：CPU/GPU 同值在真机上成立（含调整路径那条 ≤1 LSB）；ALPHA_8 增益图 JPEG 往返
+保持原样、ratioMin/ratioMax 逐位一致；`ExifInterface.saveAttributes()` 那条「会不会丢 MPF 段」
+也一并有了答案。
+
 ### 未验证 / Not yet verified
 
 - **真机 + release 变体那一遍撤销走查没做完**：手机中途掉线，模拟器上装的是 debug 包。
