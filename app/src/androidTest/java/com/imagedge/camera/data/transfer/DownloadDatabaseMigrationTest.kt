@@ -6,6 +6,7 @@ import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Rule
@@ -97,15 +98,15 @@ class DownloadDatabaseMigrationTest {
 
     @Test
     fun migratesFrom2To3WithoutLosingRows() {
-        val db = legacyDb(DB_NAME, version = 2, withHistory = true)
+        val db = legacyDb(DB_NAME_2, version = 2, withHistory = true)
         db.close()
 
         val migrated = helper.runMigrationsAndValidate(
-            DB_NAME, 3, true, DownloadDatabase.MIGRATION_2_3
+            DB_NAME_2, 3, true, DownloadDatabase.MIGRATION_2_3
         )
 
         // v2 的表里只存在未完成的行，升级后落到 'QUEUED' 是如实的
-        migrated.query("SELECT `status` FROM `download_task` WHERE `id` = 'a'").use {
+        migrated.query("SELECT `state` FROM `download_task` WHERE `id` = 'a'").use {
             it.moveToFirst()
             assertEquals("QUEUED", it.getString(0))
         }
@@ -126,16 +127,16 @@ class DownloadDatabaseMigrationTest {
     @Test
     fun migratesFrom1AllTheWayTo3InOneLaunch() {
         // 真实升级路径：v1 老用户直接装到当前版本，MIGRATION_1_2 也必须被带上
-        val db = legacyDb(DB_NAME, version = 1, withHistory = false)
+        val db = legacyDb(DB_NAME_1, version = 1, withHistory = false)
         db.close()
 
         val migrated = helper.runMigrationsAndValidate(
-            DB_NAME, 3, true,
+            DB_NAME_1, 3, true,
             DownloadDatabase.MIGRATION_1_2,
             DownloadDatabase.MIGRATION_2_3,
         )
 
-        migrated.query("SELECT `status`, `progress` FROM `download_task` WHERE `id` = 'a'").use {
+        migrated.query("SELECT `state`, `progress` FROM `download_task` WHERE `id` = 'a'").use {
             it.moveToFirst()
             assertEquals("QUEUED", it.getString(0))
             assertEquals(0, it.getInt(1))
@@ -148,7 +149,23 @@ class DownloadDatabaseMigrationTest {
         migrated.close()
     }
 
+    /**
+     * 两条用例**各用各的库文件**。
+     *
+     * 原来两条共用一个名字且都不清理，于是先跑的那条把 v3 库留在原地，第二条去建 v1 时
+     * SQLite 报 `Can't downgrade database from version 3 to 2`——那条失败与迁移无关，
+     * 是用例之间互相踩。`Assume` 那种「跳过而不是通过」的纪律在这里用不上：
+     * 该失败就得失败，只是失败的理由得是迁移自己的问题。
+     */
+    @After
+    fun cleanUp() {
+        for (name in listOf(DB_NAME_1, DB_NAME_2)) {
+            instrumentation.targetContext.deleteDatabase(name)
+        }
+    }
+
     private companion object {
-        const val DB_NAME = "migration-test-download.db"
+        const val DB_NAME_1 = "migration-test-download-1.db"
+        const val DB_NAME_2 = "migration-test-download-2.db"
     }
 }
