@@ -124,6 +124,40 @@ class LensCorrectionTest {
     }
 
     @Test
+    fun `the hoisted per pixel offsets equal the per channel calls`() {
+        // 6→1 那次提取是**纯重构**：它把 `undistortFactor`（含 ln 与 6 步牛顿迭代）
+        // 从每像素 6 次降到 1 次。这条钉住它没顺手改掉任何结果——
+        // 「提速顺便修了点东西」正是那种没人能审的改动
+        val params = LensCorrectionParams(k1 = 0.02f, tca = 0.004f)
+        val w = 4000
+        val h = 3000
+        val dx = FloatArray(3)
+        val dy = FloatArray(3)
+        val midX = (w - 1) / 2f
+        val midY = (h - 1) / 2f
+
+        for (y in 0 until h step 97) {
+            for (x in 0 until w step 89) {
+                LensCorrection.offsetsOf(x.toFloat(), y.toFloat(), w, h, params, dx, dy)
+                for (ch in 0..2) {
+                    assertEquals(
+                        "($x,$y) 通道$ch 的 x 偏移",
+                        LensCorrection.sourceX(x.toFloat(), y.toFloat(), w, h, params, ch),
+                        midX + dx[ch],
+                        1e-4f
+                    )
+                    assertEquals(
+                        "($x,$y) 通道$ch 的 y 偏移",
+                        LensCorrection.sourceY(x.toFloat(), y.toFloat(), w, h, params, ch),
+                        midY + dy[ch],
+                        1e-4f
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
     fun `a tiny coefficient still converges exactly`() {
         // 这条是给「把方程通除 k1 化成首一形式」那个优化设的绊线。真实镜头的 k1 量级就是
         // 0.001（上游文档里点名那支 500mm 是 0.00108）：通除之后系数放大到 ~1000，
@@ -172,10 +206,12 @@ class LensCorrectionTest {
     fun `the slider scale covers the range real lenses need`() {
         // 真实镜头的 k1 量级是 0.001 上下（上游点名那支 500mm 是 0.00108），
         // 而常见桶形能到 0.05。滑条要够细也要够宽
-        assertEquals("k1 = 0 应在滑条正中", 100, lensK1StepOf(0f))
-        assertEquals("刻度 0 是 -0.1", -0.1f, lensK1Of(0), 1e-6f)
-        assertEquals("刻度末位是 +0.1", 0.1f, lensK1Of(LensCorrectionParams.K1_STEPS), 1e-6f)
-        assertEquals("色差刻度末位是 0.02", 0.02f, lensTcaOf(LensCorrectionParams.TCA_STEPS), 1e-6f)
+        // 范围是**上限决定的**，不是随手取的：条带缓冲的大小随位移线性涨，
+        // 21 MP 上 k1 = 0.1 要 88 MB、k1 = 0.02 只要约 20 MB
+        assertEquals("k1 = 0 应在滑条正中", LensCorrectionParams.K1_STEPS / 2, lensK1StepOf(0f))
+        assertEquals("刻度 0 是 -0.02", -0.02f, lensK1Of(0), 1e-6f)
+        assertEquals("刻度末位是 +0.02", 0.02f, lensK1Of(LensCorrectionParams.K1_STEPS), 1e-6f)
+        assertEquals("色差刻度末位就是它的上限", LensCorrectionParams.TCA_LIMIT, lensTcaOf(LensCorrectionParams.TCA_STEPS), 1e-6f)
     }
 
     @Test

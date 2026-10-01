@@ -23,7 +23,7 @@ import com.imagedge.camera.image.ExposureAnalysis
 import com.imagedge.camera.image.Geometry
 import com.imagedge.camera.image.HistoryList
 import com.imagedge.camera.image.LensCorrectionParams
-import com.imagedge.camera.image.LensResample
+import com.imagedge.camera.image.correctLensDistortion
 import com.imagedge.camera.image.ImagePipeline
 import com.imagedge.camera.image.LumaHistogram
 import com.imagedge.camera.image.NormRect
@@ -224,6 +224,10 @@ data class PhotoEditState(
      * 那一版还不带任何镜头数据库（见 LensCorrection 顶上关于 k1 的说明）。
      *
      * 所以它和 [showKeyMask] 一样只是 ViewModel 状态：影响预览与导出，不进历史、不进预设。
+     *
+     * 代价是**它进不了历史**：撤销与重做只在配方之间来回，所以「重置」清掉它之后，
+     * 撤销那一步重置会带回配方、**带不回镜头校正**——要恢复只能重拖两条滑条。
+     * [hasEdits] 与 [resetEdits] 都算上了它，所以「有没有改动」和「一键回原图」至少是真的。
      */
     val lens: LensCorrectionParams = LensCorrectionParams(),
 ) {
@@ -246,8 +250,14 @@ data class PhotoEditState(
     val selective: SelectiveAdjust get() = derived.selective
     val selectiveKey: RangeKey? get() = derived.selectiveKey
 
-    /** 有没有「还没存盘的改动」；判定只在 [EditRecipeFields.hasEdits] 一处 */
-    val hasEdits: Boolean get() = derived.hasEdits
+    /**
+     * 有没有「还没存盘的改动」；**配方那半边**判定只在 [EditRecipeFields.hasEdits] 一处。
+     *
+     * 镜头校正在这里 OR 进来。它是唯一一件「影响导出成品、却不进配方」的编辑，
+     * 不算进去的话，只调了镜头校正的会话里「重置」是灰的、「未存盘」标记也不亮，
+     * 而导出的照片确实变形了——界面说没改，成品说改了。
+     */
+    val hasEdits: Boolean get() = derived.hasEdits || !lens.isIdentity
 
     /** 裁剪模式底图的宽高比（宽/高），裁剪框换算与比例预设都要用 */
     val cropBaseAspect: Float
@@ -554,6 +564,24 @@ internal fun carriedColour(previous: EditRecipe, noFilterKey: String): EditRecip
     return if (adjust.isIdentity) base else base.with(EditStep.Color(adjust))
 }
 
+/**
+ * 「一键重置」写进 state 的那一份。
+ *
+ * 抽成纯函数是为了能在 JVM 里钉住它：镜头校正那一格是后加的，而它**不进配方**——
+ * 只对着配方断言的重置测试看不见它，于是「重置之后预览仍然变形、而按钮已经把界面标回
+ * 没改动」这种不一致可以照绿。`:app` 的测试依赖只有 junit4，起不来 ViewModel，
+ * 所以纯算术与纯构造都得走这个口子（与 rotatedRecipe / committedTransform 同一个理由）。
+ */
+internal fun resetStateOf(state: PhotoEditState): PhotoEditState = state.copy(
+    recipe = EditRecipe.EMPTY,
+    cropAspect = CropAspect.FREE,
+    // 镜头校正也要清：它影响导出成品却不在配方里
+    lens = LensCorrectionParams(),
+    // 走 record 而不是直接换配方：重置自己就该是一格可撤销的历史
+    history = state.history.record(EditRecipe.EMPTY),
+    message = null,
+)
+
 @HiltViewModel
 class PhotoEditViewModel @Inject constructor(
     @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
@@ -808,36 +836,17 @@ class PhotoEditViewModel @Inject constructor(
      *
      * 走位图前处理而不是塞进 `:lut` 那一趟，是因为 CPU 双线性与 GPU 硬件双线性对不到
      * 1 LSB——塞进去会直接打破本仓库最贵的那条同值不变量，而打破它的表现是
-     * 「同一张照片在不同机器上边缘差半个像素」，极难察觉（理由详见 LensResample）。
+     * 「同一张照片在不同机器上边缘差半个像素」，极难察觉（理由见 image 模块的
+     * LensResample.kt 顶上那段「为什么它不在 :lut 那一趟里」）。
      *
-     * 零系数时 [LensResample.correctRgba] **原样返回入参**，所以这条在没开校正时零成本。
-     * 它也**不改**入参：返回的一定是新建的位图，`original` 不会被踩（踩了就成二次校正了）。
+     * 零系数时 [correctLensDistortion] **原样返回入参**，所以这条在没开校正时零成本。
+     * 非零系数时它返回新建的位图且**不改**入参，`original` 不会被踩（踩了就成二次校正了）。
+     *
+     * 下游必须继续满足两条：**不原地写** processSource（恒等时它就是 `previewSource`，
+     * 被踩就等于踩了缓存的预览源），以及**及时回收**它（校正产生的位图生命周期只归这一次渲染）。
      */
-    private fun applyLensCorrection(source: Bitmap, params: LensCorrectionParams): Bitmap {
-        if (params.isIdentity) return source
-        val w = source.width
-        val h = source.height
-        val pixels = IntArray(w * h)
-        source.getPixels(pixels, 0, w, 0, 0, w, h)
-        val rgba = ByteArray(w * h * 4)
-        for (i in pixels.indices) {
-            val px = pixels[i]
-            rgba[i * 4] = (px shr 16 and 0xFF).toByte()
-            rgba[i * 4 + 1] = (px shr 8 and 0xFF).toByte()
-            rgba[i * 4 + 2] = (px and 0xFF).toByte()
-            rgba[i * 4 + 3] = (px ushr 24 and 0xFF).toByte()
-        }
-        val out = LensResample.correctRgba(rgba, w, h, params)
-        val packed = IntArray(w * h)
-        for (i in packed.indices) {
-            val o = i * 4
-            packed[i] = (rgba.getOrNull(o + 3)?.toInt()?.and(0xFF) ?: 255 shl 24) or
-                ((out[o].toInt() and 0xFF) shl 16) or
-                ((out[o + 1].toInt() and 0xFF) shl 8) or
-                (out[o + 2].toInt() and 0xFF)
-        }
-        return Bitmap.createBitmap(packed, w, h, Bitmap.Config.ARGB_8888)
-    }
+    private fun applyLensCorrection(source: Bitmap, params: LensCorrectionParams): Bitmap =
+        correctLensDistortion(source, params)
 
     private fun Bitmap.hasGainmapSafely(): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && hasGainmap()
@@ -1046,18 +1055,10 @@ class PhotoEditViewModel @Inject constructor(
         scheduleApply()
     }
 
-    /** 一键重置：回到原图（清掉滤镜、强度、全部调色与几何，裁剪框跟着配方一起清空） */
+    /** 一键重置：回到原图（清掉滤镜、强度、全部调色、几何与镜头校正，裁剪框跟着配方一起清空） */
     fun resetEdits() {
         applyJob?.cancel()
-        _state.update {
-            it.copy(
-                recipe = EditRecipe.EMPTY,
-                cropAspect = CropAspect.FREE,
-                // 走 record 而不是直接换配方：重置自己就该是一格可撤销的历史
-                history = it.history.record(EditRecipe.EMPTY),
-                message = null
-            )
-        }
+        _state.update { resetStateOf(it) }
         applyCurrentFilter()
     }
 
@@ -1200,11 +1201,6 @@ class PhotoEditViewModel @Inject constructor(
     private fun applyCurrentFilter(expectedGeneration: Long = sourceGeneration.get()) {
         val snapshot = _state.value
         val original = snapshot.original ?: return
-        // 预览源优先：交互式处理在降采样副本上跑，比全分辨率快约 6 倍
-        // 镜头校正在这里，**在几何之前**：先校正再裁剪，裁剪框才对得上最终画面。
-        // 放在几何之后会浪费四角，而且裁剪框指的是畸变图上的位置。
-        // 幂等性靠的是它不改动入参——每次都从 previewSource/original 重新算
-        val processSource = applyLensCorrection(previewSource ?: original, snapshot.lens)
         val option = _filters.value.firstOrNull { it.key == snapshot.selectedKey }
             ?: return
         val lut = option.lut ?: lutCache[option.key]
@@ -1219,10 +1215,16 @@ class PhotoEditViewModel @Inject constructor(
         // 本次渲染是按这份输入起的头；防抖窗口内输入又被改了一次时，旧参数的结果不许进 state。
         // 比的是 renderInputsOf（不含裁剪框），理由与代价见它的 KDoc
         val requestInputs = renderInputsOf(snapshot.recipe)
+        // 换图判废比的是**进闸那一刻的 previewSource 快照**，不是 processSource：
+        // 镜头校正非恒等时 processSource 是 applyLensCorrection 新建的位图，拿它比会让
+        // 每一趟带校正的渲染都在闸前被丢掉——预览永不更新，而 [PhotoEditState.processing]
+        // 只在采纳与异常两条路径里复位，于是转圈永久卡住。
+        val expectedPreview = previewSource
         val request = renderGeneration.incrementAndGet()
         applyJob?.cancel()
         _state.update { it.copy(processing = true) }
         applyJob = viewModelScope.launch(Dispatchers.Default) {
+            var processSource: Bitmap? = null
             var geometryOnly: Bitmap? = null
             var cropped: Bitmap? = null
             var coloredCropped: Bitmap? = null
@@ -1237,14 +1239,23 @@ class PhotoEditViewModel @Inject constructor(
                 applyMutex.withLock {
                     coroutineContext.ensureActive()
                     if (sourceGeneration.get() != expectedGeneration ||
-                        renderGeneration.get() != request || previewSource !== processSource ||
+                        renderGeneration.get() != request || previewSource !== expectedPreview ||
                         requestInputs != renderInputsOf(_state.value.recipe)
                     ) return@withLock
+                    // 0) 镜头校正。预览源优先：交互式处理在降采样副本上跑，比全分辨率快约 6 倍。
+                    // 它**在几何之前**——先校正再裁剪，裁剪框才对得上最终画面；放在几何之后
+                    // 会浪费四角，而且裁剪框指的是畸变图上的位置。
+                    //
+                    // 它放在闸**之后**、Dispatchers.Default **之上**：被判废的一趟不必为一次
+                    // 全图重采样付出代价，而它抛出的异常也终于落进下面那个 catch，
+                    // 不再是直接崩在主线程上。幂等性靠的是它不改动入参。
+                    val corrected = applyLensCorrection(expectedPreview ?: original, snapshot.lens)
+                    processSource = corrected
                     // 1) 几何：拉直 → 旋转 → 翻转（**不裁剪**，裁剪模式的底图要用它）
                     geometryOnly = if (geoSteps.isEmpty()) {
-                        processSource
+                        corrected
                     } else {
-                        ImagePipeline(geoSteps).renderGeometry(processSource)
+                        ImagePipeline(geoSteps).renderGeometry(corrected)
                     }
                     coroutineContext.ensureActive()
                     // 2) 裁剪：配方里没有 Crop 步骤就等于全图（写入侧见 croppedRecipe 的删除分支），
@@ -1274,7 +1285,7 @@ class PhotoEditViewModel @Inject constructor(
                     }
                     coroutineContext.ensureActive()
                     if (sourceGeneration.get() != expectedGeneration ||
-                        renderGeneration.get() != request || previewSource !== processSource ||
+                        renderGeneration.get() != request || previewSource !== expectedPreview ||
                         requestInputs != renderInputsOf(_state.value.recipe)
                     ) return@withLock
                     val oldFiltered = _state.value.filtered
@@ -1308,9 +1319,12 @@ class PhotoEditViewModel @Inject constructor(
                     _state.update { it.copy(processing = false, message = "处理失败：${e.message}") }
                 }
             } finally {
+                // `expectedPreview` 是排除项而不是 `processSource`：镜头校正恒等时
+                // processSource **就是** 缓存的预览源，回收它等于回收 loadPicked 的东西；
+                // 非恒等时它是我们这一趟造的，该回收。判据必须是进闸那一刻的同一个快照。
                 recycleUnique(
-                    listOfNotNull(geometryOnly, cropped)
-                        .filter { it !== processSource && it !== heldByState }
+                    listOfNotNull(geometryOnly, cropped, processSource)
+                        .filter { it !== expectedPreview && it !== heldByState }
                 )
                 if (!published) recycleUnique(listOfNotNull(coloredCropped, coloredFull))
             }

@@ -1,6 +1,8 @@
 package com.imagedge.camera.image
 
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.hypot
 import kotlin.math.sqrt
 
 /**
@@ -20,11 +22,38 @@ data class LensCorrectionParams(
     /** 两个系数都是 0 时整条校正链是一次恒等映射，不该为它付一次全图重采样 */
     val isIdentity: Boolean get() = k1 == 0f && tca == 0f
 
-    companion object {
-        /** k1 滑条的刻度：-100..100 ↔ -0.1..0.1（步长 0.001，真实镜头的量级就在 0.001 上下） */
-        const val K1_STEPS = 200
+    /** 把参数收敛到条带采样能承受的范围内。见 [K1_LIMIT] 为什么是这个数 */
+    fun coerceIntoRange(): LensCorrectionParams = LensCorrectionParams(
+        // coerceIn 的两次比较对 NaN 都是 false，NaN 会原样穿过去；而下游的 isFinite 守卫
+        // 会把非有限数当成「这一格不校正」，于是 isIdentity 为假的一趟全图重采样
+        // 跑完了、结果与原图逐像素相同——用户只看到一次慢了几分钟的导出。
+        if (k1.isFinite()) k1.coerceIn(-K1_LIMIT, K1_LIMIT) else 0f,
+        if (tca.isFinite()) tca.coerceIn(0f, TCA_LIMIT) else 0f,
+    )
 
-        /** 色差滑条的刻度：0..100 ↔ 0..0.02。色差的真实量级比 k1 小一到两个数量级 */
+    companion object {
+        /**
+         * k1 的**上限**，0.02。
+         *
+         * 依据是**滑条分辨率**与真实镜头的量级，不是内存：真实定焦镜头的 k1 多在
+         * 0.001..0.03，0.02 已经覆盖绝大多数，而 0.001 的步长用 ±0.02 只需要 41 格
+         * 就能覆盖，用 ±0.1 则要 201 格——同样一格 0.001，前者把滑条分得更细。
+         *
+         * 内存**不是**这个上限的理由：条带缓冲按精确上界算（见 [LensCorrection.bandSlack]），
+         * 21.3 MP 上 k1 = 0.02 约 7 MB，k1 = 0.1 也只有约 12 MB。
+         *
+         * 这个上限**由 [coerceIntoRange] 兜住**，而不只是滑条的两端——`LensCorrectionParams`
+         * 是公开可构造的 data class，一次直接构造就能把它顶回去，而那条路径不经过滑条。
+         */
+        const val K1_LIMIT = 0.02f
+
+        /** k1 滑条的刻度格数：0..40 ↔ -0.02..+0.02（步长 0.001） */
+        const val K1_STEPS = 40
+
+        /** 色差上限：0.004。真镜头的横向色差在这个量级 */
+        const val TCA_LIMIT = 0.004f
+
+        /** 色差滑条的刻度格数：0..100 ↔ 0..0.004 */
         const val TCA_STEPS = 100
     }
 }
@@ -34,16 +63,17 @@ fun lensK1Of(step: Int): Float =
     (step - LensCorrectionParams.K1_STEPS / 2) / 1000f
 
 /** k1 → k1 滑条刻度 */
-// 两个方向都用**四舍五入**而不是截断：7/5000f 在 float32 下再乘回 5000f 是 6.9999995，
+// 两个方向都用**四舍五入**而不是截断：7/1000f 在 float32 下再乘回 1000f 是 6.9999995，
 // `toInt()` 把它截成 6，于是滑条读回的值比用户拖到的少一格——表现是「松手之后数字自己动了一下」
 fun lensK1StepOf(k1: Float): Int =
     Math.round(k1 * 1000f) + LensCorrectionParams.K1_STEPS / 2
 
 /** 色差滑条刻度 → 色差强度 */
-fun lensTcaOf(step: Int): Float = step / 5000f
+fun lensTcaOf(step: Int): Float = step * LensCorrectionParams.TCA_LIMIT / LensCorrectionParams.TCA_STEPS
 
 /** 色差强度 → 色差滑条刻度 */
-fun lensTcaStepOf(tca: Float): Int = Math.round(tca * 5000f)
+fun lensTcaStepOf(tca: Float): Int =
+    Math.round(tca * LensCorrectionParams.TCA_STEPS / LensCorrectionParams.TCA_LIMIT)
 
 /**
  * 镜头畸变与横向色差校正：**把校正后画面上的一个像素，映射回畸变图里的取样坐标**。
@@ -158,6 +188,108 @@ object LensCorrection {
         val sign = if (channel == 0) 1f else -1f
         val scale = 1f + sign * strength * r * r
         return if (scale.isFinite() && scale > 0f) scale else 1f
+    }
+
+    /**
+     * 一个像素的**三个通道**取样偏移，一次算完。
+     *
+     * 存在的唯一理由是速度：[sourceX] / [sourceY] 每个都自带一次 [undistortFactor]
+     * （内含 `ln` 与 6 步牛顿迭代），而**畸变对三个通道是同一个值**——它只依赖
+     * 半径与 k1，不含 tca。按通道各算一遍的话，21.3 MP 上这一项被做 6 次、
+     * 其中 5 次结果完全相同。真机上 21 MP + k1=0.02 的导出因此要约 4 分钟。
+     *
+     * 输出写进调用方给的数组（长度各 3，索引 0=R 1=G 2=B），**不在这里分配**——
+     * 每像素 new 一次数组在两千万像素上就是两千万次分配。
+     */
+    fun offsetsOf(
+        x: Float,
+        y: Float,
+        width: Int,
+        height: Int,
+        p: LensCorrectionParams,
+        dx: FloatArray,
+        dy: FloatArray,
+    ) {
+        val cx = x - (width - 1) / 2f
+        val cy = y - (height - 1) / 2f
+        val half = minOf(width, height) / 2f
+        if (half <= 0f) {
+            dx[0] = cx; dx[1] = cx; dx[2] = cx
+            dy[0] = cy; dy[1] = cy; dy[2] = cy
+            return
+        }
+        val rd = sqrt(cx * cx + cy * cy) / half
+        // 畸变：三个通道共用，算一次
+        val kd = undistortFactor(rd, p.k1)
+        // 色差：只有这里分通道，而绿通道的 tcaScale 恒为 1
+        for (ch in 0..2) {
+            val k = kd * tcaScale(rd, p.tca, ch)
+            dx[ch] = cx * k
+            dy[ch] = cy * k
+        }
+    }
+
+    /**
+     * 条带式重采样要往每条带上下各多读多少行，才够覆盖所有取样点。
+     *
+     * 位移是 `|cy · (k − 1)|`，而 `rd` 只决定 `k`、`|cy|` 只决定乘多少，所以上界拆成
+     * `max|cy| × max|k − 1|` 两项分别求。这**不是**把两项凑在一起：实测 21 MP 的 4:3 与 16:9
+     * 上只松 1~2%，而超宽画幅松到 1.5 倍，仍远好过按经验系数估。
+     *
+     * 为什么上界不能估松：取样那侧把越界的行号钳到边缘行，于是估松了**不会报错**，
+     * 出来的是一条糊带；估紧了则缓冲白占内存。两头都不能偏。
+     *
+     * 曾经那版用 `(|k1| + |tca|) · 对角线` 这个线性式估：它对 4:3 够、对 16:9 不够。
+     * 两个原因叠加——真实位移随 `rd²` 涨而那个式子只按 `rd` 算，且它乘的是**短边**的一半，
+     * 而 `|cy|` 能到**长边**的一半。竖幅与超宽幅因此全线欠估。
+     */
+    fun bandSlack(width: Int, height: Int, p: LensCorrectionParams): Int {
+        if (width <= 0 || height <= 0 || p.isIdentity) return 0
+        val half = normalisationScale(width, height)
+        if (half <= 0f) return 0
+        val rdMax = hypot((width - 1).toFloat(), (height - 1).toFloat()) / (2 * half)
+        return ceil((height - 1) / 2f * worstChannelDeviation(rdMax, p)).toInt() + 2
+    }
+
+    /**
+     * 半径 `rd` 上、三个通道里取样因子偏离 1 的最大值。
+     *
+     * `max|k − 1|` 沿 `rd` **不是单调的**：`k1 < 0` 时牛顿迭代在某个半径之外不再收敛，
+     * 因子回落回 1，于是最坏点的半径既不是 0 也不是画面对角。所以它只能在区间上求最大值。
+     *
+     * 粗网格定位 + 一次局部细化：约 2000 次 [undistortFactor]，相对每像素一次可以忽略。
+     * 网格只能给出「不小于真值」的**近似**上界，因此它由 `BandSlackTest` 的逐像素对拍钉住——
+     * 那条测试里的六种画幅（含竖幅与超宽）都能让一个更松的界现形。
+     */
+    private fun worstChannelDeviation(rdMax: Float, p: LensCorrectionParams): Float {
+        val coarse = 1024
+        val step = rdMax / coarse
+        var best = 0f
+        var bestIndex = 0
+        for (i in 0..coarse) {
+            val v = deviationAt(i * step, p)
+            if (v > best) {
+                best = v
+                bestIndex = i
+            }
+        }
+        val lo = maxOf(0f, (bestIndex - 1) * step)
+        val hi = minOf(rdMax, (bestIndex + 1) * step)
+        val fine = (hi - lo) / 1024f
+        for (j in 0..1024) {
+            val v = deviationAt(lo + j * fine, p)
+            if (v > best) best = v
+        }
+        return best
+    }
+
+    private fun deviationAt(rd: Float, p: LensCorrectionParams): Float {
+        var worst = 0f
+        for (ch in 0..2) {
+            val d = abs(undistortFactor(rd, p.k1) * tcaScale(rd, p.tca, ch) - 1f)
+            if (d > worst) worst = d
+        }
+        return worst
     }
 
     /** 校正后画面的这个像素，R 通道该去哪里取样 */

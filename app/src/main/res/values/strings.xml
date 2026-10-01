@@ -237,7 +237,7 @@
     <string name="edit_lens_title">镜头校正</string>
     <string name="edit_lens_k1">畸变</string>
     <string name="edit_lens_tca">色差</string>
-    <string name="edit_lens_note">两项都是 0 时不做任何处理。k1 大于 0 修桶形、小于 0 修枕形——本版不带镜头数据库，数值要你自己按镜头调；填错不会崩，只会把一种畸变修成另一种。</string>
+    <string name="edit_lens_note">两项都是 0 时不做任何处理。k1 大于 0 修桶形、小于 0 修枕形，范围 −0.02..+0.02——本版不带镜头数据库，数值要你自己按镜头调；填错不会崩，只会把一种畸变修成另一种。</string>
     <string name="edit_selective_title">局部调整</string>
     <string name="edit_selective_off">关闭</string>
     <string name="edit_selective_pick_hint">选一个维度再动滑条，即只在那一段里生效；不想用了把三轴都归零</string>
