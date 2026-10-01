@@ -335,7 +335,6 @@
     <string name="edit_contrast">对比度</string>
     <string name="edit_saturation">饱和度</string>
     <string name="edit_temperature">色温</string>
-    <string name="edit_reset">重置</string>
     <string name="edit_action">编辑</string>
     <string name="editor_undo">撤销</string>
     <string name="editor_redo">重做</string>

@@ -43,6 +43,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import kotlin.math.roundToInt
 import androidx.compose.ui.unit.dp
 import com.imagedge.camera.ui.glass.GlassSwitch
 import com.imagedge.camera.ui.theme.Radius
@@ -225,7 +226,13 @@ fun AppSlider(
         )
         Slider(
             value = value.toFloat(),
-            onValueChange = { onValueChange(it.toInt()) },
+            // **四舍五入，不是截断**：steps = 0 时 M3 的 Slider 是连续的，拇指能停在 12 与 13
+            // 之间，而截断会把它记成 12，松手时用户看到拇指自己弹了一下。
+            //
+            // 别改成 `steps = range.last - range.first - 1` 去把轨道分档——试过：
+            // M3 会改画轨道本身（深色药丸里再套一层浅色药丸、端点圆点消失），
+            // 那比「松手弹一下」难看得多，而且它只在真机上看得出来，编译与单测都拦不住。
+            onValueChange = { onValueChange(it.roundToInt()) },
             onValueChangeFinished = onValueChangeFinished,
             valueRange = range.first.toFloat()..range.last.toFloat(),
             steps = steps,

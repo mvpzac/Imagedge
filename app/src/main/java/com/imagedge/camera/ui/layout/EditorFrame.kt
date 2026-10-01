@@ -126,7 +126,9 @@ fun EditorFrame(
                 title = title,
                 onBack = ::requestLeave,
                 actions = {
-                    if (onReset != null) {
+                    // 没有主体时不摆「重置」：一颗永远按不动的按钮只会让人先去弄清它为什么是灰的，
+                    // 而它此刻根本不该出现——与 [EditorFrameState.saveVisible] 同一套处理
+                    if (onReset != null && state.hasSubject) {
                         AppLink(
                             text = stringResource(R.string.editor_reset),
                             enabled = state.canReset,
@@ -137,28 +139,34 @@ fun EditorFrame(
             )
         }
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = Spacing.L)
-                .padding(bottom = Spacing.XL),
-            verticalArrangement = Arrangement.spacedBy(Spacing.L)
-        ) {
-            if (state.exporting) {
-                Text(
-                    text = stringResource(R.string.editor_exporting_stay),
-                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
-                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            state.result?.let { ResultMessage(text = it, ok = state.resultOk) }
+        Column(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = Spacing.L)
+                    .padding(bottom = Spacing.L),
+                verticalArrangement = Arrangement.spacedBy(Spacing.L)
+            ) {
+                if (state.exporting) {
+                    Text(
+                        text = stringResource(R.string.editor_exporting_stay),
+                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                state.result?.let { ResultMessage(text = it, ok = state.resultOk) }
 
-            content()
+                content()
 
-            if (state.busy == EditorBusy.Preparing) {
-                ProcessingView(message = stringResource(R.string.editor_preparing))
+                if (state.busy == EditorBusy.Preparing) {
+                    ProcessingView(message = stringResource(R.string.editor_preparing))
+                }
             }
+            // 主操作**固定在滚动区之外**，不排在内容末尾。
+            // 调色分区那一屏装不下：三组滤镜 + 直方图 + 八条滑条 + 镜头校正 +
+            // 局部调整 + 预设，真机实测要滚六次才到底——而「保存副本」是这一屏唯一的完成动作。
+            // 压在滚动末尾时它既看不见，也不像主操作。
             if (state.saveVisible) {
                 AppButton(
                     text = saveLabel.ifBlank {
@@ -167,7 +175,8 @@ fun EditorFrame(
                         )
                     },
                     onClick = onSave,
-                    enabled = state.hasSubject && state.busy == EditorBusy.None
+                    enabled = state.hasSubject && state.busy == EditorBusy.None,
+                    modifier = Modifier.padding(horizontal = Spacing.L, vertical = Spacing.L)
                 )
             }
         }

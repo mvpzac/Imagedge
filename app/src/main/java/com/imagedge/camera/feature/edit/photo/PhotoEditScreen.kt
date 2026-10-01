@@ -64,8 +64,6 @@ import com.imagedge.camera.R
 import com.imagedge.camera.data.lut.LutType
 import com.imagedge.camera.image.Geometry
 import com.imagedge.camera.image.NormRect
-import com.imagedge.camera.ui.components.AppButtonType
-import com.imagedge.camera.ui.components.AppButton
 import com.imagedge.camera.ui.components.AppChip
 import com.imagedge.camera.ui.components.AppChipRow
 import com.imagedge.camera.ui.components.AppDivider
@@ -170,18 +168,6 @@ fun PhotoEditScreen(
                 })
 
                 if (state.hasImage) {
-                    // 对比原图给一个**显式**按钮，长按只是快捷方式（设计 §4.7）：
-                    // 长按是不可发现的，而且读屏用户拿不到它
-                    if (state.tab != EditTab.CROP) {
-                        AppLink(
-                            text = stringResource(
-                                if (state.comparing) R.string.editor_show_result
-                                else R.string.editor_compare_original
-                            ),
-                            onClick = { viewModel.setComparing(!state.comparing) }
-                        )
-                    }
-
                     // ── 分区切换（互斥选项 ≤ 4 → AppChipRow）──
                     AppChipRow(
                         items = EditTab.entries.toList(),
@@ -194,16 +180,34 @@ fun PhotoEditScreen(
                     // 「刚载入」那一格由 loadPicked 调 seededHistoryOf 播下种子，所以第一次改动
                     // 就能退回它；那一格的内容是 carriedColour 带上来的调色与强度，不是空白
                     // （用例见 PhotoEditRecipeStateTest 的「seeded history points at…」）。
+                    // 这一排放的是**整屏通用**的动作，不属于任何一个分区的参数：
+                    // 对比原图（模式开关）、撤销、重做。它们等分宽度，与上面那排分区 chip 同一逻辑——
+                    // 此前「对比原图」自己独占一行且按文字自适应，右侧空一大片。
+                    //
+                    // 对比原图是**显式**按钮而不是只有长按（设计 §4.7）：长按不可发现，
+                    // 读屏用户也拿不到它。裁剪分区那一屏看的是未裁剪底图，没有「对比」这回事。
                     Row(horizontalArrangement = Arrangement.spacedBy(Spacing.S)) {
+                        if (state.tab != EditTab.CROP) {
+                            AppLink(
+                                text = stringResource(
+                                    if (state.comparing) R.string.editor_show_result
+                                    else R.string.editor_compare_original
+                                ),
+                                onClick = { viewModel.setComparing(!state.comparing) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                         AppLink(
                             text = stringResource(R.string.editor_undo),
                             enabled = state.history.canUndo,
-                            onClick = { viewModel.undoEdit() }
+                            onClick = { viewModel.undoEdit() },
+                            modifier = Modifier.weight(1f)
                         )
                         AppLink(
                             text = stringResource(R.string.editor_redo),
                             enabled = state.history.canRedo,
-                            onClick = { viewModel.redoEdit() }
+                            onClick = { viewModel.redoEdit() },
+                            modifier = Modifier.weight(1f)
                         )
                     }
 
@@ -299,9 +303,10 @@ private fun PreviewArea(
                         onDragFinished = viewModel::commitEdit
                     )
                 }
-                if (state.processing) {
-                    CircularProgressIndicator(Modifier.padding(8.dp))
-                }
+                // 这里原来还有一个盖在预览上的 CircularProgressIndicator，已移除：
+                // 「正在忙」由 EditorFrame 的 ProcessingView 表达，而那一个**带文案**。
+                // 两个转圈说的是同一件事，骨架里那一个还管着另外三个编辑器
+                // （边框、三拼），所以去掉的必须是这一处而不是共享的那一处。
                 // 状态角标
                 val badge = when {
                     state.tab == EditTab.CROP -> stringResource(R.string.edit_crop_hint)
@@ -376,16 +381,13 @@ private fun ColorPanel(
             )
         }
 
-        AppSection(
-            title = stringResource(R.string.edit_adjust_title),
-            trailing = {
-                AppLink(
-                    text = stringResource(R.string.edit_reset),
-                    onClick = { viewModel.resetEdits() },
-                    enabled = state.hasEdits
-                )
-            }
-        ) {
+        // 这一节**没有**自己的「重置」：曾经有过一枚，文案与顶栏那枚一字不差（都是「重置」）、
+        // 动作也同一件，但这一枚直接调 resetEdits()、不过确认框，而顶栏那枚走 EditorFrame 的
+        // confirmReset。更糟的是它摆在这一节里，用户会以为它只回退上面那几条滑条，
+        // 而它其实连裁剪、旋转、翻转、拉直、镜头校正一起清——一个会毁掉成果的按钮，
+        // 摆在最不像会毁掉成果的位置，且不确认。顶栏那一枚在滚动区之外、始终可见，
+        // 分区级的回退另有「重置裁剪」「重置几何」两枚，文案都说清了自己管什么。
+        AppSection(title = stringResource(R.string.edit_adjust_title)) {
             Column(verticalArrangement = Arrangement.spacedBy(Spacing.XS)) {
                 // 直方图在滑条之上：调高光/对比度时眼睛要同时在画面和形状之间来回看，
                 // 放到面板底部等于每次都要滚下去确认
@@ -452,11 +454,15 @@ private fun ColorPanel(
             }
         }
 
-        LensSection(state, viewModel)
         SelectiveSection(state, viewModel)
 
-        // 预设区排在调色分区的**最后**：它存的正是这一屏的两样东西（参数 + 滤镜），
-        // 而导出分区只有格式与元数据，摆在那儿等于把动作放到它管不到的东西后面
+        // 预设区排在调色分区的**最后**：它管的是这一屏的调色参数与滤镜，
+        // 而导出分区只有格式与元数据，摆在那儿等于把动作放到它管不到的东西后面。
+        //
+        // 镜头校正**不进预设**，而它现在住在「旋转」分区（它跑在几何之前，见 RotatePanel），
+        // 不再与这一节同屏——所以「存预设管的是调色与滤镜」这句话与用户看到的东西对得上了。
+        // 真要让它进预设，得改 EditRecipeDocument 的落盘格式，而它的语义是镜头而非影调：
+        // 同一支镜头的 k1 换一张照片照样成立，不该跟着一个「我的影调」预设走。
         PresetSection(
             presets = presets,
             nameTaken = viewModel::presetNameTaken,
@@ -502,6 +508,10 @@ private fun CropPanel(state: PhotoEditState, viewModel: PhotoEditViewModel) {
 @Composable
 private fun RotatePanel(state: PhotoEditState, viewModel: PhotoEditViewModel) {
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.L)) {
+        // 镜头校正摆在几何这一区的**最前面**：它在处理链上跑在裁剪/旋转/拉直之前
+        // （见 applyCurrentFilter），而放在调色分区里，用户拖着它会发现构图变了、
+        // 却找不到任何与构图相关的开关——它在那一屏里看起来是调色，实际改的是几何
+        LensSection(state, viewModel)
         AppSection(title = stringResource(R.string.edit_rotate_title)) {
             Row(horizontalArrangement = Arrangement.spacedBy(Spacing.S)) {
                 AppChip(
@@ -628,8 +638,11 @@ private fun PresetSection(
             )
             // 名字空着不给存：归一化后为空会被存储层拒掉，与其弹一条「名称无效」
             // 不如让按钮自己看起来就是按不动的
-            AppButton(
+            // 降级成行内动作：它是附带的库操作，而「保存副本」才是这一屏唯一的完成动作。
+            // 两枚同样宽、同样重挨在一起时，用户会犹豫按哪个——真机截图上就是这样
+            AppLink(
                 text = stringResource(R.string.edit_preset_save),
+                modifier = Modifier.fillMaxWidth(),
                 onClick = {
                     val trimmed = name.trim()
                     // 撞名要按**落盘身份**问存储层（viewModel::presetNameTaken）：
@@ -638,7 +651,6 @@ private fun PresetSection(
                     if (nameTaken(trimmed)) pendingOverwrite = trimmed
                     else onSave(trimmed)
                 },
-                type = AppButtonType.SECONDARY,
                 enabled = name.isNotBlank()
             )
         }
