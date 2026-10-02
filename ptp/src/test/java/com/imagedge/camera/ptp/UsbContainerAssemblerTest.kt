@@ -99,7 +99,11 @@ class UsbContainerAssemblerTest {
     fun `an impossible declared length is rejected and the buffer is dropped`() {
         val assembler = UsbContainerAssembler()
         // 头必须先到齐才谈得上读长度；不足 8 字节时只能等，这是字节流的固有约束
-        assembler.feed(byteArrayOf(0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0x7F.toByte(), 1, 0, 0, 0))
+        assembler.feed(
+            ByteArray(HEADER_BYTES).also {
+                it[0] = 0xFF.toByte(); it[1] = 0xFF.toByte(); it[2] = 0xFF.toByte(); it[3] = 0x7F.toByte()
+            }
+        )
 
         try {
             assembler.next()
@@ -114,7 +118,7 @@ class UsbContainerAssemblerTest {
     @Test
     fun `a length smaller than the header is rejected`() {
         val assembler = UsbContainerAssembler()
-        assembler.feed(byteArrayOf(2, 0, 0, 0, 1, 0, 0, 0))
+        assembler.feed(byteArrayOf(2, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0))
 
         try {
             assembler.next()
@@ -161,7 +165,9 @@ class UsbContainerAssemblerTest {
         assembler.feed(whole.copyOfRange(0, 100))
         assembler.feed(whole.copyOfRange(100, whole.size))
 
-        val decoded = PtpContainerCodec.decode(assertNotNullBytes(assembler.next()))
+        val decoded = PtpContainerCodec.toPacket(
+            PtpContainerCodec.decode(assertNotNullBytes(assembler.next()))
+        )
         assertTrue(decoded is DataPacket)
         assertEquals(500, (decoded as DataPacket).payload.size)
     }

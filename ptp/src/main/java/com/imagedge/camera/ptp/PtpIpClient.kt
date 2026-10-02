@@ -1101,7 +1101,10 @@ class PtpIpClient(
                     if (started && !ended) {
                         throw PtpMalformedPacketException("Response arrived before EndData for transaction $tid")
                     }
-                    if (started && received != dataLength) {
+                    if (started && dataLength > 0 && received != dataLength) {
+                        // dataLength == 0 表示「链路未声明长度」而非「长度为 0」：
+                        // USB 通路整条线上都没有这个字段，总长只能等收完才知道。
+                        // 拿 0 当真实长度会把每一次 USB 数据事务都判成不匹配
                         throw PtpMalformedPacketException(
                             "事务 0x${operationCode.toString(16)} 长度不匹配：received=$received, declared=$dataLength"
                         )
@@ -1133,7 +1136,8 @@ class PtpIpClient(
         if (next < received) {
             throw PtpMalformedPacketException("Transaction byte count overflow")
         }
-        if (next > declared) {
+        if (declared > 0 && next > declared) {
+            // declared == 0 是「链路未声明长度」（USB 通路），此时只能靠内存上限兜住
             throw PtpMalformedPacketException(
                 "事务 0x${operationCode.toString(16)} 数据超过声明长度（$next > $declared）"
             )

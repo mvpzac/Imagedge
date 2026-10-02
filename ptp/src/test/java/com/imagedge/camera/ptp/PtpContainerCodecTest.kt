@@ -12,55 +12,86 @@ import org.junit.Test
  *     desc   : USB 容器编解码往返
  * </pre>
  *
- * USB 通路在没有相机时唯一能被验证的部分就是这层翻译，所以往返覆盖到每一种包型。
+ * 布局按官方实现核对过：头 12 字节（长度/类型/码/事务 ID），
+ * **数据容器的负载就是剩下的全部字节，里面没有长度字段**。
  */
 class PtpContainerCodecTest {
+
+    /** 按官方布局拼一个容器 */
+    private fun container(type: Int, code: Int, transactionId: Long, payload: ByteArray): ByteArray =
+        PtpBuffer.writer()
+            .writeUInt32((HEADER_BYTES + payload.size).toLong())
+            .writeUInt16(type)
+            .writeUInt16(code)
+            .writeUInt32(transactionId)
+            .writeBytes(payload)
+            .toByteArray()
+
+    private fun params(vararg values: Long): ByteArray =
+        PtpBuffer.writer().apply { values.forEach { writeUInt32(it) } }.toByteArray()
+
+    @Test
+    fun `container header is twelve bytes with the transaction id inside it`() {
+        val bytes = PtpContainerCodec.encode(
+            OperationRequest(operationCode = 0x9207, transactionId = 7)
+        )
+
+        assertEquals(PtpContainerType.COMMAND, (bytes[4].toInt() and 0xFF) or ((bytes[5].toInt() and 0xFF) shl 8))
+        // 码必须容得下 16 位操作码：按 1 字节写会把 0x9207 截成 0x07，事务打到别的操作上
+        assertEquals(0x9207, (bytes[6].toInt() and 0xFF) or ((bytes[7].toInt() and 0xFF) shl 8))
+        assertEquals(7L, readUInt32(bytes, 8))
+    }
 
     @Test
     fun `operation request round-trips`() {
         val request = OperationRequest(
-            dataPhaseInfo = DataPhaseInfo.DATA_OUT,
             operationCode = 0x9207,
             transactionId = 7,
             parameters = longArrayOf(0xD2C1)
         )
 
-        val decoded = PtpContainerCodec.decode(PtpContainerCodec.encode(request))
+        val decoded = PtpContainerCodec.toPacket(
+            PtpContainerCodec.decode(PtpContainerCodec.encode(request))
+        ) as OperationRequest
 
-        val op = decoded as OperationRequest
-        assertEquals(0x9207, op.operationCode)
-        assertEquals(7L, op.transactionId)
-        assertArrayEquals(longArrayOf(0xD2C1), op.parameters)
+        assertEquals(0x9207, decoded.operationCode)
+        assertEquals(7L, decoded.transactionId)
+        assertArrayEquals(longArrayOf(0xD2C1), decoded.parameters)
     }
 
     @Test
-    fun `command container puts the operation code in the header code word`() {
-        val bytes = PtpContainerCodec.encode(
-            OperationRequest(operationCode = 0x9207, transactionId = 1)
-        )
-
-        // 头是 长度(4) + 类型(2) + 码(2)。码必须容得下 16 位操作码——
-        // 按 1 字节写会把 0x9207 截成 0x07，事务打到另一个操作上去
-        assertEquals(PtpContainerType.COMMAND, bytes[4].toInt() and 0xFF)
-        assertEquals(0x9207, (bytes[6].toInt() and 0xFF) or ((bytes[7].toInt() and 0xFF) shl 8))
-    }
-
-    @Test
-    fun `start data round-trips with its declared length`() {
-        val start = StartData(transactionId = 3, dataLength = 2L)
-
-        val decoded = PtpContainerCodec.decode(PtpContainerCodec.encode(start)) as StartData
-
-        assertEquals(3L, decoded.transactionId)
-        assertEquals(2L, decoded.dataLength)
-    }
-
-    @Test
-    fun `data packet round-trips its payload`() {
-        val payload = ByteArray(300) { (it % 251).toByte() }
+    fun `data container payload is exactly the bytes after the header`() {
+        // 数据容器里没有长度字段：官方实现把 payload 原样放进容器，
+        // 收方一路累积到响应容器为止。曾经在这里多读 4 字节，
+        // 结果是每个数据包都凭空少掉真实负载的头 4 个字节
+        val payload = ByteArray(64) { (it % 251).toByte() }
 
         val decoded = PtpContainerCodec.decode(
-            PtpContainerCodec.encode(DataPacket(transactionId = 4, payload = payload))
+            container(PtpContainerType.DATA, 0x9205, 3, payload)
+        )
+
+        assertEquals(3L, decoded.transactionId)
+        assertEquals(64, decoded.payload.size)
+        assertArrayEquals(payload, decoded.payload)
+    }
+
+    @Test
+    fun `data container declares a length that is header plus payload only`() {
+        val bytes = PtpContainerCodec.encode(DataPacket(transactionId = 4, payload = ByteArray(10)))
+
+        // 12 头 + 10 负载。多一个字节就说明又塞进去了不该有的长度字段
+        assertEquals(22L, readUInt32(bytes, 0))
+        assertEquals(22, bytes.size)
+    }
+
+    @Test
+    fun `data packet round-trips through encode and decode`() {
+        val payload = ByteArray(300) { (it % 253).toByte() }
+
+        val decoded = PtpContainerCodec.toPacket(
+            PtpContainerCodec.decode(
+                PtpContainerCodec.encode(DataPacket(transactionId = 4, payload = payload))
+            )
         ) as DataPacket
 
         assertEquals(4L, decoded.transactionId)
@@ -68,88 +99,41 @@ class PtpContainerCodecTest {
     }
 
     @Test
-    fun `end data round-trips and stays distinguishable from a plain data packet`() {
-        val end = PtpContainerCodec.encode(EndData(transactionId = 5, payload = byteArrayOf(1, 2)))
-
-        // 端点：容器类型仍是数据，靠码字段里的数据类型区分——这正是它必须能还原的原因
-        assertEquals(PtpContainerType.DATA, end[4].toInt() and 0xFF)
-        assertEquals(PtpDataType.DATA_END, end[6].toInt() and 0xFF)
-
-        val decoded = PtpContainerCodec.decode(end)
-        assertTrue(decoded is EndData)
-        assertEquals(5L, (decoded as EndData).transactionId)
-    }
-
-    @Test
     fun `response container decodes code transaction id and parameters`() {
-        // 相机构造：长度(4) + 类型=响应(2) + 码(2) + 事务 ID(4) + 参数(4×2)
-        val raw = PtpBuffer.writer()
-            .writeUInt32(20)
-            .writeUInt16(PtpContainerType.RESPONSE)
-            .writeUInt16(0x2001)       // OK
-            .writeUInt32(9)
-            .writeUInt32(0xF10001)
-            .writeUInt32(2)
-            .toByteArray()
+        val decoded = PtpContainerCodec.toPacket(
+            PtpContainerCodec.decode(
+                container(PtpContainerType.RESPONSE, 0x2001, 9, params(0xF10001, 2))
+            )
+        ) as OperationResponse
 
-        val response = PtpContainerCodec.decode(raw) as OperationResponse
-
-        assertEquals(0x2001, response.responseCode)
-        assertEquals(9L, response.transactionId)
-        assertArrayEquals(longArrayOf(0xF10001, 2), response.parameters)
+        assertEquals(0x2001, decoded.responseCode)
+        assertEquals(9L, decoded.transactionId)
+        assertArrayEquals(longArrayOf(0xF10001, 2), decoded.parameters)
     }
 
     @Test
     fun `event container decodes`() {
-        val raw = PtpBuffer.writer()
-            .writeUInt32(16)
-            .writeUInt16(PtpContainerType.EVENT)
-            .writeUInt16(0x400A)       // CaptureComplete
-            .writeUInt32(11)
-            .writeUInt32(0xABCD)
-            .toByteArray()
+        val decoded = PtpContainerCodec.toPacket(
+            PtpContainerCodec.decode(container(PtpContainerType.EVENT, 0x400A, 11, params(0xABCD)))
+        ) as Event
 
-        val event = PtpContainerCodec.decode(raw) as Event
-
-        assertEquals(0x400A, event.eventCode)
-        assertEquals(11L, event.transactionId)
-        assertArrayEquals(longArrayOf(0xABCD), event.parameters)
+        assertEquals(0x400A, decoded.eventCode)
+        assertEquals(11L, decoded.transactionId)
+        assertArrayEquals(longArrayOf(0xABCD), decoded.parameters)
     }
 
     @Test
-    fun `the first data container decodes as StartData while continuations do not`() {
-        // 数据类型字段是唯一区分手段：首个容器带长度声明，之后的只带负载
-        val first = PtpBuffer.writer()
-            .writeUInt32(16)
-            .writeUInt16(PtpContainerType.DATA)
-            .writeUInt16(PtpDataType.DATA_INIT)
-            .writeUInt32(12)
-            .writeUInt32(2048)
-            .toByteArray()
-        val rest = PtpBuffer.writer()
-            .writeUInt32(16)          // 8 头 + 4 事务 + 4 长度（后续容器的长度字段为 0）
-            .writeUInt16(PtpContainerType.DATA)
-            .writeUInt16(PtpDataType.DATA)
-            .writeUInt32(12)
-            .writeUInt32(0)
-            .toByteArray()
+    fun `empty parameter list round-trips`() {
+        val decoded = PtpContainerCodec.toPacket(
+            PtpContainerCodec.decode(PtpContainerCodec.encode(OperationRequest(operationCode = 0x1001, transactionId = 1)))
+        ) as OperationRequest
 
-        val decodedFirst = PtpContainerCodec.decode(first)
-        val decodedRest = PtpContainerCodec.decode(rest)
-
-        assertTrue(decodedFirst is StartData)
-        assertEquals(2048L, (decodedFirst as StartData).dataLength)
-        assertTrue(decodedRest is DataPacket)
+        assertTrue(decoded.parameters.isEmpty())
     }
 
     @Test
     fun `handshake packets are rejected because usb has no such step`() {
-        val rejected = listOf(
-            InitCommandRequest(),
-            InitEventRequest(),
-            ProbeRequest()
-        )
-        rejected.forEach { packet ->
+        listOf(InitCommandRequest(), InitEventRequest(), ProbeRequest()).forEach { packet ->
             try {
                 PtpContainerCodec.encode(packet)
                 throw AssertionError("${packet::class.simpleName} 不该能被编码成 USB 容器")
@@ -185,14 +169,8 @@ class PtpContainerCodecTest {
 
     @Test
     fun `an unknown container type is rejected`() {
-        val raw = PtpBuffer.writer()
-            .writeUInt32(8)
-            .writeUInt16(99)
-            .writeUInt16(0)
-            .toByteArray()
-
         try {
-            PtpContainerCodec.decode(raw)
+            PtpContainerCodec.toPacket(UsbContainer(99, 0, 1, ByteArray(0)))
             throw AssertionError("未知容器类型应当抛错")
         } catch (e: PtpMalformedPacketException) {
             assertTrue(e.message!!.contains("未知容器类型"))
@@ -201,19 +179,10 @@ class PtpContainerCodecTest {
 
     @Test
     fun `parameters that are not a whole number of words are rejected`() {
-        // 参数区必须是 4 字节的整数倍，否则后续字段会整体错位
-        val raw = PtpBuffer.writer()
-            .writeUInt32(15)           // 8 头 + 4 事务 ID + 3 字节不对齐的参数
-            .writeUInt16(PtpContainerType.COMMAND)
-            .writeUInt16(0x1001)
-            .writeUInt32(1)
-            .writeUInt8(1)
-            .writeUInt8(2)
-            .writeUInt8(3)
-            .toByteArray()
-
         try {
-            PtpContainerCodec.decode(raw)
+            PtpContainerCodec.toPacket(
+                UsbContainer(PtpContainerType.COMMAND, 0x1001, 1, ByteArray(3))
+            )
             throw AssertionError("参数字节数不对齐应当抛错")
         } catch (e: PtpMalformedPacketException) {
             assertTrue(e.message!!.contains("参数非法"))
@@ -222,7 +191,7 @@ class PtpContainerCodecTest {
 
     @Test
     fun `a hostile declared length is rejected before any allocation`() {
-        val raw = ByteArray(8).also {
+        val raw = ByteArray(HEADER_BYTES).also {
             it[0] = 0xFF.toByte(); it[1] = 0xFF.toByte(); it[2] = 0xFF.toByte(); it[3] = 0x7F.toByte()
         }
 
@@ -232,5 +201,11 @@ class PtpContainerCodecTest {
         } catch (e: PtpMalformedPacketException) {
             assertTrue(e.message!!.contains("声明长度"))
         }
+    }
+
+    private fun readUInt32(data: ByteArray, offset: Int): Long {
+        var value = 0L
+        for (i in 0 until 4) value = value or ((data[offset + i].toLong() and 0xFF) shl (8 * i))
+        return value
     }
 }

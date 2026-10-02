@@ -12,12 +12,17 @@ import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
 import com.imagedge.camera.core.common.AppLog
+import com.imagedge.camera.ptp.DataPacket
+import com.imagedge.camera.ptp.EndData
 import com.imagedge.camera.ptp.PtpCommandChannel
 import com.imagedge.camera.ptp.PtpContainerCodec
+import com.imagedge.camera.ptp.PtpContainerType
+import com.imagedge.camera.ptp.PtpIpPacket
+import com.imagedge.camera.ptp.StartData
+import com.imagedge.camera.ptp.UsbContainer
 import com.imagedge.camera.ptp.UsbContainerAssembler
 import com.imagedge.camera.ptp.PtpIoException
 import com.imagedge.camera.ptp.PtpMalformedPacketException
-import com.imagedge.camera.ptp.PtpIpPacket
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -50,11 +55,26 @@ class UsbPtpCommandChannel private constructor(
     /** 字节流切分交给可单测的累积器；这里只负责搬字节 */
     private val assembler = UsbContainerAssembler(MAX_CONTAINER_BYTES)
 
+    /**
+     * 本次数据阶段是否已经开始读。
+     *
+     * USB 上没有 StartData/EndData 包，数据容器一路收到响应容器为止——事务引擎却按
+     * PTP/IP 的模型要求「先 StartData、再若干 DataPacket、最后 EndData」。这里记住
+     * 是否已进入数据阶段，把首尾两个包补出来，让上层那套逻辑在两种链路上是同一份。
+     */
+    private var inDataPhase = false
+
     private val openFlag = AtomicBoolean(true)
 
     override val isOpen: Boolean get() = openFlag.get()
 
     override fun write(packet: PtpIpPacket) {
+        // 事务引擎按 PTP/IP 的习惯发「空 StartData → 数据 → 空 EndData」三个包，
+        // 而 USB 上一段数据阶段就是一个数据容器。空的首尾容器不发出去——
+        // 官方实现同样是把整段负载放进单个容器，多发两个空容器没有对应的语义。
+        val isEmptyMarker = (packet is StartData) ||
+            (packet is EndData && packet.payload.isEmpty())
+        if (isEmptyMarker) return
         val bytes = PtpContainerCodec.encode(packet)
         val written = connection.bulkTransfer(bulkOut, bytes, bytes.size, WRITE_TIMEOUT_MS)
         if (written < 0) {
@@ -68,11 +88,40 @@ class UsbPtpCommandChannel private constructor(
 
     override fun read(): PtpIpPacket {
         while (true) {
-            assembler.next()?.let { return PtpContainerCodec.decode(it) }
-            // 切不出容器只可能是「还没攒够」：合法且 ≤ 上限的长度一旦被满足就已经切出来了，
-            // 而非法长度在 next() 里就被拒并清空了。所以这里只会往下再读，不会越攒越多
-            appendIncoming("容器片段")
+            val container = assembler.next() ?: run {
+                // 切不出容器只可能是「还没攒够」：合法且 ≤ 上限的长度一旦被满足就已经切出来了，
+                // 而非法长度在 next() 里就被拒并清空了。所以这里只会往下再读，不会越攒越多
+                appendIncoming("容器片段")
+                continue
+            }
+            return translate(PtpContainerCodec.decode(container))
         }
+    }
+
+    /**
+     * 容器 → PTP 包，补上 USB 缺失的数据阶段首尾包。
+     *
+     * 声明长度传 0 表示「未声明」：USB 通路没有任何地方会告诉我们这次数据阶段有多长，
+     * 总长只能等收完才知道，因此这里不能编一个数字出来。
+     */
+    private fun translate(container: UsbContainer): PtpIpPacket = when (container.type) {
+        PtpContainerType.DATA ->
+            if (!inDataPhase) {
+                inDataPhase = true
+                StartData(container.transactionId, dataLength = 0)
+            } else {
+                DataPacket(container.transactionId, container.payload)
+            }
+        PtpContainerType.RESPONSE ->
+            if (inDataPhase) {
+                // 数据阶段到此为止。负载不带——前面每个 DataPacket 已经送过一次，
+                // 这里再带一遍会让事务引擎把字节数算成两倍
+                inDataPhase = false
+                EndData(container.transactionId)
+            } else {
+                PtpContainerCodec.toPacket(container)
+            }
+        else -> PtpContainerCodec.toPacket(container)
     }
 
     private fun appendIncoming(what: String) {
