@@ -15,7 +15,7 @@ import androidx.compose.ui.unit.dp
  * 结构尺寸的唯一来源。
  *
  * 与 [Spacing] / [Radius] 的分工：Spacing 管元素之间的呼吸，Radius 管圆角，
- * 这里管**可点击与可读的最小尺寸**以及版面上限。大字模式下内容按自身增高，
+ * 这里管**可点击与可读的最小尺寸**。大字模式下内容按自身增高，
  * 这些值只是地板——把它们当固定高度用就会裁字。
  *
  * 页面不散写数值：预览验证后若要调整，全项目从此处同步。
@@ -35,9 +35,6 @@ object UiSize {
 
     /** 照片网格自适应列的最小格宽 */
     val PhotoTileMin = 104.dp
-
-    /** 表单与长说明的最大宽度；宽屏居中，避免一行读到头 */
-    val FormMaxWidth = 600.dp
 
     /** 遥控主快门视觉直径 */
     val ShutterDiameter = 72.dp

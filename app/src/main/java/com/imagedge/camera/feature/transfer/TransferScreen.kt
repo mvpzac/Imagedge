@@ -63,6 +63,7 @@ import com.imagedge.camera.ui.components.AppChipRow
 import com.imagedge.camera.ui.components.ConfirmDialog
 import com.imagedge.camera.ui.components.AppIconButton
 import com.imagedge.camera.ui.components.AppLink
+import com.imagedge.camera.ui.components.AppPage
 import com.imagedge.camera.ui.components.EmptyState
 import com.imagedge.camera.ui.components.GroupTitle
 import com.imagedge.camera.ui.components.Lucide
@@ -70,10 +71,9 @@ import com.imagedge.camera.ui.components.LucideIcon
 import com.imagedge.camera.ui.components.StatusBanner
 import com.imagedge.camera.ui.glass.glassDialog
 import com.imagedge.camera.ui.glass.glassDialogContainerColor
-import com.imagedge.camera.ui.layout.AppPageHeader
-import com.imagedge.camera.ui.layout.AppScreenFrame
 import com.imagedge.camera.ui.theme.Radius
 import com.imagedge.camera.ui.theme.Spacing
+import com.imagedge.camera.ui.theme.UiSize
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -138,38 +138,34 @@ fun TransferScreen(
     // 站到失败面前就算看过了：全局任务条的职责到此为止（设计 §4.5「尚未查看的失败」）
     LaunchedEffect(Unit) { viewModel.markBatchFailuresViewed() }
 
-    AppScreenFrame(
-        topBar = {
-            AppPageHeader(
-                title = stringResource(R.string.download_title),
-                onBack = onBack,
-                actions = {
-                    if (tab == 0) {
-                        if (hasActive) {
-                            AppLink(
-                                text = stringResource(R.string.download_cancel_all),
-                                onClick = { pendingConfirm = PendingConfirm.CancelAll }
-                            )
-                        }
-                        if (hasFinished) {
-                            AppLink(
-                                text = stringResource(R.string.download_clear),
-                                onClick = { pendingConfirm = PendingConfirm.ClearFinished }
-                            )
-                        }
-                    } else {
-                        if (history.isNotEmpty()) {
-                            AppLink(
-                                text = stringResource(R.string.download_history_clear),
-                                // 只清这本账，一张照片都不动（用户删的是记录，不是原片）
-                                // ——但这句话得让用户先看到，而不是事后自己推断
-                                onClick = { pendingConfirm = PendingConfirm.ClearHistory }
-                            )
-                        }
-                    }
+    AppPage(
+        title = stringResource(R.string.download_title),
+        onBack = onBack,
+        actions = {
+            if (tab == 0) {
+                if (hasActive) {
+                    AppLink(
+                        text = stringResource(R.string.download_cancel_all),
+                        onClick = { pendingConfirm = PendingConfirm.CancelAll }
+                    )
                 }
-            )
-        }
+                if (hasFinished) {
+                    AppLink(
+                        text = stringResource(R.string.download_clear),
+                        onClick = { pendingConfirm = PendingConfirm.ClearFinished }
+                    )
+                }
+            } else {
+                if (history.isNotEmpty()) {
+                    AppLink(
+                        text = stringResource(R.string.download_history_clear),
+                        // 只清这本账，一张照片都不动（用户删的是记录，不是原片）
+                        // ——但这句话得让用户先看到，而不是事后自己推断
+                        onClick = { pendingConfirm = PendingConfirm.ClearHistory }
+                    )
+                }
+            }
+        },
     ) {
         Column(
             modifier = Modifier
@@ -511,14 +507,14 @@ private fun DownloadTaskRow(
                     bitmap = thumb.asImageBitmap(),
                     contentDescription = task.filename,
                     modifier = Modifier
-                        .size(48.dp)
+                        .size(UiSize.TouchMin)
                         .clip(RoundedCornerShape(Radius.Control)),
                     contentScale = ContentScale.Crop
                 )
             } else {
                 Box(
                     modifier = Modifier
-                        .size(48.dp)
+                        .size(UiSize.TouchMin)
                         .clip(RoundedCornerShape(Radius.Control))
                         .background(MaterialTheme.colorScheme.surface)
                 )

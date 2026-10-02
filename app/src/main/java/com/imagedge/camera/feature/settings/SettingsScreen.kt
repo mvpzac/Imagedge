@@ -7,11 +7,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
@@ -39,6 +37,7 @@ import com.imagedge.camera.BuildConfig
 import com.imagedge.camera.R
 import com.imagedge.camera.data.lut.LutType
 import com.imagedge.camera.navigation.LocalNavClearance
+import com.imagedge.camera.ui.components.AppPage
 import com.imagedge.camera.ui.components.ActionRow
 import com.imagedge.camera.ui.components.AppButton
 import com.imagedge.camera.ui.components.AppButtonType
@@ -49,8 +48,6 @@ import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.SettingsRow
 import com.imagedge.camera.ui.glass.glassDialog
 import com.imagedge.camera.ui.glass.glassDialogContainerColor
-import com.imagedge.camera.ui.layout.AppPageHeader
-import com.imagedge.camera.ui.layout.AppScreenFrame
 import com.imagedge.camera.ui.theme.Spacing
 import com.imagedge.camera.ui.theme.ThemeMode
 
@@ -97,174 +94,172 @@ fun SettingsScreen(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri -> uri?.let { viewModel.onDirPicked(it) } }
 
-    AppScreenFrame(
-        topBar = { AppPageHeader(title = stringResource(R.string.tab_settings), large = true) }
+    // 骨架交给 AppPage：滚动与内边距的顺序只在这一处写死。安全区由 AppScreenFrame
+    // 加过，这里补的是自己的水平边距与底部导航让位
+    AppPage(
+        title = stringResource(R.string.tab_settings),
+        large = true,
+        contentPadding = PaddingValues(
+            start = Spacing.L,
+            end = Spacing.L,
+            bottom = LocalNavClearance.current + Spacing.L
+        )
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                // 安全区由 AppScreenFrame 加过了，这里只加自己的水平边距与导航让位
-                .padding(horizontal = Spacing.L)
-                .padding(bottom = LocalNavClearance.current),
-            verticalArrangement = Arrangement.spacedBy(Spacing.L)
-        ) {
-            // ──  保存位置与下载 ─
-            GroupTitle(stringResource(R.string.settings_section_download), icon = Lucide.Download)
-            Column(verticalArrangement = Arrangement.spacedBy(Spacing.S)) {
-                // 常用行直接显示当前值：要点进下一层才知道存到哪，等于把状态藏起来
-                SettingsRow(
-                    title = stringResource(R.string.settings_save_location_title),
-                    value = dirLabel,
-                    onClick = { dirPicker.launch(null) }
+        // ──  保存位置与下载 ─
+        GroupTitle(stringResource(R.string.settings_section_download), icon = Lucide.Download)
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.S)) {
+            // 常用行直接显示当前值：要点进下一层才知道存到哪，等于把状态藏起来
+            SettingsRow(
+                title = stringResource(R.string.settings_save_location_title),
+                value = dirLabel,
+                onClick = { dirPicker.launch(null) }
+            )
+            if (viewModel.downloadTreeUri != null) {
+                AppLink(
+                    text = stringResource(R.string.settings_restore_dir),
+                    onClick = viewModel::restoreDefaultDir
                 )
-                if (viewModel.downloadTreeUri != null) {
-                    AppLink(
-                        text = stringResource(R.string.settings_restore_dir),
-                        onClick = viewModel::restoreDefaultDir
-                    )
-                }
+            }
+            Text(
+                text = stringResource(R.string.settings_download_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        // ── ② 外观与触觉 ──
+        GroupTitle(stringResource(R.string.settings_section_appearance), icon = Lucide.Palette)
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.M)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.S)) {
                 Text(
-                    text = stringResource(R.string.settings_download_hint),
-                    style = MaterialTheme.typography.bodySmall,
+                    text = stringResource(R.string.settings_theme_title),
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            }
-
-            // ── ② 外观与触觉 ──
-            GroupTitle(stringResource(R.string.settings_section_appearance), icon = Lucide.Palette)
-            Column(verticalArrangement = Arrangement.spacedBy(Spacing.M)) {
-                Column(verticalArrangement = Arrangement.spacedBy(Spacing.S)) {
-                    Text(
-                        text = stringResource(R.string.settings_theme_title),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    val segmentedColors = SegmentedButtonDefaults.colors(
-                        inactiveContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest
-                    )
-                    // 显示顺序写死，不用 ThemeMode.entries：枚举声明序是 SYSTEM/LIGHT/DARK，
-                    // 而界面上「浅色 / 深色 / 跟随系统」才是既有顺序，用 entries 会静默换序
-                    val displayOrder = listOf(ThemeMode.LIGHT, ThemeMode.DARK, ThemeMode.SYSTEM)
-                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                        displayOrder.forEachIndexed { index, mode ->
-                            SegmentedButton(
-                                selected = themeMode == mode,
-                                onClick = { viewModel.setThemeMode(mode) },
-                                shape = SegmentedButtonDefaults.itemShape(index = index, count = displayOrder.size),
-                                colors = segmentedColors
-                            ) {
-                                Text(stringResource(mode.labelRes()))
-                            }
-                        }
-                    }
-                }
-                AppSwitchRow(
-                    title = stringResource(R.string.settings_haptics_title),
-                    subtitle = stringResource(R.string.settings_haptics_desc),
-                    checked = hapticsEnabled,
-                    onCheckedChange = viewModel::setHapticsEnabled
+                val segmentedColors = SegmentedButtonDefaults.colors(
+                    inactiveContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest
                 )
-            }
-
-            // ── ③ 色彩预设（LUT） ──
-            GroupTitle(stringResource(R.string.settings_section_lut), icon = Lucide.SlidersHorizontal)
-            Column(verticalArrangement = Arrangement.spacedBy(Spacing.S)) {
-                if (userLuts.isEmpty()) {
-                    Text(
-                        text = stringResource(R.string.settings_lut_empty),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                } else {
-                    userLuts.forEach { name ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
+                // 显示顺序写死，不用 ThemeMode.entries：枚举声明序是 SYSTEM/LIGHT/DARK，
+                // 而界面上「浅色 / 深色 / 跟随系统」才是既有顺序，用 entries 会静默换序
+                val displayOrder = listOf(ThemeMode.LIGHT, ThemeMode.DARK, ThemeMode.SYSTEM)
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    displayOrder.forEachIndexed { index, mode ->
+                        SegmentedButton(
+                            selected = themeMode == mode,
+                            onClick = { viewModel.setThemeMode(mode) },
+                            shape = SegmentedButtonDefaults.itemShape(index = index, count = displayOrder.size),
+                            colors = segmentedColors
                         ) {
-                            Text(
-                                text = name.removeSuffix(".cube"),
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.weight(1f)
-                            )
-                            AppLink(
-                                text = stringResource(R.string.settings_lut_export),
-                                onClick = {
-                                    exportTarget = name
-                                    lutExportLauncher.launch(name)
-                                }
-                            )
-                            AppLink(
-                                text = stringResource(R.string.settings_lut_delete),
-                                onClick = { deleteTarget = name },
-                                color = MaterialTheme.colorScheme.error
-                            )
+                            Text(stringResource(mode.labelRes()))
                         }
                     }
                 }
-                AppButton(
-                    text = stringResource(R.string.settings_lut_import),
-                    onClick = { lutImportLauncher.launch(arrayOf("*/*")) },
-                    type = AppButtonType.PRIMARY
-                )
-                lutMessage?.let {
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
             }
+            AppSwitchRow(
+                title = stringResource(R.string.settings_haptics_title),
+                subtitle = stringResource(R.string.settings_haptics_desc),
+                checked = hapticsEnabled,
+                onCheckedChange = viewModel::setHapticsEnabled
+            )
+        }
 
-            // ── ④ 相机与权限 ──
-            GroupTitle(stringResource(R.string.settings_section_camera), icon = Lucide.Camera)
-            Column(verticalArrangement = Arrangement.spacedBy(Spacing.S)) {
-                ActionRow(
-                    title = stringResource(R.string.profile_title),
-                    description = stringResource(R.string.profile_entry_desc),
-                    icon = Lucide.Camera,
-                    onClick = onOpenProfiles
+        // ── ③ 色彩预设（LUT） ──
+        GroupTitle(stringResource(R.string.settings_section_lut), icon = Lucide.SlidersHorizontal)
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.S)) {
+            if (userLuts.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.settings_lut_empty),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                ActionRow(
-                    title = stringResource(R.string.permission_title),
-                    description = stringResource(R.string.settings_permission_entry_desc),
-                    icon = Lucide.ShieldCheck,
-                    onClick = onOpenPermissions
-                )
-                // 关过的引导要能召回：新手常常是在不该关的时候点了「知道了」，
-                // 之后就没有第二条路把说明找回来（新手手册 §5）
-                ActionRow(
-                    title = stringResource(R.string.settings_guides_entry),
-                    description = stringResource(R.string.settings_guides_entry_desc),
-                    icon = Lucide.CircleQuestionMark,
-                    onClick = {
-                        viewModel.reopenGuides()
-                        guidesReopened = true
+            } else {
+                userLuts.forEach { name ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = name.removeSuffix(".cube"),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        AppLink(
+                            text = stringResource(R.string.settings_lut_export),
+                            onClick = {
+                                exportTarget = name
+                                lutExportLauncher.launch(name)
+                            }
+                        )
+                        AppLink(
+                            text = stringResource(R.string.settings_lut_delete),
+                            onClick = { deleteTarget = name },
+                            color = MaterialTheme.colorScheme.error
+                        )
                     }
-                )
-                if (guidesReopened) {
-                    Text(
-                        text = stringResource(R.string.settings_guides_reopened),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
             }
-
-            // ── ⑤ 关于 ──
-            GroupTitle(stringResource(R.string.settings_section_about), icon = Lucide.Info)
-            Column(verticalArrangement = Arrangement.spacedBy(Spacing.XS)) {
-                // 版本号从 BuildConfig 读取：与构建配置同源，发版永不脱节
+            AppButton(
+                text = stringResource(R.string.settings_lut_import),
+                onClick = { lutImportLauncher.launch(arrayOf("*/*")) },
+                type = AppButtonType.PRIMARY
+            )
+            lutMessage?.let {
                 Text(
-                    text = "Imagedge " + BuildConfig.VERSION_NAME,
-                    style = MaterialTheme.typography.titleSmall
-                )
-                Text(
-                    text = stringResource(R.string.settings_about_body),
+                    text = it,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        }
+
+        // ── ④ 相机与权限 ──
+        GroupTitle(stringResource(R.string.settings_section_camera), icon = Lucide.Camera)
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.S)) {
+            ActionRow(
+                title = stringResource(R.string.profile_title),
+                description = stringResource(R.string.profile_entry_desc),
+                icon = Lucide.Camera,
+                onClick = onOpenProfiles
+            )
+            ActionRow(
+                title = stringResource(R.string.permission_title),
+                description = stringResource(R.string.settings_permission_entry_desc),
+                icon = Lucide.ShieldCheck,
+                onClick = onOpenPermissions
+            )
+            // 关过的引导要能召回：新手常常是在不该关的时候点了「知道了」，
+            // 之后就没有第二条路把说明找回来（新手手册 §5）
+            ActionRow(
+                title = stringResource(R.string.settings_guides_entry),
+                description = stringResource(R.string.settings_guides_entry_desc),
+                icon = Lucide.CircleQuestionMark,
+                onClick = {
+                    viewModel.reopenGuides()
+                    guidesReopened = true
+                }
+            )
+            if (guidesReopened) {
+                Text(
+                    text = stringResource(R.string.settings_guides_reopened),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        // ── ⑤ 关于 ──
+        GroupTitle(stringResource(R.string.settings_section_about), icon = Lucide.Info)
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.XS)) {
+            // 版本号从 BuildConfig 读取：与构建配置同源，发版永不脱节
+            Text(
+                text = "Imagedge " + BuildConfig.VERSION_NAME,
+                style = MaterialTheme.typography.titleSmall
+            )
+            Text(
+                text = stringResource(R.string.settings_about_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 

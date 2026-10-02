@@ -6,14 +6,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -40,6 +38,7 @@ import com.imagedge.camera.domain.camera.ConnectPurpose
 import com.imagedge.camera.navigation.LocalNavClearance
 import com.imagedge.camera.ui.components.ActionRow
 import com.imagedge.camera.ui.components.AppButton
+import com.imagedge.camera.ui.components.AppPage
 import com.imagedge.camera.ui.components.AppButtonType
 import com.imagedge.camera.ui.components.AppLink
 import com.imagedge.camera.ui.components.AppTextField
@@ -50,8 +49,6 @@ import com.imagedge.camera.ui.components.StatusBanner
 import com.imagedge.camera.ui.guidance.ContextHint
 import com.imagedge.camera.ui.guidance.GuideCard
 import com.imagedge.camera.ui.guidance.GuideContent
-import com.imagedge.camera.ui.layout.AppPageHeader
-import com.imagedge.camera.ui.layout.AppScreenFrame
 import com.imagedge.camera.ui.theme.Radius
 import com.imagedge.camera.ui.theme.Spacing
 
@@ -117,67 +114,59 @@ fun ConnectWizardScreen(
         onBack()
     }
 
-    AppScreenFrame(
-        topBar = {
-            AppPageHeader(
-                title = stringResource(R.string.wizard_title),
-                onBack = leave
-            )
-        }
+    AppPage(
+        title = stringResource(R.string.wizard_title),
+        onBack = leave,
+        contentPadding = PaddingValues(
+            start = Spacing.L,
+            end = Spacing.L,
+            bottom = LocalNavClearance.current + Spacing.L
+        )
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = Spacing.L)
-                .padding(bottom = LocalNavClearance.current),
-            verticalArrangement = Arrangement.spacedBy(Spacing.L)
-        ) {
-            StepHeader(phase = wizardPhaseIndex(wizard.attempt))
+        StepHeader(phase = wizardPhaseIndex(wizard.attempt))
 
-            when (wizard.attempt.stage) {
-                WizardStage.PrepareCamera -> PrepareCameraStage(
-                    hotspotAlreadyJoined = wizard.attempt.hotspotJoined,
-                    viewModel = viewModel,
-                    scanViewModel = scanViewModel,
-                    showOtherPaths = showOtherPaths,
-                    onShowOtherPaths = { showOtherPaths = true },
-                    onLeave = leave
-                )
+        when (wizard.attempt.stage) {
+            WizardStage.PrepareCamera -> PrepareCameraStage(
+                hotspotAlreadyJoined = wizard.attempt.hotspotJoined,
+                viewModel = viewModel,
+                scanViewModel = scanViewModel,
+                showOtherPaths = showOtherPaths,
+                onShowOtherPaths = { showOtherPaths = true },
+                onLeave = leave
+            )
 
-                WizardStage.ScanQr -> QrScanStep(
-                    onSessionStart = { viewModel.startSession() },
-                    onNeedOtherPaths = {
-                        showOtherPaths = true
-                        viewModel.backToPrepare()
-                    },
-                    onBack = { viewModel.backToPrepare() },
-                    viewModel = scanViewModel
-                )
+            WizardStage.ScanQr -> QrScanStep(
+                onSessionStart = { viewModel.startSession() },
+                onNeedOtherPaths = {
+                    showOtherPaths = true
+                    viewModel.backToPrepare()
+                },
+                onBack = { viewModel.backToPrepare() },
+                viewModel = scanViewModel
+            )
 
-                WizardStage.Connect -> ConnectStage(
-                    view = wizard,
-                    onRetrySession = { viewModel.retrySession() },
-                    onRetryWifi = {
-                        scanViewModel.reset()
-                        viewModel.retryWifi()
-                    },
-                    onNeedOtherPaths = {
-                        showOtherPaths = true
-                        viewModel.backToPrepare()
-                    },
-                    onBack = { viewModel.backToPrepare() },
-                    onLeave = leave
-                )
+            WizardStage.Connect -> ConnectStage(
+                view = wizard,
+                onRetrySession = { viewModel.retrySession() },
+                onRetryWifi = {
+                    scanViewModel.reset()
+                    viewModel.retryWifi()
+                },
+                onNeedOtherPaths = {
+                    showOtherPaths = true
+                    viewModel.backToPrepare()
+                },
+                onBack = { viewModel.backToPrepare() },
+                onLeave = leave
+            )
 
-                WizardStage.Success -> SuccessStage(
-                    model = connection.cameraModel,
-                    purpose = purpose,
-                    shutterState = capabilities.stateOf(CameraCapability.CAPTURE),
-                    onOpenPhotos = onOpenPhotos,
-                    onOpenRemote = onOpenRemote
-                )
-            }
+            WizardStage.Success -> SuccessStage(
+                model = connection.cameraModel,
+                purpose = purpose,
+                shutterState = capabilities.stateOf(CameraCapability.CAPTURE),
+                onOpenPhotos = onOpenPhotos,
+                onOpenRemote = onOpenRemote
+            )
         }
     }
 }

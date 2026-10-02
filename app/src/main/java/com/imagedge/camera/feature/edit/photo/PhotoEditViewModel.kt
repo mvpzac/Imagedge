@@ -236,7 +236,9 @@ data class PhotoEditState(
     // 每个 state 实例只算一次：fields() 是纯映射，同一份配方必然给出同一组值，
     // 而这几个名字在同一个实例上会被反复读（滑条每动一下就 copy 出一个新实例，见各 setter）。
     // 写成 `get()` 就是每次访问重筛一遍步骤列表——量不大，但没有理由白做。
-    private val derived by lazy { recipe.fields() }
+    // 不用 by lazy：滑条每动一下就 copy() 出一个新实例，而 lazy 的委托对象本身
+    // 也要分配、每次读还要过一次同步。实例一次性使用、构造时算一次就够。
+    private val derived = recipe.fields()
     /** 归一化裁剪框（相对「拉直+旋转+翻转」之后的画面）：配方里那条 Crop 步骤，没有就是全图 */
     val crop: NormRect get() = derived.crop
     val selectedKey: String get() = derived.selectedKey

@@ -92,6 +92,12 @@ fun EditorFrame(
     /** 确认对话框正文。默认说「调整」，会连素材一起清掉的编辑器必须自己写清楚 */
     resetConfirmBody: String? = null,
     modifier: Modifier = Modifier,
+    /**
+     * 只作用在**内容区**的 modifier。用来做「弹层打开时把背后糊掉」这类效果：
+     * 挂在 [modifier] 上会连标题栏与底部主按钮一起糊——那两样正是用户确认
+     * 「我在哪个页面、我还能按哪个键」的锚点，糊掉只增加成本不给信息。
+     */
+    contentModifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
     var confirmReset by remember { mutableStateOf(false) }
@@ -141,7 +147,8 @@ fun EditorFrame(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             Column(
-                modifier = Modifier
+                modifier = contentModifier
+                    .fillMaxSize()
                     .weight(1f)
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = Spacing.L)

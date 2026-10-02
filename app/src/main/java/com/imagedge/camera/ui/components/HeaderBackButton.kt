@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.imagedge.camera.ui.theme.UiSize
 import com.imagedge.camera.R
 import com.imagedge.camera.ui.glass.glassReactive
 import com.imagedge.camera.ui.theme.Spacing
@@ -35,7 +36,7 @@ fun HeaderBackButton(
     Box(
         modifier = modifier
             .padding(start = Spacing.S)
-            .size(48.dp)
+            .size(UiSize.TouchMin)
             .clip(CircleShape)
             .glassReactive(onClick = onClick),
         contentAlignment = Alignment.Center

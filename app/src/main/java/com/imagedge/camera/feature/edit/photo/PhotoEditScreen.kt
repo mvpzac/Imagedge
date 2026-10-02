@@ -138,6 +138,7 @@ fun PhotoEditScreen(
 
     // 说明弹窗开关：打开时标题栏与内容一起模糊，点背景退出
     var showHelp by remember { mutableStateOf(false) }
+    // 挂 contentModifier 而不是整个骨架：标题栏与底部保存按钮保持清晰
     val blurModifier = if (showHelp) Modifier.blur(12.dp) else Modifier
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -161,7 +162,7 @@ fun PhotoEditScreen(
             onSave = { viewModel.save() },
             onReset = { viewModel.resetEdits() },
             onBack = onBack,
-            modifier = blurModifier
+            contentModifier = blurModifier
         ) {
                 PreviewArea(state = state, viewModel = viewModel, onPick = {
                     imagePicker.launch(arrayOf("image/*"))

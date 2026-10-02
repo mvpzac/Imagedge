@@ -43,6 +43,7 @@ import com.imagedge.camera.ui.layout.EditorFrameState
 import com.imagedge.camera.ui.components.AppSection
 import com.imagedge.camera.ui.glass.GlassCard
 import com.imagedge.camera.ui.theme.Spacing
+import com.imagedge.camera.ui.theme.UiSize
 import com.imagedge.camera.ui.glass.GlassSwitch
 import com.imagedge.camera.ui.components.AppButtonType
 import com.imagedge.camera.ui.components.EmptyState
@@ -279,7 +280,7 @@ private fun SlotCard(
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
                                 // 触控目标 ≥ 48dp（规范 §8.1）：高度从 44 提到 48
-                                .size(width = 72.dp, height = 48.dp)
+                                .size(width = 72.dp, height = UiSize.TouchMin)
                                 .clip(RoundedCornerShape(Radius.Tag))
                                 .then(
                                     if (selected) Modifier.border(

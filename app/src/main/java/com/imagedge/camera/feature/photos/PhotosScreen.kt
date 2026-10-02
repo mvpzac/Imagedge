@@ -45,6 +45,7 @@ import com.imagedge.camera.domain.media.mediaId
 import com.imagedge.camera.domain.media.MediaId
 import com.imagedge.camera.navigation.LocalNavClearance
 import com.imagedge.camera.ui.components.AlbumGridSkeleton
+import com.imagedge.camera.ui.components.AppPageScaffold
 import com.imagedge.camera.ui.components.AppChipRow
 import com.imagedge.camera.ui.components.AppLink
 import com.imagedge.camera.ui.components.EmptyState
@@ -54,8 +55,6 @@ import com.imagedge.camera.ui.components.StatusBanner
 import com.imagedge.camera.ui.feedback.SnackbarController
 import com.imagedge.camera.ui.guidance.GuideCard
 import com.imagedge.camera.ui.guidance.GuideContent
-import com.imagedge.camera.ui.layout.AppPageHeader
-import com.imagedge.camera.ui.layout.AppScreenFrame
 import com.imagedge.camera.ui.theme.Spacing
 import com.imagedge.camera.ui.theme.UiSize
 import com.imagedge.camera.ptp.PhotoType
@@ -143,49 +142,47 @@ fun PhotosScreen(
         else R.string.photos_scope_selection
     )
 
-    AppScreenFrame(
-        topBar = {
-            AppPageHeader(
-                title = if (selectionMode) {
-                    pluralStringResource(R.plurals.photos_selected_count, selected.size, selected.size)
-                } else {
-                    stringResource(R.string.tab_photos)
-                },
-                large = true,
-                actions = {
-                    if (selectionMode) {
-                        // 全选当前**筛选出来的**这一批，而不是整个相册
-                        val allShownSelected = filtered.isNotEmpty() &&
-                            filtered.all { it.channelKey in selected }
-                        AppLink(
-                            text = stringResource(
-                                if (allShownSelected) R.string.photos_deselect_all
-                                else R.string.photos_select_all
-                            ),
-                            onClick = { viewModel.setManySelected(filtered, !allShownSelected) }
-                        )
-                        AppLink(
-                            text = stringResource(R.string.photos_cancel_selection),
-                            onClick = {
-                                selectionMode = false
-                                viewModel.clearSelection()
-                            }
-                        )
-                    } else {
-                        // 一张都没有时不给进选择态：进去之后只能对着一句「请选择照片」发呆
-                        if (items.isNotEmpty()) {
-                            AppLink(
-                                text = stringResource(R.string.photos_select_action),
-                                onClick = { selectionMode = true }
-                            )
-                        }
-                        AppLink(
-                            text = stringResource(R.string.photos_transfer_action),
-                            onClick = onOpenTransfer
-                        )
+    // 正文是 LazyVerticalGrid，套不进 AppPage 那层滚动 Column（lazy 容器会拿到无界高度），
+    // 所以用下半层骨架：标题栏、底部槽、正文根节点各归各处，写法仍然只有这一处
+    AppPageScaffold(
+        title = if (selectionMode) {
+            pluralStringResource(R.plurals.photos_selected_count, selected.size, selected.size)
+        } else {
+            stringResource(R.string.tab_photos)
+        },
+        large = true,
+        actions = {
+            if (selectionMode) {
+                // 全选当前**筛选出来的**这一批，而不是整个相册
+                val allShownSelected = filtered.isNotEmpty() &&
+                    filtered.all { it.channelKey in selected }
+                AppLink(
+                    text = stringResource(
+                        if (allShownSelected) R.string.photos_deselect_all
+                        else R.string.photos_select_all
+                    ),
+                    onClick = { viewModel.setManySelected(filtered, !allShownSelected) }
+                )
+                AppLink(
+                    text = stringResource(R.string.photos_cancel_selection),
+                    onClick = {
+                        selectionMode = false
+                        viewModel.clearSelection()
                     }
+                )
+            } else {
+                // 一张都没有时不给进选择态：进去之后只能对着一句「请选择照片」发呆
+                if (items.isNotEmpty()) {
+                    AppLink(
+                        text = stringResource(R.string.photos_select_action),
+                        onClick = { selectionMode = true }
+                    )
                 }
-            )
+                AppLink(
+                    text = stringResource(R.string.photos_transfer_action),
+                    onClick = onOpenTransfer
+                )
+            }
         },
         bottomBar = {
             if (selectionMode) {
@@ -212,161 +209,162 @@ fun PhotosScreen(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             // 没连上又什么都没有时，「范围」和「筛选」都还是在说一个不存在的数据集：
-            // 这时页面只该给一条修复路径（下面的 NeedsConnection 空态），不摆控件
-            val hasSession = connected || items.isNotEmpty()
+                // 这时页面只该给一条修复路径（下面的 NeedsConnection 空态），不摆控件
+                val hasSession = connected || items.isNotEmpty()
 
-            // 范围行：这一屏列的是哪一批，点开可换
-            if (hasSession) BrowseScopeRow(
-                scopeLabel = scopeLabel,
-                note = stringResource(
-                    if (scopeEnum.decidedByCamera) R.string.transfer_scope_by_camera
-                    else R.string.photos_scope_note_card
-                ),
-                // 传输中就地把原因写在行下（设计 §2）。真点下去时 ViewModel 还会按
-                // 「相机当前功能模式」再判一次，所以这里最坏是多说一句，不会拦掉本该允许的切换
-                blockedReason = if (transferActive)
-                    stringResource(R.string.photos_scope_blocked) else null,
-                onClick = { showScopeSheet = true },
-                modifier = Modifier.padding(horizontal = Spacing.L)
-            )
-
-            val filterLabels = MediaFilter.entries.associateWith { stringResource(it.labelRes) }
-            if (hasSession) AppChipRow(
-                items = MediaFilter.entries.toList(),
-                selected = filter,
-                label = { filterLabels.getValue(it) },
-                onSelect = {
-                    filter = it
-                    viewModel.onFilterChanged()
-                },
-                modifier = Modifier.padding(horizontal = Spacing.L)
-            )
-
-            // 断线横幅只负责「已经有内容，但连接掉了」：内容不清空，改一条横幅说明。
-            // 首屏还没连上时不画它——那时该出现的是 NeedsConnection 空态，
-            // 两块一起出现就是同一件事说两遍，还平白给一块失败红
-            if (!connected && items.isNotEmpty()) {
-                StatusBanner(
-                    message = stringResource(R.string.album_disconnected_banner),
-                    actionLabel = stringResource(
-                        if (reconnecting) R.string.album_disconnected_reconnecting
-                        else R.string.album_disconnected_retry
+                // 范围行：这一屏列的是哪一批，点开可换
+                if (hasSession) BrowseScopeRow(
+                    scopeLabel = scopeLabel,
+                    note = stringResource(
+                        if (scopeEnum.decidedByCamera) R.string.transfer_scope_by_camera
+                        else R.string.photos_scope_note_card
                     ),
-                    onAction = { if (!reconnecting) viewModel.reconnect() },
-                    modifier = Modifier.padding(horizontal = Spacing.L, vertical = Spacing.XS)
+                    // 传输中就地把原因写在行下（设计 §2）。真点下去时 ViewModel 还会按
+                    // 「相机当前功能模式」再判一次，所以这里最坏是多说一句，不会拦掉本该允许的切换
+                    blockedReason = if (transferActive)
+                        stringResource(R.string.photos_scope_blocked) else null,
+                    onClick = { showScopeSheet = true },
+                    modifier = Modifier.padding(horizontal = Spacing.L)
                 )
-            }
 
-            // 一次说明：文字、语气和**能做的补救**都按类型给（设计 §8.5 状态到界面的显式映射）。
-            // 一律给一个「重试→重新加载」会把「去连接」「再存一次」这两件不同的事抹平成第三件
-            val noticeUi = notice?.let { noticeView(it, scopeLabel, viewModel, onGoConnect) }
+                val filterLabels = MediaFilter.entries.associateWith { stringResource(it.labelRes) }
+                if (hasSession) AppChipRow(
+                    items = MediaFilter.entries.toList(),
+                    selected = filter,
+                    label = { filterLabels.getValue(it) },
+                    onSelect = {
+                        filter = it
+                        viewModel.onFilterChanged()
+                    },
+                    modifier = Modifier.padding(horizontal = Spacing.L)
+                )
 
-            // 后台刷新失败但已有内容：横幅说明，列表照旧（设计 §4.3 末段）
-            if (noticeUi != null && items.isNotEmpty()) {
-                StatusBanner(
-                    message = noticeUi.text,
-                    actionLabel = noticeUi.actionLabel,
-                    onAction = noticeUi.onAction,
-                    isError = noticeUi.isError,
-                    modifier = Modifier.padding(horizontal = Spacing.L, vertical = Spacing.XS)
-                )
-            }
+                // 断线横幅只负责「已经有内容，但连接掉了」：内容不清空，改一条横幅说明。
+                // 首屏还没连上时不画它——那时该出现的是 NeedsConnection 空态，
+                // 两块一起出现就是同一件事说两遍，还平白给一块失败红
+                if (!connected && items.isNotEmpty()) {
+                    StatusBanner(
+                        message = stringResource(R.string.album_disconnected_banner),
+                        actionLabel = stringResource(
+                            if (reconnecting) R.string.album_disconnected_reconnecting
+                            else R.string.album_disconnected_retry
+                        ),
+                        onAction = { if (!reconnecting) viewModel.reconnect() },
+                        modifier = Modifier.padding(horizontal = Spacing.L, vertical = Spacing.XS)
+                    )
+                }
 
-            val grouped = remember(filtered) { groupByDate(filtered) }
+                // 一次说明：文字、语气和**能做的补救**都按类型给（设计 §8.5 状态到界面的显式映射）。
+                // 一律给一个「重试→重新加载」会把「去连接」「再存一次」这两件不同的事抹平成第三件
+                val noticeUi = notice?.let { noticeView(it, scopeLabel, viewModel, onGoConnect) }
 
-            when {
-                // 没连上又什么都没有：给一条去连接的路，而不是「暂无数据」
-                !connected && items.isEmpty() -> EmptyState(
-                    title = stringResource(R.string.photos_need_connect_title),
-                    desc = stringResource(R.string.photos_need_connect_desc),
-                    icon = Lucide.Camera,
-                    actionLabel = stringResource(R.string.photos_need_connect_action),
-                    onAction = onGoConnect,
-                    modifier = Modifier.fillMaxSize()
-                )
-                loading && items.isEmpty() -> AlbumGridSkeleton()
-                noticeUi != null && items.isEmpty() -> EmptyState(
-                    title = stringResource(R.string.album_error_title),
-                    desc = noticeUi.text,
-                    actionLabel = noticeUi.actionLabel ?: stringResource(R.string.album_retry),
-                    onAction = noticeUi.onAction ?: { viewModel.loadMedia() },
-                    modifier = Modifier.fillMaxSize()
-                )
-                // 选片集且相机还没推任何东西：这是**正常等待**，不是空目录
-                connected && items.isEmpty() && scopeEnum.decidedByCamera -> GuideCard(
-                    guide = GuideContent(
-                        id = AWAITING_GUIDE_ID,
-                        locationLabel = stringResource(R.string.home_guide_on_camera),
-                        title = stringResource(R.string.photos_awaiting_title),
-                        body = stringResource(R.string.photos_awaiting_body),
-                        actionLabel = stringResource(R.string.photos_refresh_action)
-                    ),
-                    onAction = { viewModel.loadMedia() },
-                    modifier = Modifier.padding(Spacing.L)
-                )
-                // 整卡确认过是空的：说「卡里没有照片」，不要把两种范围的解释混在一句里
-                connected && items.isEmpty() && cardEmptyConfirmed -> EmptyState(
-                    title = stringResource(R.string.photos_card_empty_title),
-                    desc = stringResource(R.string.photos_card_empty_desc),
-                    icon = Lucide.HardDrive,
-                    actionLabel = stringResource(R.string.photos_refresh_action),
-                    onAction = { viewModel.loadMedia() },
-                    modifier = Modifier.fillMaxSize()
-                )
-                connected && items.isEmpty() -> EmptyState(
-                    title = stringResource(R.string.album_empty_title),
-                    desc = stringResource(R.string.album_empty_hint),
-                    icon = Lucide.Images,
-                    actionLabel = stringResource(R.string.photos_refresh_action),
-                    onAction = { viewModel.loadMedia() },
-                    modifier = Modifier.fillMaxSize()
-                )
-                filtered.isEmpty() -> EmptyState(
-                    title = stringResource(R.string.album_filter_empty_title),
-                    desc = stringResource(R.string.album_filter_empty_hint),
-                    actionLabel = stringResource(R.string.album_filter_reset),
-                    onAction = { filter = MediaFilter.ALL },
-                    modifier = Modifier.fillMaxSize()
-                )
-                else -> LazyVerticalGrid(
-                    // 自适应列：窄屏自然掉到 2 列，不写死 3
-                    columns = GridCells.Adaptive(UiSize.PhotoTileMin),
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.XS),
-                    verticalArrangement = Arrangement.spacedBy(Spacing.XS),
-                    contentPadding = PaddingValues(
-                        start = Spacing.L,
-                        end = Spacing.L,
-                        // 最后一行要能完整停在悬浮导航上方：让位量实测下发，不写死
-                        bottom = LocalNavClearance.current
-                    ),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    grouped.forEach { entry ->
-                        when (entry) {
-                            is GridEntry.Header -> item(
-                                key = "date-${entry.label}",
-                                span = { GridItemSpan(maxLineSpan) }
-                            ) {
-                                GroupTitle(text = entry.label)
-                            }
-                            is GridEntry.Media -> {
-                                val item = entry.item
-                                item(key = item.thumbKey) {
-                                    PhotoGridCell(
-                                        item = item,
-                                        selectionMode = selectionMode,
-                                        selected = item.channelKey in selected,
-                                        savedLocally = item.thumbKey in savedKeys,
-                                        onClick = {
-                                            if (selectionMode) viewModel.toggleSelect(item)
-                                            else onOpenViewer(item.mediaId)
-                                        },
-                                        onLongClick = {
-                                            selectionMode = true
-                                            viewModel.toggleSelect(item)
-                                        },
-                                        viewModel = viewModel
-                                    )
+                // 后台刷新失败但已有内容：横幅说明，列表照旧（设计 §4.3 末段）
+                if (noticeUi != null && items.isNotEmpty()) {
+                    StatusBanner(
+                        message = noticeUi.text,
+                        actionLabel = noticeUi.actionLabel,
+                        onAction = noticeUi.onAction,
+                        isError = noticeUi.isError,
+                        modifier = Modifier.padding(horizontal = Spacing.L, vertical = Spacing.XS)
+                    )
+                }
+
+                val grouped = remember(filtered) { groupByDate(filtered) }
+
+                when {
+                    // 没连上又什么都没有：给一条去连接的路，而不是「暂无数据」
+                    !connected && items.isEmpty() -> EmptyState(
+                        title = stringResource(R.string.photos_need_connect_title),
+                        desc = stringResource(R.string.photos_need_connect_desc),
+                        icon = Lucide.Camera,
+                        actionLabel = stringResource(R.string.photos_need_connect_action),
+                        onAction = onGoConnect,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    loading && items.isEmpty() -> AlbumGridSkeleton()
+                    noticeUi != null && items.isEmpty() -> EmptyState(
+                        title = stringResource(R.string.album_error_title),
+                        desc = noticeUi.text,
+                        actionLabel = noticeUi.actionLabel ?: stringResource(R.string.album_retry),
+                        onAction = noticeUi.onAction ?: { viewModel.loadMedia() },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    // 选片集且相机还没推任何东西：这是**正常等待**，不是空目录
+                    connected && items.isEmpty() && scopeEnum.decidedByCamera -> GuideCard(
+                        guide = GuideContent(
+                            id = AWAITING_GUIDE_ID,
+                            locationLabel = stringResource(R.string.home_guide_on_camera),
+                            title = stringResource(R.string.photos_awaiting_title),
+                            body = stringResource(R.string.photos_awaiting_body),
+                            actionLabel = stringResource(R.string.photos_refresh_action)
+                        ),
+                        onAction = { viewModel.loadMedia() },
+                        modifier = Modifier.padding(Spacing.L)
+                    )
+                    // 整卡确认过是空的：说「卡里没有照片」，不要把两种范围的解释混在一句里
+                    connected && items.isEmpty() && cardEmptyConfirmed -> EmptyState(
+                        title = stringResource(R.string.photos_card_empty_title),
+                        desc = stringResource(R.string.photos_card_empty_desc),
+                        icon = Lucide.HardDrive,
+                        actionLabel = stringResource(R.string.photos_refresh_action),
+                        onAction = { viewModel.loadMedia() },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    connected && items.isEmpty() -> EmptyState(
+                        title = stringResource(R.string.album_empty_title),
+                        desc = stringResource(R.string.album_empty_hint),
+                        icon = Lucide.Images,
+                        actionLabel = stringResource(R.string.photos_refresh_action),
+                        onAction = { viewModel.loadMedia() },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    filtered.isEmpty() -> EmptyState(
+                        title = stringResource(R.string.album_filter_empty_title),
+                        desc = stringResource(R.string.album_filter_empty_hint),
+                        actionLabel = stringResource(R.string.album_filter_reset),
+                        onAction = { filter = MediaFilter.ALL },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    else -> LazyVerticalGrid(
+                        // 自适应列：窄屏自然掉到 2 列，不写死 3
+                        columns = GridCells.Adaptive(UiSize.PhotoTileMin),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.XS),
+                        verticalArrangement = Arrangement.spacedBy(Spacing.XS),
+                        contentPadding = PaddingValues(
+                            start = Spacing.L,
+                            end = Spacing.L,
+                            // 最后一行要能完整停在悬浮导航上方：让位量实测下发，不写死
+                            bottom = LocalNavClearance.current
+                        ),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        grouped.forEach { entry ->
+                            when (entry) {
+                                is GridEntry.Header -> item(
+                                    key = "date-${entry.label}",
+                                    span = { GridItemSpan(maxLineSpan) }
+                                ) {
+                                    GroupTitle(text = entry.label)
+                                }
+                                is GridEntry.Media -> {
+                                    val item = entry.item
+                                    item(key = item.thumbKey) {
+                                        PhotoGridCell(
+                                            item = item,
+                                            selectionMode = selectionMode,
+                                            selected = item.channelKey in selected,
+                                            savedLocally = item.thumbKey in savedKeys,
+                                            onClick = {
+                                                if (selectionMode) viewModel.toggleSelect(item)
+                                                else onOpenViewer(item.mediaId)
+                                            },
+                                            onLongClick = {
+                                                selectionMode = true
+                                                viewModel.toggleSelect(item)
+                                            },
+                                            viewModel = viewModel
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -374,7 +372,6 @@ fun PhotosScreen(
                 }
             }
         }
-    }
 
     if (showScopeSheet) {
         BrowseScopeSheet(

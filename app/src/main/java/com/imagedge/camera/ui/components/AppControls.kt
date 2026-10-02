@@ -18,7 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import com.imagedge.camera.ui.glass.GlassSwitch
 import com.imagedge.camera.ui.theme.Radius
 import com.imagedge.camera.ui.theme.Spacing
+import com.imagedge.camera.ui.theme.UiSize
 
 /**
  * 设计系统控件层（UI 规范 §6.1 决策表）。
@@ -114,7 +115,7 @@ fun AppChip(
     }
     Box(
         modifier = modifier
-            .defaultMinSize(minHeight = 48.dp)
+            .defaultMinSize(minHeight = UiSize.TouchMin)
             .clip(shape)
             .background(background, shape)
             .then(gesture)
@@ -156,7 +157,13 @@ fun <T> AppChipRow(
     /** 单项禁用（如 PNG 格式下"元数据策略"不可选） */
     enabled: (T) -> Boolean = { true },
 ) {
-    if (scrollable) {
+    // 「项数多就横向滚动」原来只写在文档里：非滚动分支每项 weight(1f)，第 5 项起
+    // 宽度不够就开始用 Ellipsis 截字。改成由组件自己兜底——调用方漏传 scrollable
+    // 的结果是横向滚动，而不是几个被截掉一半的标签。阈值取 4 是实测的最大值：
+    // 今天不传 scrollable 的调用点里项数最多的几个（导出尺寸、倒计时、编辑页标签页、
+    // 照片筛选、三拼比例）都正好 4 项，所以这条分支今天不改变任何一页的观感，
+    // 只是把「再加一项就会静默截字」这个坑从调用方身上挪到了组件里。
+    if (scrollable || items.size > NON_SCROLLABLE_MAX_CHIPS) {
         LazyRow(
             modifier = modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(Spacing.S),
@@ -189,6 +196,12 @@ fun <T> AppChipRow(
     }
 }
 
+/** 滑条标签列与数值列共用的宽度下限。取 min 而非定宽的理由见 [AppSlider] */
+private val SLIDER_COLUMN_MIN = 60.dp
+
+/** 非滚动模式下每项的可用宽度下限：再往下列表标签就会被 Ellipsis 截断 */
+private const val NON_SCROLLABLE_MAX_CHIPS = 4
+
 /**
  * 参数滑条（替代裸 `Slider`）：标签 + 滑条 + 数值。
  *
@@ -220,9 +233,18 @@ fun AppSlider(
             text = label,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            // 48dp 只放得下两个汉字：四字标签（「横向色差」）会折成两行，把整行撑高。
-            // 加到 60dp 是实测出来的最小值——设备上看到折行才量得出这个
-            modifier = Modifier.width(60.dp)
+            // **下限，不是定宽**。定宽会让系统大字模式下重新炸开：
+            // DesignScaleLocked 只把 LocalDensity 乘上 1~1.35，fontScale 原样保留，
+            // 而这里的文字是 sp —— 字号随 fontScale 涨，dp 容器只随 density·scale 涨，
+            // 两者不同步。fontScale = 2.0 时四字标签要 ~96dp，60dp 会把它挤折成两行。
+            //
+            // 取 min 的代价是「比 min 宽的那一行会自己变宽，滑条随之变窄」，
+            // 而同屏各行字号相同、短标签都吃 min，所以默认字体下各行仍然等宽对齐。
+            // 字号真的变大时，宁可滑条窄一点也不让文字折行/截断——
+            // 折成两行会把整行撑高，而这一列是等高的。
+            modifier = Modifier.widthIn(min = SLIDER_COLUMN_MIN),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
         Slider(
             value = value.toFloat(),
@@ -247,9 +269,11 @@ fun AppSlider(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = androidx.compose.ui.text.style.TextAlign.End,
-            // 40dp 放得下「+100」，放不下带小数的「+0.000」——后者会折成「+0.00」+「0」两行，
-            // 读起来像两个数。同样是设备走查才发现的，60dp 足够六字符
-            modifier = Modifier.width(60.dp)
+            // 与标签列同一个理由、同一套解法，见上。定宽会让数字位数之外的**字号变化**
+            // 重新把它挤爆，而这一列恰好是最容易在真机上被发现的。
+            modifier = Modifier.widthIn(min = SLIDER_COLUMN_MIN),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -288,7 +312,7 @@ fun AppSwitchRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp),
+            .heightIn(min = UiSize.TouchMin),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
@@ -329,7 +353,7 @@ fun AppSwitch(
 ) {
     Box(
         modifier = modifier
-            .defaultMinSize(minHeight = 48.dp)
+            .defaultMinSize(minHeight = UiSize.TouchMin)
             .semantics { this.contentDescription = contentDescription },
         contentAlignment = Alignment.Center
     ) {
@@ -379,7 +403,7 @@ fun AppLink(
     }
     Box(
         modifier = modifier
-            .defaultMinSize(minHeight = 48.dp)
+            .defaultMinSize(minHeight = UiSize.TouchMin)
             .clip(shape)
             .background(color.copy(alpha = containerAlpha), shape)
             .clickable(
@@ -423,7 +447,7 @@ fun AppIconButton(
     val iconColor = tint ?: MaterialTheme.colorScheme.primary
     Box(
         modifier = modifier
-            .size(48.dp)
+            .size(UiSize.TouchMin)
             .clip(CircleShape)
             // 只有半透明圆底、没有描边：黑线圆环在极简配色里过于抢眼
             .background(
