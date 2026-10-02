@@ -25,6 +25,14 @@ object PtpOperationCode {
     const val GET_OBJECT = 0x1009
     const val GET_THUMB = 0x100A
     const val GET_PARTIAL_OBJECT = 0x101B
+
+/**
+ * 触发快门。
+     *
+     * 标准 PTP 操作码，保留供非索尼的 PTP 相机使用。**索尼相机不靠它出图**——
+     * 触发快门走 [SonySdioOperationCode.SDIO_CONTROL_DEVICE] 配
+     * [SonyControlCode.S1_BUTTON] 的两段式，本工程已不再下发 0x100E。
+     */
     const val INITIATE_CAPTURE = 0x100E
     const val INITIATE_OPEN_CAPTURE = 0x100F
 }
@@ -54,5 +62,47 @@ object SonySdioOperationCode {
      * like 5MB, but likes 1MB"），照搬单一分块大小同样可能失败。
      */
     const val SDIO_GET_PARTIAL_LARGE_OBJECT = 0x9211
-    const val SDIO_GET_EXT_DEVICE_PROP = 0x9251        // SDIOGetExtDeviceProp（读单个设备属性）
+
+    /**
+     * 短视频专用的分块读取。
+     *
+     * 此前这段注释把它当作「libgphoto2 里没有、所以不可信」而与 0x9211 混为一谈。
+     * 它其实是独立且存在的操作码，只是语义比 0x9211 窄：**仅用于短视频**，
+     * 因此不能拿来当 0x9211 的通用替代——两者不是同一个能力的两个版本。
+     */
+    const val SDIO_GET_PARTIAL_LARGE_OBJECT_FOR_SHORT_VIDEOS = 0x9219
+
+    /**
+     * 读单个扩展设备属性。
+     *
+     * 状态存疑：官方 App 的操作码表里没有这一条，它们读属性一律走
+     * 0x9209（一次读全部）或 0x9205 的对称读路径。本工程此前把它当成
+     * 既成事实在用，实际未在任何机型上确认过——所以调用方需自行处理失败。
+     */
+    const val SDIO_GET_EXT_DEVICE_PROP = 0x9251
+}
+
+/**
+ * 索尼对象属性操作码（0x98xx）。
+ *
+ * 与设备属性（0xDxxx）的分工：设备属性描述相机，对象属性描述单个文件。
+ * 这是传输列表在下载前标出 RAW / 代理 / 多帧合成片的唯一途径。
+ */
+object SonyObjectPropOperationCode {
+    /** 相机支持哪些对象属性 */
+    const val GET_OBJECT_PROPS_SUPPORTED = 0x9801
+
+    /** 对象属性的类型、取值范围与当前值 */
+    const val GET_OBJECT_PROP_DESC = 0x9802
+
+    /** 读单个对象的单个属性 */
+    const val GET_OBJECT_PROP_VALUE = 0x9803
+
+    /**
+     * 一次读多个对象属性。
+     *
+     * 参数为 `(句柄1, 属性码1, 句柄2, 属性码2, …)` 的交替序列，
+     * 相机按序逐项回报，不支持的项直接略过而不报错。
+     */
+    const val GET_OBJECT_PROP_LIST = 0x9805
 }

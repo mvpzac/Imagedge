@@ -48,6 +48,12 @@
         android:name="android.hardware.camera"
         android:required="false" />
 
+    <!-- USB 遥控：与相机直连传输同一套 PTP 栈，换一条不依赖 Wi-Fi 的链路。
+         非必需——没有 USB 主机能力的设备仍走 Wi-Fi，故 required=false。 -->
+    <uses-feature
+        android:name="android.hardware.usb.host"
+        android:required="false" />
+
     <!-- 明文 HTTP 为相机局域网协议硬性例外：PTP/IP(15740) 与 LiveView(60152) 均为
          明文 HTTP，由相机固件决定、无法升级 HTTPS；仅限与相机直连的局域网，不涉及
          公网传输，不构成劫持风险面（金标安全标准 6.4 的合理例外）。

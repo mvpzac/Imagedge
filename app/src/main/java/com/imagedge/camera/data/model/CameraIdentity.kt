@@ -15,7 +15,11 @@ package com.imagedge.camera.data.model
  * 能力与传输强相关：UPnP（「发送到智能手机」）通道只做目录浏览与 JPEG 下载，
  * 结构上不暴露 PTP DeviceProp，因此参数控制在这些通道上不是「未知」而是**确定不支持**。
  */
-enum class CameraTransport { PTP_IP, UPNP }
+enum class CameraTransport { PTP_IP, USB_PTP, UPNP }
+
+/** 是否为 PTP 承载。USB-PTP 跑的是同一套 PTP 栈，只是换了物理链路。 */
+val CameraTransport.isPtp: Boolean
+    get() = this == CameraTransport.PTP_IP || this == CameraTransport.USB_PTP
 
 /**
  * 相机身份。

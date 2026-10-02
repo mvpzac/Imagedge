@@ -82,7 +82,7 @@ import com.imagedge.camera.ui.components.AppSwitchRow
  *     time   : 2026-08-28
  *     desc   : 遥控拍摄二级页（实时取景 + PTP 快门 + PTP DeviceProp 参数区）
  *     version: 2.0 —— 参数区改为能力驱动三态渲染（T0）
- *     note   : 实时取景走相机 60152 LiveView；快门经 BLE（优先）或 PTP InitiateCapture；
+ *     note   : 实时取景走相机下发的 LiveView 地址；快门经 BLE（优先）或 PTP 设备控制通道；
  *              参数（ISO/光圈/快门/照相模式/白平衡/曝光补偿）经 PTP DeviceProp（0x9205/0x9209）
  *              调节，是否可调、有哪些档位**全部以相机上报的描述符为准**，
  *              不依赖 Camera Remote API（ZV-E10 无此服务）。
@@ -542,6 +542,7 @@ internal fun IdentitySummary(identity: CameraIdentity) {
  */
 internal fun CameraTransport.label(): String = when (this) {
     CameraTransport.PTP_IP -> "PTP/IP"
+    CameraTransport.USB_PTP -> "USB (PTP)"
     CameraTransport.UPNP -> "UPnP"
 }
 

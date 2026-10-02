@@ -147,7 +147,13 @@ class PtpChannel @Inject constructor() : CameraChannel {
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
 
-    override val channelType: ChannelType = ChannelType.PTP_IP
+    /** 承载方式随连接而定：Wi-Fi 走 PTP/IP，[connectUsb] 走 USB 上的同一套 PTP 栈 */
+    override val channelType: ChannelType
+        get() = if (transportOverUsb) ChannelType.USB_PTP else ChannelType.PTP_IP
+
+    /** 本次会话是否由 USB 承载。断开后复位，避免下一条 Wi-Fi 连接被标成 USB。 */
+    @Volatile
+    private var transportOverUsb = false
     override var deviceModel: String = ""
         private set
 
@@ -158,11 +164,13 @@ class PtpChannel @Inject constructor() : CameraChannel {
     /**
      * 遥控拍摄按**当前功能模式**判定，不写死。
      *
-     * 模式 0（电脑遥控 / 选片集）下 InitiateCapture 实测可用（docs/sony-protocol-notes.md）；
-     * 模式 1（整卡 ContentsTransfer）下它**没有实测记录**
-     * （docs/camera-capability-matrix.md §5 明标未验证）。以前这里恒为 true，
-     * 等于把未验证写成「可下发」——正是 T0 验收禁止的那类硬编码。
-     * 未知不等于不支持，所以返回 UNKNOWN 而不是 UNSUPPORTED。
+     * 模式 0（电脑遥控 / 选片集）下相机接受遥控拍摄，这一点有真机记录；
+     * 快门改走设备控制通道后仍属同一模式，故保持 WRITABLE。
+     *
+     * 模式 1（整卡 ContentsTransfer）下相机没有回报过任何与遥控拍摄相关的
+     * 属性，因此仍判 UNKNOWN——**未知不等于不支持**，把它写成 WRITABLE
+     * 是拿「应该可以」冒充「相机说了可以」。相机端禁用遥控时
+     * [SonyDevicePropCode.REMOTE_CONTROL_RESTRICTION] 会另行回报。
      */
     override val captureSupport: CapabilityState
         get() = if (functionMode == 0) CapabilityState.WRITABLE else CapabilityState.UNKNOWN
@@ -203,10 +211,35 @@ class PtpChannel @Inject constructor() : CameraChannel {
     private suspend fun connectInternal(host: String, mode: Int) {
         disconnect()
         lastHost = host
-        val newClient = PtpIpClient(host)
+        transportOverUsb = false
+        connectVia(PtpIpClient(host), mode = mode, handshaked = true)
+    }
+
+    /**
+     * 在一条已建立的 USB 命令通道上开 PTP 会话。
+     *
+     * 与 [connectInternal] 的差别只有两处：USB 没有 PTP/IP 握手，且事件通道不来自
+     * 第二条连接而是中断端点——因此这里**不启动事件监听**，拍完照片的自动拉回
+     * 在 USB 通路下不可用，需要该功能时用 Wi-Fi。
+     */
+    suspend fun connectUsb(channel: com.imagedge.camera.ptp.PtpCommandChannel): Boolean =
+        withContext(Dispatchers.IO) {
+            disconnect()
+            transportOverUsb = true
+            runCatching { connectVia(PtpIpClient(), channel = channel, mode = 0, handshaked = false) }
+                .onFailure { AppLog.w(TAG, "USB PTP 会话建立失败：${it.message}") }
+                .isSuccess
+        }
+
+    private suspend fun connectVia(
+        newClient: PtpIpClient,
+        channel: com.imagedge.camera.ptp.PtpCommandChannel? = null,
+        mode: Int,
+        handshaked: Boolean
+    ) {
         // 「电脑遥控 / 发送到智能手机」模式为 Imaging Edge 私有协议：
         // 双连接握手（alpha-fairy 顺序）→ OpenSession（按功能模式）→ SDIO 初始化 → 内容传输模式
-        newClient.connect()
+        if (handshaked) newClient.connect() else newClient.connectVia(checkNotNull(channel))
         try {
             if (mode == 1) {
                 newClient.sonyOpenSession(1)  // 0x9210 [1,1]：ContentsTransfer 整卡
@@ -227,7 +260,7 @@ class PtpChannel @Inject constructor() : CameraChannel {
         client = newClient
         _connectionState.value = ChannelConnectionState.CONNECTED
         startKeepAlive(newClient)
-        startEventMonitor(newClient)
+        if (handshaked) startEventMonitor(newClient)
     }
 
     override suspend fun disconnect() = withContext(Dispatchers.IO) {
@@ -241,6 +274,7 @@ class PtpChannel @Inject constructor() : CameraChannel {
         // 身份随会话失效：留着旧型号/固件会让上层把断开后的能力快照当成当前相机的事实
         deviceModel = ""
         deviceFirmware = ""
+        transportOverUsb = false
         _connectionState.value = ChannelConnectionState.DISCONNECTED
         if (closingClient != null) {
             if (ptpMutex.tryLock()) {
@@ -619,10 +653,33 @@ class PtpChannel @Inject constructor() : CameraChannel {
         }
     }
 
+    /**
+     * 快门按下 → 松开，两段式。
+     *
+     * 索尼相机不响应「一按到底」的快门动作：必须先按下半按让相机对焦、
+     * 再松开才释放快门出图。两个值是两条独立事务，发同一个值只会得到
+     * 「只对焦」或「不重新对焦直接释放」。
+     *
+     * 两条事务放在**同一次** [ptpCall] 里，否则会在两次加锁之间被保活或
+     * 相册轮询插进来，而相机那边看到的是一次按下后隔了很久才松开。
+     */
     override suspend fun takePicture(): Long = withContext(Dispatchers.IO) {
         val c = client ?: throw IllegalStateException("未连接相机")
-        ptpCall { c.initiateCapture() }
+        ptpCall {
+            if (c.pressShutter()) {
+                delay(HALF_PRESS_HOLD_MS)
+                c.releaseShutter()
+            }
+            // 返回 0：控制通道按下式快门不回对象句柄，新照片由事件流告知
+            0L
+        }
     }
+
+    /**
+     * 半按时长。短于相机的对焦判定窗口会导致还没来得及对焦就松开，
+     * 长到能让对焦真正完成又会拖慢连拍。
+     */
+    private val HALF_PRESS_HOLD_MS = 120L
 
     // ── 设备属性（PTP DeviceProp）读写 ──────────────────────────────
 
@@ -646,6 +703,22 @@ class PtpChannel @Inject constructor() : CameraChannel {
         val c = client ?: return@withContext null
         orDefault(null, onError = { AppLog.w(TAG, "读取 0x9209 设备属性失败：${it.message}") }) {
             ptpCall { c.getAllDeviceProperties() }
+        }
+    }
+
+    /**
+     * 相机下发的实时取景地址。
+     *
+     * 端口与路径由相机自己给出，因此这一条比「按固定端口拼 URL」更准：
+     * 固件换端口或换路径时不必改代码。
+     *
+     * @return URL；相机未连接、未开放取景或不上报该属性时为 null，
+     *         调用方应回退到自建地址，而不是判定取景不可用
+     */
+    suspend fun readLiveViewUrl(): String? = withContext(Dispatchers.IO) {
+        val c = client ?: return@withContext null
+        orDefault(null, onError = { AppLog.w(TAG, "读取 LiveView 地址失败：${it.message}") }) {
+            ptpCall { c.readLiveViewUrl() }
         }
     }
 

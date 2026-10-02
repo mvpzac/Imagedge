@@ -310,6 +310,7 @@ private fun shutterCapability(capabilities: CameraCapabilities): Int {
 
 private fun channelLabel(transport: CameraTransport?): String = when (transport) {
     CameraTransport.PTP_IP -> "PTP/IP"
+    CameraTransport.USB_PTP -> "USB (PTP)"
     CameraTransport.UPNP -> "UPnP"
     null -> "—"
 }

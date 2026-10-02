@@ -66,8 +66,10 @@ class ConnectionViewModel @Inject constructor(
      * 扫码配网的观测结果。
      *
      * [joined] 是**粘住**的：QrScanViewModel 在步骤离开组合时会 release()，
-     * 而 release 在成功态下刻意保留存活的配网请求（释放即断开热点，见
-     * docs/sony-protocol-notes.md §3），同时把 UI 状态清回 Idle。
+     * 而 release 在成功态下刻意保留存活的配网请求——Android 的
+     * `requestNetwork` 连接只在请求对象存活期间成立，`unregisterNetworkCallback`
+     * 会把已经建立的链路一并拆掉（日志特征 `App released connected request`），
+     * 同时把 UI 状态清回 Idle。
      * 如果向导跟着瞬时状态走，「热点已连上」会在下一步显示成「还没开始」。
      */
     private val _hotspot = MutableStateFlow(HotspotObservation())

@@ -57,7 +57,7 @@ enum class CameraCapability {
     WHITE_BALANCE,
     EXPOSURE_BIAS,
 
-    /** PTP 遥控拍摄（InitiateCapture）。BLE 快门是另一条独立通路，不由本项描述 */
+    /** PTP 遥控拍摄（设备控制通道的两段式快门）。BLE 快门是另一条独立通路，不由本项描述 */
     CAPTURE
 }
 
@@ -349,7 +349,7 @@ data class CameraCapabilities(
                 )
             }
 
-            if (identity.transport != CameraTransport.PTP_IP) {
+            if (identity.transport?.isPtp != true) {
                 // 非 PTP 通道结构性不暴露 DeviceProp：这是确定事实，不是探测失败，
                 // 因此可以明确标记为不支持（stale=false）
                 val note = "传输通道 ${identity.transport ?: "无"} 不暴露 PTP DeviceProp"

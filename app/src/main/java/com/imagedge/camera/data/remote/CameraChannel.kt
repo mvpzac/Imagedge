@@ -19,11 +19,12 @@ import java.io.OutputStream
  */
 
 /** 通道类型 */
-enum class ChannelType { PTP_IP, UPNP }
+enum class ChannelType { PTP_IP, USB_PTP, UPNP }
 
 /** 通道类型 → 能力模型里的传输方式 */
 fun ChannelType.toTransport(): CameraTransport = when (this) {
     ChannelType.PTP_IP -> CameraTransport.PTP_IP
+    ChannelType.USB_PTP -> CameraTransport.USB_PTP
     ChannelType.UPNP -> CameraTransport.UPNP
 }
 

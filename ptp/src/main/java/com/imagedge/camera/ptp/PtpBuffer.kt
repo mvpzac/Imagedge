@@ -48,6 +48,19 @@ class PtpBuffer private constructor() {
             readStream = ByteArrayInputStream(data)
             writeStream = null
         }
+
+        /**
+         * 读模式构造，只看 [data] 的 [offset]..[offset+length) 一段。
+         *
+         * 用于「同一条字节流里先剥掉容器头再按内部结构解析」——直接对整块
+         * 建 reader 会让读取位置从容器头开始算，解析出的字段整体错位。
+         */
+        fun reader(data: ByteArray, offset: Int, length: Int): PtpBuffer {
+            require(offset >= 0 && length >= 0 && offset + length <= data.size) {
+                "切片越界：offset=$offset length=$length size=${data.size}"
+            }
+            return reader(data.copyOfRange(offset, offset + length))
+        }
     }
 
     /**

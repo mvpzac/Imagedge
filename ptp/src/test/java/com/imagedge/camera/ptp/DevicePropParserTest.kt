@@ -141,14 +141,14 @@ class DevicePropParserTest {
     @Test
     fun `read-only descriptor is not settable`() {
         val data = bulkHeader() + descriptor(
-            code = SonyDevicePropCode.SHUTTER_SPEED_HIGH,
+            code = SonyDevicePropCode.SHUTTER_SPEED_CURRENT,
             dataType = typeUInt32,
             getSet = 0x00,
             enabled = true,
             value = 1L
         )
 
-        val prop = DevicePropParser.findProperty(data, SonyDevicePropCode.SHUTTER_SPEED_HIGH)
+        val prop = DevicePropParser.findProperty(data, SonyDevicePropCode.SHUTTER_SPEED_CURRENT)
 
         requireNotNull(prop)
         assertFalse(prop.settable)
@@ -221,6 +221,49 @@ class DevicePropParserTest {
         val prop = DevicePropParser.findProperty(data, SonyDevicePropCode.ISO)
         requireNotNull(prop)
         assertEquals(400L, prop.currentValue)
+    }
+
+    /** 字符串型描述符：Code(2) + DataType(2=0xFFFF) + GetSet(1) + IsEnabled(1) + Reserved(W) + CurrentValue */
+    private fun stringDescriptor(value: String, reservedWidth: Int): ByteArray {
+        val out = ByteArrayOutputStream()
+        out.writeLe(SonyDevicePropCode.LIVE_VIEW_URL, 2)
+        out.writeLe(DevicePropParser.STRING_DATA_TYPE, 2)
+        out.write(0x01)
+        out.write(1)
+        out.write(ByteArray(reservedWidth))
+        val chars = value.toByteArray(Charsets.UTF_16LE)
+        out.write(chars.size / 2 + 1)          // 字符数含结尾 null
+        out.write(chars)
+        out.write(0); out.write(0)
+        return out.toByteArray()
+    }
+
+    @Test
+    fun `string descriptor is read back for either reserved width`() {
+        val url = "http://192.168.122.1:60152/liveviewstream"
+        for (reservedWidth in intArrayOf(1, 2)) {
+            assertEquals(
+                url,
+                DevicePropParser.findString(bulkHeader() + stringDescriptor(url, reservedWidth), SonyDevicePropCode.LIVE_VIEW_URL)
+            )
+        }
+    }
+
+    @Test
+    fun `an inconsistent string layout yields null rather than a wrong url`() {
+        // 声明长度越界：宁可说「没读到」，也不要给出一条能连但连不上相机的地址
+        val broken = bulkHeader() + stringDescriptor("http://x/y", 1).let { bytes ->
+            bytes.copyOf(bytes.size - 6)
+        }
+        assertNull(DevicePropParser.findString(broken, SonyDevicePropCode.LIVE_VIEW_URL))
+    }
+
+    @Test
+    fun `findString ignores properties that are not strings`() {
+        val numeric = bulkHeader() + descriptor(
+            SonyDevicePropCode.ISO, typeUInt32, 0x01, true, 200L
+        )
+        assertNull(DevicePropParser.findString(numeric, SonyDevicePropCode.ISO))
     }
 
     @Test

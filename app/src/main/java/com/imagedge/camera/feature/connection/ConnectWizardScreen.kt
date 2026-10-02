@@ -241,7 +241,7 @@ private fun PrepareCameraStage(
     )
 
     if (hotspotAlreadyJoined) {
-        // 从第 2/3 段退回来时热点还活着（释放即断开，见 sony-protocol-notes §3）。
+        // 从第 2/3 段退回来时热点还活着（`requestNetwork` 的连接随请求对象释放而断开）。
         // 这时还催用户去扫码，是让他把已经拿到的东西再丢一次
         StatusBanner(
             message = stringResource(R.string.wizard_hotspot_still_on),

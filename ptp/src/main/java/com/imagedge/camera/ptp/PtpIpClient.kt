@@ -70,7 +70,8 @@ fun interface DataLoadListener {
  * ```
  */
 class PtpIpClient(
-    private val host: String,
+    /** 仅 [connect] 使用；USB 通路走 [connectVia]，不经过这里 */
+    private val host: String = "",
     private val port: Int = PTP_IP_PORT,
     private val friendlyName: String = "Imagedge",
     private val connectTimeoutMs: Int = 5000
@@ -88,8 +89,12 @@ class PtpIpClient(
 
     private var commandSocket: Socket? = null
     private var eventSocket: Socket? = null
-    private var commandIn: BufferedInputStream? = null
-    private var commandOut: BufferedOutputStream? = null
+
+    /**
+     * 命令通道。默认是 TCP 承载；传入 USB 通道时跳过 PTP/IP 握手——
+     * USB 上没有 InitCommandRequest 这一步，会话直接开。
+     */
+    private var commandChannel: PtpCommandChannel? = null
     private var eventIn: CountingInputStream? = null
     /** 事件流已读走的字节数：用来区分「一个包都没开始读」和「读到一半卡住」 */
     private var eventBytesRead: Long = 0L
@@ -100,7 +105,7 @@ class PtpIpClient(
     private var opened = false
 
     val isConnected: Boolean
-        get() = commandSocket?.isConnected == true
+        get() = commandChannel?.isOpen == true
 
     // ── 连接与初始化 ─────────────────────────────────────────────────
 
@@ -144,8 +149,12 @@ class PtpIpClient(
         cmd.tcpNoDelay = true
         cmd.soTimeout = HANDSHAKE_TIMEOUT_MS
         commandSocket = cmd
-        commandIn = BufferedInputStream(cmd.getInputStream())
-        commandOut = BufferedOutputStream(cmd.getOutputStream())
+        commandChannel = SocketPtpCommandChannel(
+            input = BufferedInputStream(cmd.getInputStream()),
+            output = BufferedOutputStream(cmd.getOutputStream()),
+            isAlive = { cmd.isConnected && !cmd.isClosed },
+            onClose = { runCatching { cmd.close() } }
+        )
         AppLog.d(TAG, "命令 socket 已建立")
 
         // ② 事件 socket（握手前建立——alpha-fairy 顺序）
@@ -215,35 +224,54 @@ class PtpIpClient(
         runCatching { cmd.soTimeout = TRANSACTION_TIMEOUT_MS }
     }
 
+    /**
+ * 在一条已建立的命令通道上启动会话，跳过 PTP/IP 握手。
+     *
+     * USB 承载走这里：USB 上没有 `InitCommandRequest`/`InitEventRequest` 那一套
+     * （那是 ISO 15740 为 TCP 定义的会话建立步骤），插上即用，会话由 [openSession]
+     * 直接开。因此**不能**复用 [connect]——那会把握手包发到 USB 端点上。
+     *
+     * 事件通道在 USB 上来自中断端点而非第二条连接，[eventPollMode]/[readEventOutcome]
+     * 在这种链路下不可用；需要事件（拍完照片自动拉回）时用 Wi-Fi 通路。
+     *
+     * @param channel 调用方负责建好并已打开（例如 USB 端点通道）
+     */
+    @Synchronized
+    fun connectVia(channel: PtpCommandChannel) {
+        forceClose()
+        commandChannel = channel
+        AppLog.i(TAG, "已在既有命令通道上建立 PTP 会话（无握手）")
+    }
+
     /** 断开连接 */
     @Synchronized
     fun disconnect() {
         runCatching { if (opened) closeSession() }
+        runCatching { commandChannel?.close() }
         runCatching { commandSocket?.close() }
         runCatching { eventSocket?.close() }
+        commandChannel = null
         commandSocket = null
         eventSocket = null
-        commandIn = null
-        commandOut = null
         eventIn = null
         eventOut = null
         opened = false
     }
 
     /**
-     * 强制关闭底层 socket（不握手、不发 CloseSession）。
-     * 事务超时自愈用：让阻塞在 read 上的线程立刻收到 SocketException 而解除，
+     * 强制关闭底层连接（不握手、不发 CloseSession）。
+     * 事务超时自愈用：让阻塞在 read 上的线程立刻收到异常而解除，
      * 避免相机在内容库重建（如第二次发送）期间不响应导致整个通道永久挂死。
      */
     @Synchronized
     fun forceClose() {
         AppLog.w(TAG, "强制关闭 PTP 底层连接（事务超时自愈）")
+        runCatching { commandChannel?.close() }
         runCatching { commandSocket?.close() }
         runCatching { eventSocket?.close() }
+        commandChannel = null
         commandSocket = null
         eventSocket = null
-        commandIn = null
-        commandOut = null
         eventIn = null
         eventOut = null
         opened = false
@@ -384,20 +412,6 @@ class PtpIpClient(
         }
     }
 
-    /**
-     * 触发快门（PTP 标准 InitiateCapture 0x100E）。
-     * 「电脑遥控」模式下可用；新照片是否进入待传输内容集由相机决定，
-     * 通常需在相机端选片后经相册下载。
-     * @return 拍摄结果对象句柄（部分固件返回 0xFFFFFFFF 表示无立即句柄）
-     */
-    fun initiateCapture(): Long {
-        val response = executeTransaction(PtpOperationCode.INITIATE_CAPTURE, longArrayOf(0))
-        checkResponse(response)
-        val handle = response.parameters.firstOrNull() ?: 0xFFFFFFFFL
-        AppLog.i(TAG, "快门已触发（InitiateCapture），对象句柄=0x" + handle.toString(16))
-        return handle
-    }
-
     // ── 设备属性（DeviceProp）读写 ─────────────────────────────────────
 
     /**
@@ -406,10 +420,10 @@ class PtpIpClient(
      * 候选操作码（按顺序尝试，命中即返回）：
      * 1. `0x9205 SDIO_SetExtDevicePropValue`，params=[propCode]（消费级相机如 ZV-E10；
      *    与 0x9209 同一族，0x9209 能用即说明这族支持）
-     * 2. `0x9207 SDIO_ControlDevice`，params=[propCode, 0]（索尼电影机如 FX30/FX3；
-     *    sony-alpha-python set_device_property_sync 实测路径）
+     * 2. `0x9207 SDIO_ControlDevice`，params=[propCode]（索尼电影机如 FX30/FX3）
      *
-     * DataPhaseInfo 仍用 NO_DATA(0x1)——与工程其余事务一致（ZV-E10 依据操作码判断方向）。
+     * 两条都带数据阶段，故声明为 `DATA_OUT`。此前声明成 `NO_DATA` 却仍发出
+     * StartData/Data/EndData——声明与实际不一致，这条回退路径的可信度一直存疑。
      *
      * @param propCode  设备属性码
      * @param value     值（小端写入 valueSize 字节）
@@ -433,11 +447,13 @@ class PtpIpClient(
             AppLog.i(TAG, "设属性 0x${propCode.toString(16)} 成功（0x9205）")
             return true
         }
-        // 候选 2：电影机回退路径
-        AppLog.w(TAG, "0x9205 未成功，回退 0x9207 SDIO_ControlDevice params=[propCode, 0]")
+        // 候选 2：电影机回退路径。
+        // 参数与官方一致，只带属性码一个——此前这里多挂了一个 0，
+        // 且把数据阶段声明成「无数据」却又发了 StartData/Data/EndData。
+        AppLog.w(TAG, "0x9205 未成功，回退 0x9207 SDIO_ControlDevice params=[propCode]")
         if (trySetDeviceProperty(
                 SonySdioOperationCode.SDIO_CONTROL_DEVICE,
-                longArrayOf(propCode.toLong(), 0L),
+                longArrayOf(propCode.toLong()),
                 payload
             )
         ) {
@@ -452,13 +468,21 @@ class PtpIpClient(
      * 单次设属性尝试。发送 OperationRequest + StartData + Data + EndData，
      * 读 OperationResponse 判定 OK / 错误码。
      *
+     * [dataPhase] 必须与实际发出的数据阶段一致：声明「无数据」却跟着发
+     * StartData/Data/EndData，相机一侧无法自洽，这条事务此前就是这样写错的。
+     *
      * 注意：用显式 return（而非 return try{while{...}}）规避 Kotlin
      * 把 try 块推断为 Unit 的问题——与 executeTransaction 同款读取模式。
      */
-    private fun trySetDeviceProperty(opCode: Int, params: LongArray, payload: ByteArray): Boolean {
+    private fun trySetDeviceProperty(
+        opCode: Int,
+        params: LongArray,
+        payload: ByteArray,
+        dataPhase: Int = DataPhaseInfo.DATA_OUT
+    ): Boolean {
         val tid = nextTransactionId()
         try {
-            sendPacket(OperationRequest(DataPhaseInfo.NO_DATA, opCode, tid, params))
+            sendPacket(OperationRequest(dataPhase, opCode, tid, params))
             sendPacket(StartData(tid, payload.size.toLong()))
             sendPacket(DataPacket(tid, payload))
             sendPacket(EndData(tid, ByteArray(0)))
@@ -476,6 +500,80 @@ class PtpIpClient(
             AppLog.w(TAG, "op=0x${opCode.toString(16)} 异常：${e::class.simpleName}: ${e.message}")
             return false
         }
+    }
+
+    // ── 设备控制（按键类动作）─────────────────────────────────────────
+
+    /**
+     * 下发一条设备控制指令（[SonySdioOperationCode.SDIO_CONTROL_DEVICE]）。
+     *
+     * 与设属性的区别：这条走的是「按键」通道——参数只有一个控制码，
+     * 值放在数据阶段里按该控制码约定的宽度排列。相机的快门、对焦驱动、
+     * 触摸 AF 都走这里，属性事务按不动快门。
+     *
+     * @param controlCode 见 [SonyControlCode]
+     * @param value       控制值，见 [SonyControlValue]；宽度由控制码决定
+     * @return true 表示相机回了 OK；false 表示被拒或抛异常，调用方需自行决定退路
+     */
+    fun sendControl(controlCode: Int, value: Int): Boolean {
+        val width = SonyControlCode.payloadBytes(controlCode)
+        val payload = PtpBuffer.writer().apply {
+            when (width) {
+                1 -> writeUInt8(value)
+                2 -> writeUInt16(value)
+                else -> writeUInt32(value.toLong())
+            }
+        }.toByteArray()
+
+        return trySetDeviceProperty(
+            SonySdioOperationCode.SDIO_CONTROL_DEVICE,
+            longArrayOf(controlCode.toLong()),
+            payload
+        )
+    }
+
+    /**
+     * 按下快门（半按）：相机进入对焦，不出图。
+     */
+    fun pressShutter(): Boolean = sendControl(SonyControlCode.S1_BUTTON, SonyControlValue.DOWN)
+
+    /**
+     * 松开快门：相机在已对焦的基础上释放快门出图。
+     *
+     * 与 [pressShutter] 是两次独立事务，相机按值区分这两个动作——
+     * 只发其中一次分别得到「只对焦」和「不重新对焦直接释放」。
+     */
+    fun releaseShutter(): Boolean = sendControl(SonyControlCode.S1_BUTTON, SonyControlValue.RELEASE)
+
+    /**
+     * 手动对焦驱动一步。向 [direction] 为 0 时停止。
+     *
+     * 单步驱动而非连续：连续驱动需要在相机侧保持一个未完成的状态，
+     * 而每一步独立事务的实现不需要维护那种状态，中断时也不会留下卡住的对焦。
+     */
+    fun driveFocus(direction: Int): Boolean = sendControl(SonyControlCode.NEAR_FAR, direction)
+
+    fun focusNear(): Boolean = driveFocus(SonyControlValue.NEAR)
+
+    fun focusFar(): Boolean = driveFocus(SonyControlValue.FAR)
+
+    fun stopFocusDrive(): Boolean = driveFocus(SonyControlValue.STOP)
+
+    /**
+     * 在实时取景画面上指定对焦区域。
+     *
+     * 坐标按取景画面的千分比给出（0..1000），调用方不必知道实际像素分辨率。
+     *
+     * 该控制码的负载宽度是 4 字节，两坐标各占一个小端 UINT16；
+     * **x 在低 16 位、y 在高 16 位这个排布是推断的**——依据是相机回报对焦区域
+     * 的那个设备属性把坐标描述为 (x,y)，顺序与之一致。两坐标数量纲相同但互不
+     * 可交换，发反了的表现是「对焦点落到了关于画面中心对称的位置」，
+     * 而不是报错，所以真机验证时优先看这一点。
+     */
+    fun setFocusArea(xMilli: Int, yMilli: Int): Boolean {
+        val cx = xMilli.coerceIn(0, 1000)
+        val cy = yMilli.coerceIn(0, 1000)
+        return sendControl(SonyControlCode.AF_AREA_POSITION, (cy shl 16) or cx)
     }
 
     /** 读取命令连接上的 OperationResponse（跳过非响应包；与 executeTransaction 同模式） */
@@ -514,6 +612,179 @@ class PtpIpClient(
     fun getAllDeviceProperties(): ByteArray {
         AppLog.i(TAG, "读取全部设备属性（0x9209 SDIO_GetAllExtDevicePropInfo）")
         return executeDataTransaction(SonySdioOperationCode.SDIO_GET_ALL_EXT_DEVICE_PROP_INFO)
+    }
+
+    // ── 对象属性（文件级元数据）──────────────────────────────────────
+
+    /** 一个「支持哪些对象属性」响应里允许的最大条目数。真实相机远达不到。 */
+    private val MAX_OBJECT_PROP_CODES = 4096
+
+    /**
+     * 相机支持哪些对象属性。
+     *
+     * 整族不支持时相机回 `OPERATION_NOT_SUPPORTED` 而不是空列表，
+     * 该情况映射为 null——调用方必须区分「不支持」与「支持但当前无内容」。
+     */
+    fun getSupportedObjectProps(): List<Int>? = try {
+        val data = executeDataTransaction(SonyObjectPropOperationCode.GET_OBJECT_PROPS_SUPPORTED)
+        val buffer = PtpBuffer.reader(data)
+        val count = buffer.readUInt32().toInt()
+        if (count < 0 || count > MAX_OBJECT_PROP_CODES) {
+            throw PtpMalformedPacketException("支持的对象属性数量非法：$count")
+        }
+        List(count) { buffer.readUInt16() }
+    } catch (e: PtpResponseException) {
+        if (e.responseCode == PtpResponseCode.OPERATION_NOT_SUPPORTED) null else throw e
+    }
+
+    /**
+     * 一次读多个「文件 × 属性」。
+     *
+     * @param queries `(句柄, 属性码)` 的配对列表
+     * @return 相机实际回报的部分。相机会静默略过不支持或读不到的组合，
+     *         所以**结果里缺的项是常态而非错误**——调用方要按「没问出来」处理，
+     *         不能把缺失断言成「该文件没有这个属性」。
+     */
+    fun getObjectProps(queries: List<Pair<Long, Int>>): ObjectPropMap {
+        if (queries.isEmpty()) return ObjectPropMap.parse(ByteArray(0))
+        require(queries.size <= MAX_OBJECT_PROP_CODES) {
+            "对象属性查询 ${queries.size} 项超出单次上限 $MAX_OBJECT_PROP_CODES"
+        }
+
+        val parameters = LongArray(queries.size * 2)
+        queries.forEachIndexed { index, (handle, propCode) ->
+            parameters[index * 2] = handle
+            parameters[index * 2 + 1] = propCode.toLong()
+        }
+
+        val data = executeDataTransaction(
+            SonyObjectPropOperationCode.GET_OBJECT_PROP_LIST,
+            parameters
+        )
+        return ObjectPropMap.parse(data)
+    }
+
+    /** 读单个文件的单个属性；相机没回报时为 null。 */
+    fun getObjectProp(objectHandle: Long, propCode: Int): ObjectPropValue? =
+        getObjectProps(listOf(objectHandle to propCode))
+            .propertiesOf(objectHandle)[propCode]?.value
+
+    /**
+     * 批量取文件元数据，按句索引返回。
+     *
+     * 这是传输列表在拿到字节之前认出 RAW / 代理 / 多帧合成片的入口：
+     * [MediaMetadata.isComposite] 依赖的合成帧数只有相机端知道。
+     */
+    fun getMediaMetadata(handles: List<Long>): Map<Long, MediaMetadata> {
+        val wanted = listOf(
+            SonyObjectPropCode.WIDTH,
+            SonyObjectPropCode.HEIGHT,
+            SonyObjectPropCode.OBJECT_SIZE,
+            SonyObjectPropCode.IS_MOVIE_PROXY,
+            SonyObjectPropCode.PRIMARY_IMAGE_COUNT,
+            SonyObjectPropCode.MPTYPE_CODE,
+            SonyObjectPropCode.VIDEO_BIT_DEPTH,
+            SonyObjectPropCode.COLOR_FORMAT
+        )
+        if (handles.isEmpty()) return emptyMap()
+
+        val queries = handles.flatMap { handle -> wanted.map { handle to it } }
+        val props = getObjectProps(queries)
+        return handles.associateWith { handle ->
+            MediaMetadata.from(props.propertiesOf(handle))
+        }
+    }
+
+    // ── 实时取景地址 ────────────────────────────────────────────────
+
+    /**
+     * 相机下发的实时取景地址。
+     *
+     * 端口与路径由相机自己给出；此前端口是写死的，只因为没有读它的地方。
+     *
+     * @return URL 字符串；相机未开放取景（未就绪、被占用）时为 null
+     */
+    fun readLiveViewUrl(): String? =
+        DevicePropParser.findString(getAllDeviceProperties(), SonyDevicePropCode.LIVE_VIEW_URL)
+
+    // ── 色彩档案 ────────────────────────────────────────────────────
+
+    /**
+     * 读相机当前的 Picture Profile 与创意风格设置。
+     *
+     * 一次 `0x9209` 就能全部拿到，因此这是所有色彩读取里最便宜的一条路径。
+     */
+    fun readColorProfile(): CameraColorProfile {
+        val codes = listOf(
+            SonyDevicePropCode.PICTURE_PROFILE,
+            SonyDevicePropCode.CREATIVE_STYLE,
+            SonyDevicePropCode.CREATIVE_LOOK_CONTRAST,
+            SonyDevicePropCode.CREATIVE_LOOK_HIGHLIGHTS,
+            SonyDevicePropCode.CREATIVE_LOOK_SHADOWS,
+            SonyDevicePropCode.CREATIVE_LOOK_FADE,
+            SonyDevicePropCode.CREATIVE_LOOK_SATURATION,
+            SonyDevicePropCode.CREATIVE_LOOK_SHARPNESS,
+            SonyDevicePropCode.CREATIVE_LOOK_CLARITY
+        )
+        return CameraColorProfile.from(DevicePropParser.parse(getAllDeviceProperties(), codes))
+    }
+
+    // ── 像素位移多帧拍摄 ──────────────────────────────────────────────
+
+    /**
+     * 配置像素位移多帧拍摄。
+     *
+     * 相机端自己完成多帧位移与合成，手机只负责下发参数并读进度。
+     *
+     * @param frameCount 合成的帧数
+     * @param intervalMs 帧间隔（毫秒）
+     */
+    fun configurePixelShiftShooting(frameCount: Int, intervalMs: Int): Boolean {
+        val count = frameCount.coerceIn(2, 999)
+        val interval = intervalMs.coerceIn(0, 60_000)
+        val ok = setDeviceProperty(SonyDevicePropCode.PIXEL_SHIFT_SHOOTING_NUMBER, count.toLong(), 2)
+        if (!ok) return false
+        return setDeviceProperty(SonyDevicePropCode.PIXEL_SHIFT_SHOOTING_INTERVAL, interval.toLong(), 2)
+    }
+
+    /** 像素位移拍摄当前进度：已完成帧数。相机合成中时递增。 */
+    fun pixelShiftProgress(): Int? {
+        val props = DevicePropParser.parse(
+            getAllDeviceProperties(),
+            listOf(
+                SonyDevicePropCode.PIXEL_SHIFT_SHOOTING_STATUS,
+                SonyDevicePropCode.PIXEL_SHIFT_SHOOTING_PROGRESS
+            )
+        )
+        return props[SonyDevicePropCode.PIXEL_SHIFT_SHOOTING_PROGRESS]?.currentValue?.toInt()
+    }
+
+    // ── 焦点包围 ────────────────────────────────────────────────────
+
+    /**
+     * 配置焦点包围：对焦行程与张数。
+     *
+     * 相机沿近到远逐张对焦拍摄后自行合成；手机只设参数、按快门、等结果。
+     *
+     * @param shotCount   张数
+     * @param focusRange  对焦行程（相机定义的行程单位，不是毫米）
+     */
+    fun configureFocusBracketing(shotCount: Int, focusRange: Int): Boolean {
+        val shots = shotCount.coerceIn(2, 99)
+        val range = focusRange.coerceAtLeast(0)
+        val ok = setDeviceProperty(SonyDevicePropCode.FOCUS_BRACKET_SHOT_NUM, shots.toLong(), 2)
+        if (!ok) return false
+        return setDeviceProperty(SonyDevicePropCode.FOCUS_BRACKET_FOCUS_RANGE, range.toLong(), 2)
+    }
+
+    /** 焦点包围是否被相机接受：行程为 0 或张数为 0 时表示未启用。 */
+    fun focusBracketingReady(): Boolean {
+        val props = DevicePropParser.parse(
+            getAllDeviceProperties(),
+            listOf(SonyDevicePropCode.FOCUS_BRACKET_SHOT_NUM, SonyDevicePropCode.FOCUS_BRACKET_FOCUS_RANGE)
+        )
+        val shots = props[SonyDevicePropCode.FOCUS_BRACKET_SHOT_NUM]?.currentValue ?: return false
+        return shots >= 2
     }
 
     /** 获取设备信息（相机型号等） */
@@ -649,9 +920,8 @@ class PtpIpClient(
 
     /** 发送包（命令连接） */
     private fun sendPacket(packet: PtpIpPacket) {
-        val out = commandOut ?: throw PtpIoException("未连接")
-        out.write(packet.serialize())
-        out.flush()
+        val channel = commandChannel ?: throw PtpIoException("未连接")
+        channel.write(packet)
     }
 
     /** 发送包（事件连接） */
@@ -663,8 +933,8 @@ class PtpIpClient(
 
     /** 读取一个包（命令连接） */
     private fun readPacket(): PtpIpPacket {
-        val input = commandIn ?: throw PtpIoException("未连接")
-        return PtpIpPacket.read(input)
+        val channel = commandChannel ?: throw PtpIoException("未连接")
+        return channel.read()
     }
 
     /** 读取一个包（事件连接）——InitEventAck 及后续相机事件都走这条流 */

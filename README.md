@@ -76,7 +76,7 @@ Gradle multi-module, feature-first packaging (PBF):
 | Module | Responsibility |
 |--------|----------------|
 | `:core` | Pure-Kotlin basics (stream utils, logging) — no Android deps |
-| `:ptp` | PTP/IP protocol stack (ISO 15740), pure Kotlin, incl. Sony SDIO extensions |
+| `:ptp` | PTP stack (ISO 15740 + Sony extensions), pure Kotlin; runs over TCP (PTP/IP) or USB bulk endpoints behind one transaction engine |
 | `:upnp` | UPnP/SOAP stack (camera "Send to Smartphone" service) |
 | `:liveview` | LiveView stream (raw 60152 socket), pure Kotlin — Sony Camera Web API not used (ZV-E10 exposes no such service) |
 | `:raw` | RAW decoding: embedded-JPEG extraction (TIFF container parse); libraw NDK planned |
@@ -89,7 +89,6 @@ Gradle multi-module, feature-first packaging (PBF):
 Deep dives:
 
 - [Architecture & data flow](docs/architecture.md)
-- [Sony wireless protocol notes](docs/sony-protocol-notes.md) — BLE shutter codes, QR format, LiveView framing, content-transfer pitfalls (hard-won, field-verified)
 
 ## Requirements
 

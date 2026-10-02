@@ -30,7 +30,7 @@ class CameraCapabilitiesTest {
     private val typeUInt16 = 0x0004
     private val typeUInt32 = 0x0006
 
-    /** 真机基线：ZV-E10 + 固件 2.03 + PTP/IP + 选片集模式（docs/sony-protocol-notes.md） */
+    /** 真机基线：ZV-E10 + 固件 2.03 + PTP/IP + 选片集模式 */
     private val ptpIdentity = CameraIdentity(
         model = "ZV-E10",
         firmware = "2.03",

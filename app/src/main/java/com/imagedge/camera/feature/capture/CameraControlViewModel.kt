@@ -307,7 +307,7 @@ class CameraControlViewModel @Inject constructor(
 
     /**
      * 快门：BLE 已连接时走蓝牙（低延迟可靠，拍摄成功率高）；
-     * 否则降级 PTP InitiateCapture（ZV-E10 上固件存在已知怪癖，可能超时）。
+     * 否则降级 PTP 设备控制通道的两段式快门（0x9207 + 快门控制码）。
      */
     /**
      * 快门操作提示该不该说（设计 §4.6「首次或操作模式变化时」+ §5「记录按机型与模式分开」）。
@@ -505,7 +505,7 @@ class CameraControlViewModel @Inject constructor(
         publishCapture()
     }
 
-    /** PTP 降级通道：InitiateCapture 是一次性触发，确认来自 CaptureComplete 事件 */
+    /** PTP 降级通道：设备控制通道的快门是一次性触发，确认来自 CaptureComplete 事件 */
     private suspend fun runPtpCapture() {
         job = CaptureMachine.begin(nextJobId(), CaptureRoute.PTP, System.currentTimeMillis())
         publishCapture()
@@ -857,7 +857,7 @@ class CameraControlViewModel @Inject constructor(
     /**
      * 进入控制面板工作态：真正建立相机连接，再建相册基线并探测能力。
      *
-     * 参数走 PTP DeviceProp、快门走 BLE/PTP、LiveView 走 60152 裸流，
+     * 参数走 PTP DeviceProp、快门走 BLE/PTP 控制通道、LiveView 走相机下发的裸流，
      * 均不依赖索尼 Web API（ZV-E10 无此服务，相关代码已于 2026-08-29 清除）。
      *
      * 修复（P1-1）：原实现**从不调用** `cameraRepository.connect()`，只是把

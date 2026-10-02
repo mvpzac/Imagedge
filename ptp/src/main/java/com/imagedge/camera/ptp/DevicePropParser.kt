@@ -147,6 +147,67 @@ object DevicePropParser {
         return null
     }
 
+    /**
+     * 提取字符串型属性的当前值（[STRING_DATA_TYPE]）。
+     *
+     * 与 [findProperty] 分开而不是塞进 `DeviceProperty.currentValue`：
+     * 那个字段是 `Long`，塞字符串只能截断或编码，整数属性与字符串属性
+     * 在同一份描述符流里混着走，让调用方按需取更省事。
+     *
+     * 描述符里字符串的 `Reserved` 字段占几字节随实现而异（1 或 2 都见过），
+     * 固定取一个就是在猜。这里不猜：两个候选偏移都试，只接受**内部自洽**的
+     * 那个——声明长度完整落在数据内、结尾 null 确实在位。两个都不自洽就返回
+     * null，让调用方回退，而不是拿到半条地址去连一个不存在的端口。
+     */
+    fun findString(data: ByteArray, code: Int): String? {
+        val needle = byteArrayOf((code and 0xFF).toByte(), ((code shr 8) and 0xFF).toByte())
+        var idx = indexOf(data, needle, 0)
+        var fallback: String? = null
+        while (idx >= 0) {
+            if (idx + 6 <= data.size) {
+                val dataType = (data[idx + 2].toInt() and 0xFF) or ((data[idx + 3].toInt() and 0xFF) shl 8)
+                if (dataType == STRING_DATA_TYPE) {
+                    for (reservedWidth in STRING_RESERVED_WIDTH_CANDIDATES) {
+                        val parsed = readStringAt(data, idx + 6 + reservedWidth)
+                        if (parsed != null) {
+                            // 1 字节在前：两个都自洽时取窄的那个，它在实测机型上更常见
+                            if (reservedWidth == STRING_RESERVED_WIDTH_CANDIDATES.first()) return parsed
+                            if (fallback == null) fallback = parsed
+                        }
+                    }
+                }
+            }
+            idx = indexOf(data, needle, idx + 2)
+        }
+        return fallback
+    }
+
+    /** 字符串属性 `Reserved` 字段的候选宽度，按实测更常见的顺序排列 */
+    private val STRING_RESERVED_WIDTH_CANDIDATES = intArrayOf(1, 2)
+
+    /**
+     * 在给定偏移读一个 PTP 字符串：`UINT8 字符数（含结尾 null）` + UTF-16LE + null。
+     *
+     * @return 自洽时返回字符串；长度越界或结尾不是 null 时返回 null
+     */
+    private fun readStringAt(data: ByteArray, valueOffset: Int): String? {
+        if (valueOffset >= data.size) return null
+        val declaredChars = data[valueOffset].toInt() and 0xFF
+        if (declaredChars < 2) return null                       // 至少要有内容 + 结尾 null
+        val byteLen = declaredChars * 2
+        // 长度字节 + (declaredChars - 1) 个字符 + 2 字节结尾 null = 1 + byteLen
+        if (valueOffset + 1 + byteLen > data.size) return null
+        // 结尾必须真的是 null，否则说明这里不是字符串起点
+        if (data[valueOffset + byteLen - 1].toInt() != 0 || data[valueOffset + byteLen].toInt() != 0) {
+            return null
+        }
+        val chars = String(data, valueOffset + 1, byteLen - 2, Charsets.UTF_16LE)
+        return chars.ifEmpty { null }
+    }
+
+    /** PTP 字符串类型的数据类型码 */
+    const val STRING_DATA_TYPE = 0xFFFF
+
     private fun readLittleEndian(data: ByteArray, offset: Int, size: Int): Long {
         var value = 0L
         for (i in 0 until size) {

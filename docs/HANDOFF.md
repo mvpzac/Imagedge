@@ -217,8 +217,8 @@ com.imagedge.camera/
     只有往 debug 库里灌数据才现形。
 
 34. **扫码从弹窗搬进页面时，会杀死连接的不是布局，是 `release()` 的时机**（批次 D）：
-    `WifiNetworkSpecifier` 建的热点连接**只在 `requestNetwork` 存活期间存在**
-    （见 sony-protocol-notes §3），所以 `QrScanViewModel.release()` 刻意「成功态不释放请求、
+    `WifiNetworkSpecifier` 建的热点连接**只在 `requestNetwork` 存活期间存在**，
+    所以 `QrScanViewModel.release()` 刻意「成功态不释放请求、
     但把 UI 状态清回 Idle」。向导把扫码变成一步之后，这条组合会产生一个新 bug：
     下一步（连接页）从瞬时状态读步骤，会把「已加入热点」显示成「还没开始」。
     所以 `hotspotAfter` 的 `joined` 是**粘住**的（有单测）。同理，「手机已在相机热点上」和

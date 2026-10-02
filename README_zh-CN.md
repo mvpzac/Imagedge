@@ -84,7 +84,7 @@ Gradle 多模块，按功能分包（PBF）：
 | 模块 | 职责 |
 |------|------|
 | `:core` | 纯 Kotlin 基础库（流工具、日志），无 Android 依赖 |
-| `:ptp` | PTP/IP 协议栈（ISO 15740），纯 Kotlin 实现，含索尼 SDIO 扩展 |
+| `:ptp` | PTP 协议栈（ISO 15740 + 索尼扩展），纯 Kotlin 实现；承载可换 TCP（PTP/IP）或 USB 批量端点，事务引擎只有一份 |
 | `:upnp` | UPnP/SOAP 协议栈（相机「发送到智能手机」服务） |
 | `:liveview` | LiveView 流（裸 60152 socket），纯 Kotlin——ZV-E10 无 Camera Web API 服务，故未用 JSON-RPC |
 | `:raw` | RAW 解码：内嵌 JPEG 提取（TIFF 容器解析）；libraw NDK 规划中 |
@@ -97,7 +97,6 @@ Gradle 多模块，按功能分包（PBF）：
 深入了解：
 
 - [架构与数据流](docs/architecture.md)
-- [索尼无线协议笔记](docs/sony-protocol-notes.md) —— 蓝牙快门码表、二维码格式、LiveView 帧、内容传输陷阱（真机实测沉淀，本项目最有价值的开源贡献之一）
 
 ## 环境要求
 

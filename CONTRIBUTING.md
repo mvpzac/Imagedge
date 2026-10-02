@@ -16,7 +16,8 @@ Open an issue with:
 
 1. Fork → create a branch from `alpha` (`feat/xxx` or `fix/xxx`) — `alpha` 是本仓库唯一的一条线（没有 `main`）
 2. Follow the existing code style (see below) — the project uses PBF (package by feature) and ktlint-friendly formatting
-3. Keep protocol-level changes documented: if you discover a device quirk or a new opcode/event, add it to `docs/sony-protocol-notes.md` in the same PR
+3. Keep protocol-level changes honest: if you discover a device quirk or a new opcode/event,
+   record it next to the constant it belongs to, and mark clearly whether you verified it on real hardware
 4. Make sure `./gradlew :app:assembleDebug test :app:uiSpecCheck` passes — `uiSpecCheck` rejects raw Material 3
    controls under `feature/`; use the `App*` components instead
 5. Open a PR describing what changed **and how it was verified**. If you could not test on a
@@ -32,4 +33,4 @@ Open an issue with:
 
 ## Protocol research / 协议研究
 
-Sony's wireless protocols are partly undocumented. Verified findings are collected in `docs/sony-protocol-notes.md`. If you reverse-engineer something new (Wireshark on Imaging Edge traffic, BLE captures, etc.), PR it there — this is the most valuable contribution you can make.
+Sony's wireless protocols are partly undocumented. This repository does not publish a protocol reference: findings belong beside the constant they justify (see `ptp/src/main/java/com/imagedge/camera/ptp/`), each marked with whether it was verified on real hardware. A claim that reads as verified but is not is worse than an honest gap — so if you reverse-engineer something new (Wireshark on official app traffic, BLE captures, etc.), say how you know, and say which parts remain untested.

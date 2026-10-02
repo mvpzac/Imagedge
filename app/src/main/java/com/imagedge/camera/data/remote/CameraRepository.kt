@@ -8,6 +8,7 @@ import android.provider.DocumentsContract
 import android.provider.MediaStore
 import androidx.core.net.toUri
 import com.imagedge.camera.core.common.AppLog
+import com.imagedge.camera.ptp.PtpCommandChannel
 import com.imagedge.camera.core.io.BoundedOutputStream
 import com.imagedge.camera.data.profile.CameraProfileStore
 import com.imagedge.camera.data.model.CameraCapabilities
@@ -15,6 +16,7 @@ import com.imagedge.camera.data.model.CameraCapability
 import com.imagedge.camera.data.model.CameraIdentity
 import com.imagedge.camera.data.model.CameraSettings
 import com.imagedge.camera.data.model.CameraTransport
+import com.imagedge.camera.data.model.isPtp
 import com.imagedge.camera.data.transfer.DownloadLocation
 import com.imagedge.camera.data.model.MediaItem
 import com.imagedge.camera.data.model.PropertyWriteDecision
@@ -216,6 +218,28 @@ class CameraRepository @Inject constructor(
         }
     }
 
+    /**
+     * 通过 USB 连接相机。
+     *
+     * 与 Wi-Fi 走同一套 PTP 栈、同一批能力描述符，只是换了物理链路，因此能力快照
+     * 与遥控参数面板都照常工作。差别有两处，都写在这里而不是留给使用者去撞：
+     * - **事件通道不可用**。USB 上的事件来自中断端点，需要另一套异步等待模型，
+     *   本轮未接。因此「拍完照片自动拉回」在 USB 通路下不工作。
+     * - **实时取景不可用**。取景流是相机在 Wi-Fi 上开的 HTTP 服务，USB 上没有对应物。
+     *
+     * @param channel 调用方已建立并授权的 USB 命令通道
+     */
+    suspend fun connectUsb(channel: PtpCommandChannel): ConnectionResult = withContext(Dispatchers.IO) {
+        disconnect()
+        if (!ptpChannel.connectUsb(channel)) {
+            activeChannel = null
+            _connectionState.value = ChannelConnectionState.DISCONNECTED
+            resetCapabilitySnapshot()
+            throw IllegalStateException("USB 会话建立失败：请确认相机已进入 USB 连接（遥控/MTP）模式，且未被其他应用占用")
+        }
+        adoptChannel(ptpChannel)
+    }
+
     /** 目录里是否已存在同名文档（SAF 临时名 + 改名的前提，见 [downloadToGallery]） */
     private fun childNamed(
         resolver: android.content.ContentResolver,
@@ -317,7 +341,7 @@ class CameraRepository @Inject constructor(
             model = channel.deviceModel,
             firmware = channel.deviceFirmware,
             transport = channel.channelType.toTransport(),
-            mode = if (channel.channelType == ChannelType.PTP_IP) currentFunctionMode
+            mode = if (channel.channelType.toTransport().isPtp) currentFunctionMode
             else CameraIdentity.MODE_UNKNOWN
         )
         _identity.value = identity
@@ -448,7 +472,7 @@ class CameraRepository @Inject constructor(
     }
 
     /**
-     * 遥控拍摄（PTP InitiateCapture，「电脑遥控」模式实测可用）。
+     * 遥控拍摄（走 PTP 设备控制通道的两段式快门）。
      * 拍摄的照片是否自动进入待传输内容集由相机固件决定，通常需相机端选片后到相册下载。
      *
      * 通道未声明遥控拍摄能力时直接拒绝，不发命令——UPnP 通道下 [PtpChannel.takePicture]
@@ -532,7 +556,7 @@ class CameraRepository @Inject constructor(
         resetCapabilitySnapshot()
         val identity = _identity.value
 
-        val props = if (identity.transport == CameraTransport.PTP_IP) {
+        val props = if (identity.transport?.isPtp == true) {
             ptpChannel.getAllDeviceProperties()?.let { CameraCapabilities.parseDescriptors(it) }
         } else {
             null
