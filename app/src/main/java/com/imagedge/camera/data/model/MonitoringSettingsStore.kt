@@ -3,9 +3,11 @@ package com.imagedge.camera.data.model
 import android.content.Context
 import androidx.core.content.edit
 import com.imagedge.camera.data.model.MonitoringSettings.Companion.KEY_ASPECT
+import com.imagedge.camera.data.model.MonitoringSettings.Companion.KEY_FOCUS_PEAK
 import com.imagedge.camera.data.model.MonitoringSettings.Companion.KEY_GRID
 import com.imagedge.camera.data.model.MonitoringSettings.Companion.KEY_MIRRORED
 import com.imagedge.camera.data.model.MonitoringSettings.Companion.KEY_ROTATION
+import com.imagedge.camera.data.model.MonitoringSettings.Companion.KEY_ZEBRA
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -51,6 +53,11 @@ class MonitoringSettingsStore @Inject constructor(
             putBoolean(KEY_MIRRORED, next.mirrored)
             putString(KEY_GRID, next.gridMode.name)
             putString(KEY_ASPECT, next.aspectMarker.name)
+            // 存成字符串而不是 putBoolean：读取侧 [MonitoringSettings.fromStored] 只吃
+            // `Map<String, String?>`，它要在 JVM 上单测。混用两套类型会在
+            // SharedPreferences.getString 上抛 ClassCastException——只在真机上炸
+            putString(KEY_FOCUS_PEAK, next.focusPeak.toString())
+            putString(KEY_ZEBRA, next.zebra.toString())
         }
     }
 
@@ -58,7 +65,9 @@ class MonitoringSettingsStore @Inject constructor(
         stored = mapOf(
             KEY_ROTATION to prefs.getString(KEY_ROTATION, null),
             KEY_GRID to prefs.getString(KEY_GRID, null),
-            KEY_ASPECT to prefs.getString(KEY_ASPECT, null)
+            KEY_ASPECT to prefs.getString(KEY_ASPECT, null),
+            KEY_FOCUS_PEAK to prefs.getString(KEY_FOCUS_PEAK, null),
+            KEY_ZEBRA to prefs.getString(KEY_ZEBRA, null)
         ),
         mirrored = prefs.getBoolean(KEY_MIRRORED, false)
     )

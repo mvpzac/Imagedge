@@ -61,6 +61,28 @@ All notable changes to this project are documented here. Format follows [Keep a 
   **也没有实时取景**（取景是相机在 Wi-Fi 上开的 HTTP 服务）。因此「拍完自动拉回」
   在 USB 通路下不工作，需要它时用 Wi-Fi——写在了 `connectUsb` 的 KDoc 上而不是留给使用者去撞
 
+### Added / 新增
+
+**T1/T2：对焦峰值与斑马纹接进取景监看**
+
+`:image` 的 `peakDensity`/`peaks` 此前写完却零调用，斑马纹只有一个阈值常量与一个
+占比数字——都是纯函数层的现成件，缺的只是接线。命名沿用相机端同一套词
+（ZEBRA / FOCUS_PEAK / HISTOGRAM），用户在相机上和手机上是同一套词汇。
+
+- **新增 `zebraMask()`**：`highlightRatio` 只给一个数字，画不出条纹；斑马纹要的是
+  「哪些点过亮」。网格与 `peakDensity` 对齐（同一 stride、同样 ceil 除法），
+  三张叠加层因此共用一次缩放映射
+- **峰值按帧号节流**（每 3 帧一次）：每采样格要算三次亮度（自己/右/下），
+  960×640 降到 320 长边后仍有约 6.8 万格，逐帧算是每秒四百多万次。
+  峰值是慢变量，人眼对合焦提示的响应远大于一帧（1/20 秒），节流后视觉无差别
+- **叠加层与画面共用同一个变换块**（`withFrameTransform`）：各自算一遍坐标的话，
+  旋转与镜像就必然漂，表现是「转屏后条纹与亮部对不上」且只在转屏后出现。
+  `drawFrame` 与监看叠加层都从这里进，形状变了只改一处
+- 条纹按段做数学裁剪而非 `clipPath`：当前 Compose 版本（1.11+）已移除
+  `DrawScope.clipPath`，按段算区间既不依赖它，也没有整幅过绘
+- 开关存进 `MonitoringSettings`（**唯一来源**）：另在 ViewModel 存一份运行时开关必然
+  不同步，而不同步的表现是「开关显示关着但条纹还在」，比没有开关更难查
+
 ### Fixed / 修复
 
 - **0x9207 回退路径的包结构此前是错的**：`params` 挂了一个多余的 0，且数据阶段声明成

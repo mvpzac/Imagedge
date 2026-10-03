@@ -152,6 +152,76 @@ object ExposureAnalysis {
     /** 密度图上超过阈值的点，用于决定"要不要显示峰值"以及叠加位置 */
     fun peaks(map: PeakMap, threshold: Int = PEAK_THRESHOLD): BooleanArray =
         BooleanArray(map.density.size) { index -> map.density[index] >= threshold }
+
+    /**
+     * 斑马纹掩码：亮度 ≥ [threshold] 的采样点。
+     *
+     * 与 [highlightRatio] 同源但**不是同一个形状**：占比只给一个数字，画不出条纹；
+     * 斑马纹要的是"哪些点过亮"，所以这里逐点出掩码，网格与 [peakDensity] 对齐
+     * （同一套 [stride]、同样的 ceil 除法），三张叠加层因此能共用一次缩放映射。
+     *
+     * @return 长度 = ceil(width/stride) * ceil(height/stride) 的布尔数组
+     */
+    fun zebraMask(
+        pixels: IntArray,
+        width: Int,
+        height: Int,
+        stride: Int = 1,
+        threshold: Int = HIGHLIGHT_THRESHOLD
+    ): BooleanArray {
+        val step = stride.coerceAtLeast(1)
+        val outWidth = (width + step - 1) / step
+        val outHeight = (height + step - 1) / step
+        val mask = BooleanArray(outWidth * outHeight)
+        var oy = 0
+        var y = 0
+        while (y < height && oy < outHeight) {
+            var ox = 0
+            var x = 0
+            val row = y * width
+            while (x < width && ox < outWidth) {
+                if (lumaOf(pixels[row + x]) >= threshold) mask[oy * outWidth + ox] = true
+                ox++
+                x += step
+            }
+            oy++
+            y += step
+        }
+        return mask
+    }
+
+    /**
+     * 掩码的网格尺寸。绘制侧要靠它把采样格映射回预览像素——写错这里图案会整体错位，
+     * 而画面看上去只是"条纹和亮部对不上"，很容易被当成阈值问题去查。
+     */
+    fun gridSize(width: Int, height: Int, stride: Int = 1): Pair<Int, Int> {
+        val step = stride.coerceAtLeast(1)
+        return (width + step - 1) / step to (height + step - 1) / step
+    }
+
+    /**
+     * 把一行掩码里的连续命中段合并成矩形。
+     *
+     * 斑马纹逐格 `drawRect` 在一片过曝天空上是每行几十上百次调用；而连续段合并后
+     * 每行通常只剩个位数。**只改绘制次数，不改判定**——合并出来的矩形与逐格画完全等价。
+     *
+     * @return 段的 [startIndex, endIndexExclusive] 列表，按起点升序
+     */
+    fun rowRuns(mask: BooleanArray, offset: Int, length: Int): List<IntRange> {
+        val runs = mutableListOf<IntRange>()
+        var start = -1
+        for (i in 0 until length) {
+            val hit = mask[offset + i]
+            if (hit && start < 0) {
+                start = i
+            } else if (!hit && start >= 0) {
+                runs += start until i
+                start = -1
+            }
+        }
+        if (start >= 0) runs += start until length
+        return runs
+    }
 }
 
 /** 亮度直方图。[sampleCount] 是被采样到的像素数，不是帧的总像素数 */

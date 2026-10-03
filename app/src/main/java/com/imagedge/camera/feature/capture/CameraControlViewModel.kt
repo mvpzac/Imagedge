@@ -744,9 +744,75 @@ class CameraControlViewModel @Inject constructor(
     private var analysisWidth = 0
     private var analysisHeight = 0
 
+    /**
+     * 对焦峰值掩码。
+     *
+     * 与 [exposureStats] **刻意分开**而不是塞进同一个状态：峰值每采样点要算三次亮度
+     * （自己/右/下），960×640 降到 320 长边后仍有约 6.8 万格、20fps 下每秒四百多万次——
+     * 混进每帧都刷新的状态里，等于逼着每一帧都付这份钱。
+     *
+     * 峰值是**慢变量**：人眼对合焦提示的响应时间远大于一帧（1/20 秒），
+     * 所以按 [PEAK_REFRESH_FRAMES] 分之一更新，视觉上察觉不到，计算量降到零头。
+     */
+    private val _focusPeaks = MutableStateFlow<AssistOverlay?>(null)
+    val focusPeaks: StateFlow<AssistOverlay?> = _focusPeaks.asStateFlow()
+
+    /** 对焦峰值每隔几帧重算一次 */
+    private var peakFrameCounter = 0
+
+    /** 斑马纹掩码。与峰值同理单独成状态，因为它按开关独立刷新 */
+    private val _zebraMask = MutableStateFlow<AssistOverlay?>(null)
+    val zebraMask: StateFlow<AssistOverlay?> = _zebraMask.asStateFlow()
+
+    /**
+     * 采样格上的布尔掩码。
+     *
+     * @param gridWidth/gridHeight 采样格数，与 [ExposureAnalysis.gridSize] 一致
+     * @param stride 分析步长；绘制侧乘它换算回预览像素
+     */
+    data class AssistOverlay(
+        val mask: BooleanArray,
+        val gridWidth: Int,
+        val gridHeight: Int,
+        val stride: Int
+    ) {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is AssistOverlay) return false
+            return gridWidth == other.gridWidth && gridHeight == other.gridHeight &&
+                stride == other.stride && mask.contentEquals(other.mask)
+        }
+
+        override fun hashCode(): Int {
+            var result = gridWidth
+            result = 31 * result + gridHeight
+            result = 31 * result + stride
+            result = 31 * result + mask.contentHashCode()
+            return result
+        }
+    }
+
     fun setExposureAids(on: Boolean) {
         exposureGate.enabled = on
-        if (!on) _exposureStats.value = null
+        if (!on) {
+            _exposureStats.value = null
+            _focusPeaks.value = null
+            _zebraMask.value = null
+        }
+    }
+
+    /** 对焦峰值开关。与 [setExposureAids] 正交：统计关了但峰值开着是允许的 */
+    fun toggleFocusPeak() = updateMonitoring {
+        val next = !it.focusPeak
+        if (next) peakFrameCounter = PEAK_REFRESH_FRAMES else _focusPeaks.value = null
+        it.copy(focusPeak = next)
+    }
+
+    /** 斑马纹开关 */
+    fun toggleZebra() = updateMonitoring {
+        val next = !it.zebra
+        if (!next) _zebraMask.value = null
+        it.copy(zebra = next)
     }
 
     /** 关掉辅助时别把上一轮的读数留在屏幕上——它会看起来像实时数据 */
@@ -764,11 +830,38 @@ class CameraControlViewModel @Inject constructor(
         }
         frame.getPixels(pixels, 0, width, 0, 0, width, height)
         val stride = ExposureAnalysis.sampleStride(width, height)
+        val (gridWidth, gridHeight) = ExposureAnalysis.gridSize(width, height, stride)
+
         _exposureStats.value = ExposureStats(
             histogram = ExposureAnalysis.histogram(pixels, width, height, stride),
             highlightRatio = ExposureAnalysis.highlightRatio(pixels, width, height, stride)
         )
+
+        // 开关的**唯一来源是 MonitoringSettings**：运行时另存一份必然会出现两边不同步，
+        // 而不同步的表现是「开关显示关着但条纹还在」，比没有开关更难查
+        val aids = monitoringSettings.value
+
+        // 斑马纹每个采样点只要一次亮度，逐帧算得起
+        if (aids.zebra) {
+            _zebraMask.value = AssistOverlay(
+                ExposureAnalysis.zebraMask(pixels, width, height, stride),
+                gridWidth, gridHeight, stride
+            )
+        }
+
+        // 峰值每格三次亮度，按帧号节流
+        if (aids.focusPeak) {
+            if (++peakFrameCounter >= PEAK_REFRESH_FRAMES) {
+                peakFrameCounter = 0
+                val density = ExposureAnalysis.peakDensity(pixels, width, height, stride)
+                _focusPeaks.value = AssistOverlay(
+                    ExposureAnalysis.peaks(density),
+                    gridWidth, gridHeight, stride
+                )
+            }
+        }
     }
+
 
     private var viewfinderVisible = false
     private var viewfinderPaused = false
@@ -1092,6 +1185,9 @@ class CameraControlViewModel @Inject constructor(
     }
 
     private companion object {
+        /** 峰值每隔几帧重算一次。1 = 每帧，代价见 [_focusPeaks] 的注释 */
+        const val PEAK_REFRESH_FRAMES = 3
+
         /** 快门操作提示的引导键（改版就换后缀，旧的「已看过」不该压制新说明） */
         const val SHUTTER_GUIDE_ID = "shutter-sequence-v1"
 

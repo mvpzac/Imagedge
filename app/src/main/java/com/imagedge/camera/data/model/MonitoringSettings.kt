@@ -89,8 +89,20 @@ data class MonitoringSettings(
     val rotation: ViewRotation = ViewRotation.Deg0,
     val mirrored: Boolean = false,
     val gridMode: GridMode = GridMode.NONE,
-    val aspectMarker: AspectMarker = AspectMarker.NONE
+    val aspectMarker: AspectMarker = AspectMarker.NONE,
+    /**
+     * 对焦峰值叠加。
+     *
+     * 与网格/标记同为「什么时候显示」的偏好，所以放在这里而不是散在 ViewModel 的
+     * 运行时开关里——**两个来源就必然有一个会忘记同步**。
+     */
+    val focusPeak: Boolean = false,
+    /** 斑马纹叠加。阈值固定用 [com.imagedge.camera.image.ExposureAnalysis.HIGHLIGHT_THRESHOLD] */
+    val zebra: Boolean = false
 ) {
+
+    /** 任何像素级叠加层是否打开。关掉时连像素分析都不必做 */
+    val hasPixelOverlay: Boolean get() = focusPeak || zebra
 
     /**
      * 从存储键值还原。
@@ -105,13 +117,18 @@ data class MonitoringSettings(
         const val KEY_MIRRORED = "monitoring_mirrored"
         const val KEY_GRID = "monitoring_grid"
         const val KEY_ASPECT = "monitoring_aspect"
+        const val KEY_FOCUS_PEAK = "monitoring_focus_peak"
+        const val KEY_ZEBRA = "monitoring_zebra"
 
         fun fromStored(stored: Map<String, String?>, mirrored: Boolean = false): MonitoringSettings =
             MonitoringSettings(
                 rotation = ViewRotation.fromStored(stored[KEY_ROTATION]),
                 mirrored = mirrored,
                 gridMode = GridMode.fromStored(stored[KEY_GRID]),
-                aspectMarker = AspectMarker.fromStored(stored[KEY_ASPECT])
+                aspectMarker = AspectMarker.fromStored(stored[KEY_ASPECT]),
+                // 布尔存成 "true"/"false"，其余一律 false：未知键不是「开着」
+                focusPeak = stored[KEY_FOCUS_PEAK] == "true",
+                zebra = stored[KEY_ZEBRA] == "true"
             )
     }
 }

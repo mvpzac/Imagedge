@@ -38,7 +38,6 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -118,6 +117,9 @@ private fun WorkstationContent(
     // 的失效范围设成「每帧」，连 pointerInput 都会被每帧重装一次。
     // 画画面只需要绘制阶段失效，手势只需要读到当下那一刻的值——两处都在下面就地读。
     val frameState = viewModel.frame.collectAsStateWithLifecycle()
+    // 叠加层状态只在这里读 .value：绘制阶段取值，每帧只重画不重组
+    val peakState = viewModel.focusPeaks
+    val zebraState = viewModel.zebraMask
     // derivedStateOf 负责去重：底层 Bitmap 每帧都变，这个 Boolean 不是。
     // 顺带不用为 collect 硬塞一个 initialValue——那会让进入时闪一帧「没有画面」。
     val hasFrame by remember(frameState) { derivedStateOf { frameState.value != null } }
@@ -186,6 +188,18 @@ private fun WorkstationContent(
             if (content.width <= 0f || content.height <= 0f) return@Canvas
 
             drawFrame(source, transform, dimensions, viewport)
+            // 叠加层与画面并列地各进一次同一个变换：**不是嵌套**（drawFrame 自己也会进），
+            // 而是共用同一个变换定义。各算一遍坐标的话旋转与镜像必然漂，
+            // 表现为「转屏后条纹与亮部对不上」，且只在转屏后才出现
+            withFrameTransform(transform, dimensions, viewport) {
+                if (settings.zebra) {
+                    drawAssistMask(zebraState.value, dimensions, ZebraStripe)
+                }
+                if (settings.focusPeak) {
+                    drawFocusPeaks(peakState.value, dimensions, FocusPeakMark)
+                }
+            }
+            // 构图标记画在内容矩形里（它描述的是取景构图，不随像素缩放）
             drawMarkers(content, settings.gridMode, settings.aspectMarker)
         }
 
@@ -353,6 +367,20 @@ private fun Toolbar(
                     color = OnViewer
                 )
                 AppLink(
+                    text = stringResource(
+                        if (settings.zebra) R.string.monitoring_zebra_on else R.string.monitoring_zebra_off
+                    ),
+                    onClick = viewModel::toggleZebra,
+                    color = if (settings.zebra) MaterialTheme.colorScheme.primary else OnViewer
+                )
+                AppLink(
+                    text = stringResource(
+                        if (settings.focusPeak) R.string.monitoring_peak_on else R.string.monitoring_peak_off
+                    ),
+                    onClick = viewModel::toggleFocusPeak,
+                    color = if (settings.focusPeak) MaterialTheme.colorScheme.primary else OnViewer
+                )
+                AppLink(
                     text = stringResource(R.string.monitoring_zoom_reset, zoom),
                     onClick = onResetView,
                     color = OnViewer
@@ -396,6 +424,7 @@ private fun gridLabelOf(mode: GridMode): Int = when (mode) {
  * **internal 而非工作台私有**：遥控页的嵌入预览必须走同一套变换，否则用户在
  * 工作台里转了 90°，退出后嵌入预览还是横的——两处各写一遍就一定会漂。
  *
+ * 变换本体在 [withFrameTransform]——本函数与叠加层共用它。
  * **调用顺序必须与 [ViewportTransform] 的分解一致**。Compose 的 `withTransform` 里
  * 先调用的处于最外层，而点的变换顺序是自内向外，所以「镜像」这一行必须排在「旋转」**之前**，
  * 才能让镜像作用在旋转后的显示朝向上。顺序写反不会报错，只会「画面对、点偏」——
@@ -407,17 +436,7 @@ internal fun DrawScope.drawFrame(
     frameSize: Size,
     viewport: Size
 ) {
-    val rect = transform.contentRect(frameSize, viewport)
-    val scale = transform.fitScale(frameSize, viewport) * transform.effectiveZoom
-    if (scale <= 0f || rect.width <= 0f) return
-
-    withTransform({
-        translate(rect.center.x, rect.center.y)
-        if (transform.mirrored) scale(-1f, 1f)
-        rotate(transform.rotation.degrees.toFloat())
-        translate(-frameSize.width * scale / 2f, -frameSize.height * scale / 2f)
-        scale(scale, scale)
-    }) {
+    withFrameTransform(transform, frameSize, viewport) {
         drawImage(
             image = image,
             dstSize = IntSize(frameSize.width.toInt(), frameSize.height.toInt())

@@ -412,6 +412,11 @@
     <string name="monitoring_marker_off">比例标记·无</string>
     <string name="monitoring_marker_fmt">比例标记·%1$s</string>
     <string name="monitoring_zoom_reset">%1$.1f×·重置</string>
+    <!-- 监看叠加层。命名沿用相机端同一套词，用户不必在两处重新学 -->
+    <string name="monitoring_zebra_off">斑马纹</string>
+    <string name="monitoring_zebra_on">斑马纹·开</string>
+    <string name="monitoring_peak_off">对焦峰值</string>
+    <string name="monitoring_peak_on">对焦峰值·开</string>
     <string name="monitoring_no_frame">等待取景画面…</string>
     <string name="monitoring_paused">取景已暂停 · 已停止采集，画面定格</string>
     <string name="monitoring_tools_hint">以下工具仅影响监看显示，不改变相机文件</string>
