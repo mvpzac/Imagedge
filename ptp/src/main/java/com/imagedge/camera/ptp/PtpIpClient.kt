@@ -91,6 +91,14 @@ class PtpIpClient(
     private var eventSocket: Socket? = null
 
     /**
+     * 最近一次 GetDeviceInfo 的结果，用于查操作码支持情况。
+     *
+     * 只在 [getDeviceInfo] 里写入——它是唯一权威来源，缓存别处会与相机真实能力脱节。
+     */
+    @Volatile
+    private var cachedDeviceInfo: DeviceInfo? = null
+
+    /**
      * 命令通道。默认是 TCP 承载；传入 USB 通道时跳过 PTP/IP 握手——
      * USB 上没有 InitCommandRequest 这一步，会话直接开。
      */
@@ -255,6 +263,9 @@ class PtpIpClient(
         eventSocket = null
         eventIn = null
         eventOut = null
+        // 能力清单随会话失效：留着上一台相机的答案，会让下一次连接问出
+        // 属于别的相机的结论——而能力判定正是拿来当依据用的
+        cachedDeviceInfo = null
         opened = false
     }
 
@@ -274,6 +285,9 @@ class PtpIpClient(
         eventSocket = null
         eventIn = null
         eventOut = null
+        // 能力清单随会话失效：留着上一台相机的答案，会让下一次连接问出
+        // 属于别的相机的结论——而能力判定正是拿来当依据用的
+        cachedDeviceInfo = null
         opened = false
     }
 
@@ -516,6 +530,19 @@ class PtpIpClient(
      * @return true 表示相机回了 OK；false 表示被拒或抛异常，调用方需自行决定退路
      */
     fun sendControl(controlCode: Int, value: Int): Boolean {
+        // 刻意**不**在这里拦截。快门是本应用最要紧的动作，而「索尼固件会不会
+        // 把 SDIO 扩展列进 GetDeviceInfo 的 OperationsSupported」没有依据可查：
+        // 官方 App 自己从不查这份清单，所以它是保守的实现，但也可能保守到不列扩展。
+        // 误判成不支持的代价是**快门被静默关掉**，远大于省下一次注定失败的往返
+        // ——那一次往返本来就会失败并返回 false，行为完全一致。
+        // 因此只把不一致记下来，让日志能指出来，而不是替相机做决定。
+        if (supportsOperation(SonySdioOperationCode.SDIO_CONTROL_DEVICE) == false) {
+            AppLog.w(
+                TAG,
+                "相机未在 GetDeviceInfo 中上报 0x9207，仍照常下发控制指令；" +
+                    "若该机型快门始终无响应，先查它的操作码清单是否完整"
+            )
+        }
         val width = SonyControlCode.payloadBytes(controlCode)
         val payload = PtpBuffer.writer().apply {
             when (width) {
@@ -625,16 +652,19 @@ class PtpIpClient(
      * 整族不支持时相机回 `OPERATION_NOT_SUPPORTED` 而不是空列表，
      * 该情况映射为 null——调用方必须区分「不支持」与「支持但当前无内容」。
      */
-    fun getSupportedObjectProps(): List<Int>? = try {
-        val data = executeDataTransaction(SonyObjectPropOperationCode.GET_OBJECT_PROPS_SUPPORTED)
-        val buffer = PtpBuffer.reader(data)
-        val count = buffer.readUInt32().toInt()
-        if (count < 0 || count > MAX_OBJECT_PROP_CODES) {
-            throw PtpMalformedPacketException("支持的对象属性数量非法：$count")
+    fun getSupportedObjectProps(): List<Int>? {
+        if (supportsOperation(SonyObjectPropOperationCode.GET_OBJECT_PROPS_SUPPORTED) == false) return null
+        return try {
+            val data = executeDataTransaction(SonyObjectPropOperationCode.GET_OBJECT_PROPS_SUPPORTED)
+            val buffer = PtpBuffer.reader(data)
+            val count = buffer.readUInt32().toInt()
+            if (count < 0 || count > MAX_OBJECT_PROP_CODES) {
+                throw PtpMalformedPacketException("支持的对象属性数量非法：$count")
+            }
+            List(count) { buffer.readUInt16() }
+        } catch (e: PtpResponseException) {
+            if (e.responseCode == PtpResponseCode.OPERATION_NOT_SUPPORTED) null else throw e
         }
-        List(count) { buffer.readUInt16() }
-    } catch (e: PtpResponseException) {
-        if (e.responseCode == PtpResponseCode.OPERATION_NOT_SUPPORTED) null else throw e
     }
 
     /**
@@ -649,6 +679,9 @@ class PtpIpClient(
         if (queries.isEmpty()) return ObjectPropMap.parse(ByteArray(0))
         require(queries.size <= MAX_OBJECT_PROP_CODES) {
             "对象属性查询 ${queries.size} 项超出单次上限 $MAX_OBJECT_PROP_CODES"
+        }
+        if (!isUsable(SonyObjectPropOperationCode.GET_OBJECT_PROP_LIST, "对象属性列表")) {
+            return ObjectPropMap.parse(ByteArray(0))
         }
 
         val parameters = LongArray(queries.size * 2)
@@ -787,12 +820,41 @@ class PtpIpClient(
         return shots >= 2
     }
 
-    /** 获取设备信息（相机型号等） */
+    /** 获取设备信息（相机型号等），并记下它上报的操作码清单 */
     fun getDeviceInfo(): DeviceInfo {
         val data = executeDataTransaction(PtpOperationCode.GET_DEVICE_INFO)
         val info = DeviceInfo.parse(PtpBuffer.reader(data))
-        AppLog.i(TAG, "设备信息：${info.manufacturer} ${info.model} ${info.deviceVersion}")
+        cachedDeviceInfo = info
+        AppLog.i(TAG, "设备信息：${info.manufacturer} ${info.model} ${info.deviceVersion}（上报 ${info.operationsSupported.size} 个操作码）")
         return info
+    }
+
+    /**
+     * 相机是否上报支持某个操作码。
+     *
+     * **null 表示判定不了**——还没读过 GetDeviceInfo，或这次会话没连上。
+     * 「判定不了」与「明确不支持」必须分开：前者按原有行为走，
+     * 后者才据此跳过下发。把两者混为一谈会让首次连接前的探测全部变成静默失败。
+     *
+     * 判定的意义有两层：省掉一次注定失败的往返，以及给能力判定一个**不发报文**的依据。
+     * 后者才是关键——过去想知道相机支不支持某能力，只能真的发一次然后等 `0x2005`。
+     *
+     * @return true/false = 相机明确上报支持/不支持；null = 未知
+     */
+    fun supportsOperation(operationCode: Int): Boolean? =
+        cachedDeviceInfo?.operationsSupported?.contains(operationCode) ?: return null
+
+    /**
+     * 可选操作码的前置检查。
+     *
+     * 相机**明确**没上报支持时返回 false 并记一行日志，让调用方直接放弃；
+     * 未知（尚未读设备信息）时返回 true，照原样发出去——把「不知道」当成「不支持」
+     * 会让首次连接前的那次探测静默失效。
+     */
+    private fun isUsable(operationCode: Int, what: String): Boolean {
+        if (supportsOperation(operationCode) != false) return true
+        AppLog.i(TAG, "相机未上报支持 $what（0x${operationCode.toString(16)}），跳过下发")
+        return false
     }
 
     // ── 对象浏览 ─────────────────────────────────────────────────────
