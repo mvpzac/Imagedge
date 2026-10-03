@@ -25,8 +25,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.imagedge.camera.R
 import com.imagedge.camera.core.common.AppLog
+import com.imagedge.camera.core.export.ExportLimits
+import com.imagedge.camera.image.FrameGeometry
 import com.imagedge.camera.motionphoto.MotionPhotoComposer
 import com.imagedge.camera.motionphoto.MotionPhotoParser
+import com.imagedge.camera.share.ExportConfig
+import com.imagedge.camera.share.ExportFormat
+import com.imagedge.camera.share.ExportManager
+import com.imagedge.camera.share.ExifPolicy
 import com.imagedge.camera.ui.feedback.Haptics
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -79,8 +85,19 @@ class ExifFrameViewModel @Inject constructor(
         MINIMAL("极简叠字"),
     }
 
-    /** 单个可编辑字段（EXIF 预填 + 手动覆盖 + 是否显示） */
-    data class FrameField(val label: String, val value: String, val enabled: Boolean = true)
+    /**
+     * 单个可编辑字段（EXIF 预填 + 手动覆盖 + 是否显示）。
+     *
+     * @param baseline EXIF 刚读出来时的值。[ExifFrameState.hasEdits] 要靠它区分
+     *   「用户改过」与「只是读到了默认值」——它必须跟着字段本身走，不能只存在
+     *   ViewModel 的一个私有字段里，否则 state 单独被观察时判断不了可撤销性。
+     */
+    data class FrameField(
+        val label: String,
+        val value: String,
+        val enabled: Boolean = true,
+        val baseline: String = value,
+    )
 
     data class ExifFrameState(
         val sourceUri: Uri? = null,
@@ -97,6 +114,8 @@ class ExifFrameViewModel @Inject constructor(
         val keepLogo: Boolean = true,
         /** 照片圆角（经典白边 / 白框悬浮 / 暗色底栏下生效） */
         val rounded: Boolean = false,
+        /** 格式 / 画质 / 元数据策略，与分享面板、编辑调节共用同一份 */
+        val exportConfig: ExportConfig = ExportConfig(),
         val exporting: Boolean = false,
         val message: String? = null,
         val success: Boolean = false,
@@ -104,17 +123,31 @@ class ExifFrameViewModel @Inject constructor(
         /**
          * 有没有可撤销的改动。编辑器骨架据此决定「重置」能不能点——
          * 一张刚选好的照片本来就在默认样式上，摆一个「重置」只会让人以为动了什么。
+         *
+         * **字段的 value 也要算进去**：EXIF 读错时用户会直接改内容（改完提示的模型名、
+         * 补一条被压缩丢掉的拍摄时间），而 `resetStyle()` 本来就会把值还原。
+         * 此前只判 enabled，于是"只改了内容没动开关"的用户看着「重置」是灰的，
+         * 改了就回不来——这正是那个按钮存在的意义所在。
          */
         val hasEdits: Boolean
             get() = template != FrameTemplate.CLASSIC_WHITE ||
                 customText.isNotBlank() || rounded || !keepLogo ||
-                fields.any { !it.enabled }
+                fields.any { !it.enabled } ||
+                fields.any { it.value.trim() != it.baseline.trim() }
     }
 
     private val _state = MutableStateFlow(ExifFrameState())
     val state: StateFlow<ExifFrameState> = _state.asStateFlow()
 
-    /** 基准原图（预览/导出共用，1600px 长边降采样） */
+    /**
+     * 交互用的基准原图（1600px 长边降采样）。
+     *
+     * **它只服务预览，不参与导出。** 导出按 [ExportLimits] 重新解码到接近原分辨率——
+     * 早先版本直接拿这张图落盘，于是 6000px 的照片导出成 1600px。同一个 bug 在
+     * 编辑调节里已经修过（见 CHANGELOG「导出分辨率腰斩」），修法是逐个 feature 落的，
+     * 漏了这里。版式按源图宽取比例（见 [FrameGeometry.proportionalAbove]），
+     * 所以预览与全分辨率成品的版式是同构的。
+     */
     private var sourceBitmap: Bitmap? = null
     /** EXIF 刚读出来时的字段快照：「重置」回到这里，而不是回到空白 */
     private var baselineFields: List<FrameField> = emptyList()
@@ -382,9 +415,10 @@ class ExifFrameViewModel @Inject constructor(
         val model = exifOf(ExifInterface.TAG_MODEL)
         val focal = exifOf(ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM)
             .ifEmpty { exifOf(ExifInterface.TAG_FOCAL_LENGTH) }
-        val exposure = exifOf(ExifInterface.TAG_EXPOSURE_TIME).toDoubleOrNull()
-            ?.let { if (it >= 1) "%.0fs".format(it) else "1/%.0f".format(1 / it) }
-            .orEmpty()
+        val exposure = FrameGeometry.formatShutter(
+            exifOf(ExifInterface.TAG_EXPOSURE_TIME).toDoubleOrNull(),
+            exifOf(ExifInterface.TAG_SHUTTER_SPEED_VALUE).toDoubleOrNull(),
+        )
         val iso = exifOf(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY)
             .ifEmpty { exifOf(ExifInterface.TAG_ISO_SPEED_RATINGS) }
             .let { if (it.isNotEmpty()) "ISO$it" else "" }
@@ -495,6 +529,11 @@ class ExifFrameViewModel @Inject constructor(
         renderPreview()
     }
 
+    /** 导出配置（格式 / 画质 / 元数据策略）。不触发重渲染——它不影响画面，只影响落盘。 */
+    fun setExportConfig(config: ExportConfig) {
+        _state.update { it.copy(exportConfig = config) }
+    }
+
     private var fieldDebounceJob: kotlinx.coroutines.Job? = null
 
     /** 字段编辑：300ms 防抖后重渲染——逐字全量渲染 1600px 位图会造成连续卡顿 */
@@ -556,7 +595,7 @@ class ExifFrameViewModel @Inject constructor(
                 Color.WHITE, hex("#111214"),
                 hex("#8A8F98"), hex("#E6E8EB")
             ),
-            borderRatio = 0.045f
+            FrameGeometry.FRAMED
         )
         FrameTemplate.DARK_BAR -> renderFramed(
             source, fields, state,
@@ -564,7 +603,7 @@ class ExifFrameViewModel @Inject constructor(
                 hex("#0B0C0E"), hex("#F4F5F7"),
                 hex("#9BA1A9"), hex("#26282C")
             ),
-            borderRatio = 0.045f
+            FrameGeometry.FRAMED
         )
         FrameTemplate.SIGNATURE -> renderSignature(source, fields, state)
     }
@@ -580,21 +619,22 @@ class ExifFrameViewModel @Inject constructor(
         fields: List<FrameField>,
         state: ExifFrameState,
         palette: Palette,
-        borderRatio: Float
+        spec: FrameGeometry.FrameSpec
     ): Bitmap {
         val w = source.width
         val h = source.height
-        val border = (w * borderRatio).toInt().coerceAtLeast(16)
-        val barH = (w * 0.155f).toInt().coerceAtLeast(110)
-        val outW = w + border * 2
-        val outH = border + h + barH
-        val result = createBitmap(outW, outH)
+        val out = FrameGeometry.output(spec, w, h)
+        val border = out.sideMargin
+        val barH = out.barHeight
+        val outW = out.width
+        val result = createBitmap(outW, out.height)
         val canvas = Canvas(result)
         canvas.drawColor(palette.bg)
 
         drawPhoto(canvas, source, border.toFloat(), border.toFloat(), state.rounded, w * 0.025f)
 
         val padX = border + w * 0.045f
+        val rowWidth = outW - padX * 2
         val modelText = visibleValue(fields, "相机型号")
         val params = paramLine(fields)
         val barTop = (border + h).toFloat()
@@ -609,34 +649,49 @@ class ExifFrameViewModel @Inject constructor(
             drawBrand(canvas, mark, cursor, line1 - brandH / 2f, brandH, darkBg)
             cursor += brandLogoWidth(mark, brandH) + w * 0.02f
         }
-        if (modelText.isNotEmpty()) {
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = palette.fg
-                typeface = fontMedium
-                textSize = barH * 0.26f
-            }
-            fitTextSize(paint, modelText, outW - padX - cursor - w * 0.02f, barH * 0.26f, barH * 0.16f)
-            canvas.drawText(modelText, cursor, baselineFor(paint, line1), paint)
-        }
+
+        // 第一行是「型号（左）+ 自定义文字（右）」两段。两段各自按整行宽缩放时
+        // 各自都判定放得下、合起来却超出画布——表现是两段叠在一起。
+        // 所以先给右段封顶 55%，再把剩余宽度作为左段的预算。
         val custom = state.customText.trim()
+        var customWidth = 0f
         if (custom.isNotEmpty()) {
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = palette.muted
                 typeface = fontRegular
-                textSize = barH * 0.20f
                 textAlign = Paint.Align.RIGHT
             }
-            fitTextSize(paint, custom, outW - padX * 2, barH * 0.20f, barH * 0.13f)
-            canvas.drawText(custom, outW - padX, baselineFor(paint, line1), paint)
+            val budget = rowWidth * 0.55f
+            customWidth = drawFitted(
+                canvas, paint, custom, outW - padX, line1,
+                barH * 0.20f, barH * 0.13f, budget,
+            )
+        }
+        // 型号从 cursor 起，到「右段文字左边缘再留一个间距」为止。
+        // 这里的 totalWidth **不再**自带右侧留白：outW - padX 已经把右内边距算掉了，
+        // 再减一次 w*0.02f 就是凭空多出两倍间距——不重叠，但会把放得下的型号截短。
+        if (modelText.isNotEmpty()) {
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = palette.fg
+                typeface = fontMedium
+            }
+            val budget = FrameGeometry.leftBudgetOf(
+                outW - padX - cursor, customWidth, w * 0.02f,
+            )
+            drawFitted(
+                canvas, paint, modelText, cursor, line1,
+                barH * 0.26f, barH * 0.16f, budget,
+            )
         }
         if (params.isNotEmpty()) {
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = palette.muted
                 typeface = fontRegular
-                textSize = barH * 0.19f
             }
-            fitTextSize(paint, params, outW - padX * 2, barH * 0.19f, barH * 0.12f)
-            canvas.drawText(params, padX, baselineFor(paint, line2), paint)
+            drawFitted(
+                canvas, paint, params, padX, line2,
+                barH * 0.19f, barH * 0.12f, outW - padX * 2,
+            )
         }
         // 分隔线：信息区上沿一条细线，弱化「贴了一条色块」的观感
         val divider = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -651,12 +706,12 @@ class ExifFrameViewModel @Inject constructor(
     private fun renderPolaroid(source: Bitmap, fields: List<FrameField>, state: ExifFrameState): Bitmap {
         val w = source.width
         val h = source.height
-        val marginX = (w * 0.085f).toInt().coerceAtLeast(24)
-        val marginTop = (w * 0.085f).toInt().coerceAtLeast(24)
-        val bottomH = (w * 0.20f).toInt().coerceAtLeast(72)
-        val outW = w + marginX * 2
-        val outH = marginTop + h + bottomH
-        val result = createBitmap(outW, outH)
+        val out = FrameGeometry.output(FrameGeometry.POLAROID, w, h)
+        val marginX = out.sideMargin
+        val marginTop = marginX
+        val bottomH = out.barHeight
+        val outW = out.width
+        val result = createBitmap(outW, out.height)
         val canvas = Canvas(result)
         canvas.drawColor(Color.WHITE)
 
@@ -695,7 +750,11 @@ class ExifFrameViewModel @Inject constructor(
         }
         var firstLineW = 0f
         if (state.keepLogo) firstLineW += brandLogoWidth(mark, brandH) + w * 0.02f
-        if (modelText.isNotEmpty()) firstLineW += modelPaint.measureText(modelText)
+        // 先适配再算居中位置：拿缩放前的宽度定位，字号一缩整行就偏
+        val fittedModel = if (modelText.isNotEmpty()) {
+            fit(modelPaint, modelText, bottomH * 0.22f, bottomH * 0.14f, outW * 0.8f)
+        } else null
+        if (fittedModel != null) firstLineW += fittedModel.width
         val line1Y = marginTop + h + bottomH * 0.38f
         val line2Y = marginTop + h + bottomH * 0.74f
         var x = (outW - firstLineW) / 2f
@@ -703,16 +762,19 @@ class ExifFrameViewModel @Inject constructor(
             drawBrand(canvas, mark, x, line1Y - brandH / 2f, brandH, darkBg = false)
             x += brandLogoWidth(mark, brandH) + w * 0.02f
         }
-        if (modelText.isNotEmpty()) {
-            fitTextSize(modelPaint, modelText, outW * 0.8f, bottomH * 0.22f, bottomH * 0.14f)
-            canvas.drawText(modelText, x, baselineFor(modelPaint, line1Y), modelPaint)
+        if (fittedModel != null) {
+            canvas.drawText(fittedModel.text, x, baselineFor(modelPaint, line1Y), modelPaint)
         }
         val custom = state.customText.trim()
         val second = listOf(params, custom).filter { it.isNotEmpty() }.joinToString("  ·  ")
         if (second.isNotEmpty()) {
-            paramPaint.textAlign = Paint.Align.CENTER
-            fitTextSize(paramPaint, second, outW * 0.82f, bottomH * 0.17f, bottomH * 0.11f)
-            canvas.drawText(second, outW / 2f, baselineFor(paramPaint, line2Y), paramPaint)
+            val fitted = fit(paramPaint, second, bottomH * 0.17f, bottomH * 0.11f, outW * 0.82f)
+            canvas.drawText(
+                fitted.text,
+                outW / 2f - fitted.width / 2f,
+                baselineFor(paramPaint, line2Y),
+                paramPaint,
+            )
         }
         return result
     }
@@ -724,7 +786,7 @@ class ExifFrameViewModel @Inject constructor(
     private fun renderSignature(source: Bitmap, fields: List<FrameField>, state: ExifFrameState): Bitmap {
         val w = source.width
         val h = source.height
-        val barH = (w * 0.17f).toInt().coerceAtLeast(120)
+        val barH = FrameGeometry.output(FrameGeometry.SIGNATURE, w, h).barHeight
         val result = createBitmap(w, h + barH)
         val canvas = Canvas(result)
         canvas.drawColor(hex("#0B0C0E"))
@@ -754,8 +816,14 @@ class ExifFrameViewModel @Inject constructor(
             letterSpacing = 0.05f
         }
         if (modelText.isNotEmpty()) {
-            fitTextSize(modelPaint, modelText, w - textX - padX, barH * 0.28f, barH * 0.16f)
-            canvas.drawText(modelText, textX, baselineFor(modelPaint, line1), modelPaint)
+            // 右侧要留给品牌 LOGO，两者各自按整行缩放会叠在一起：先扣掉 LOGO 的位置
+            val mark = brandOf()
+            val brandH = barH * 0.26f
+            val logoReserve = if (state.keepLogo) brandLogoWidth(mark, brandH) + padX else 0f
+            drawFitted(
+                canvas, modelPaint, modelText, textX, line1,
+                barH * 0.28f, barH * 0.16f, w - textX - padX - logoReserve,
+            )
         }
         if (state.keepLogo) {
             val mark = brandOf()
@@ -769,8 +837,10 @@ class ExifFrameViewModel @Inject constructor(
         val custom = state.customText.trim()
         val second = listOf(params, custom).filter { it.isNotEmpty() }.joinToString("   ")
         if (second.isNotEmpty()) {
-            fitTextSize(paramPaint, second, w - textX - padX, barH * 0.18f, barH * 0.11f)
-            canvas.drawText(second, textX, baselineFor(paramPaint, line2), paramPaint)
+            drawFitted(
+                canvas, paramPaint, second, textX, line2,
+                barH * 0.18f, barH * 0.11f, w - textX - padX,
+            )
         }
         return result
     }
@@ -823,13 +893,19 @@ class ExifFrameViewModel @Inject constructor(
             cursor += brandLogoWidth(mark, brandH) + w * 0.02f
         }
         if (modelText.isNotEmpty()) {
-            fitTextSize(modelPaint, modelText, w - padX - cursor, modelPaint.textSize, modelPaint.textSize * 0.6f)
-            canvas.drawText(modelText, cursor, baseline1, modelPaint)
+            val base = modelPaint.textSize
+            drawFittedAtBaseline(
+                canvas, modelPaint, modelText, cursor, baseline1,
+                base, base * 0.6f, w - padX - cursor,
+            )
         }
         val second = listOf(params, custom).filter { it.isNotEmpty() }.joinToString("  ·  ")
         if (second.isNotEmpty()) {
-            fitTextSize(paramPaint, second, w - padX * 2, paramPaint.textSize, paramPaint.textSize * 0.7f)
-            canvas.drawText(second, padX, baseline2, paramPaint)
+            val base = paramPaint.textSize
+            drawFittedAtBaseline(
+                canvas, paramPaint, second, padX, baseline2,
+                base, base * 0.7f, w - padX * 2,
+            )
         }
         return result
     }
@@ -881,13 +957,65 @@ class ExifFrameViewModel @Inject constructor(
         return centerY - (fm.ascent + fm.descent) / 2f
     }
 
-    /** 自适应字号：先按基准字号量宽，超出则等比缩小（不低于 minSize），避免溢出截断 */
-    private fun fitTextSize(paint: Paint, text: String, maxWidth: Float, baseSize: Float, minSize: Float) {
-        paint.textSize = baseSize
-        if (maxWidth <= 0f) return
-        val measured = paint.measureText(text)
-        if (measured <= maxWidth) return
-        paint.textSize = (baseSize * maxWidth / measured).coerceAtLeast(minSize)
+    /**
+ * 一段已经适配好宽度的文字。[width] 是缩放与截断**之后**的真实占位，
+     * 居中排版必须用它——先前拍立得模板拿缩放前的宽度算 `x`，于是字号一缩整行就偏。
+     */
+    private class Fitted(val text: String, val width: Float)
+
+    /**
+     * 把一段文字放进 [maxWidth]：先按基准字号量宽，超出则等比缩小，**缩到下限仍放不下就截断加省略号**。
+     *
+     * 截断这一层是后补的。原先只 `coerceAtLeast(minSize)` 就结束，于是长型号名与长署名
+     * 会画到画布外，或与同一行的另一段**静默重叠**——两处都不报错，表现为"某个名字显得怪"。
+     * 纯算术在 [FrameGeometry]（可 JVM 单测），这里只把 `Paint.measureText` 接上去。
+     */
+    private fun fit(paint: Paint, text: String, baseSize: Float, minSize: Float, maxWidth: Float): Fitted {
+        paint.textSize = FrameGeometry.fitTextSize(baseSize, minSize, maxWidth) {
+            paint.textSize = it
+            paint.measureText(text)
+        }
+        val clipped = FrameGeometry.ellipsize(text, maxWidth) { paint.measureText(it.toString()) }
+        return Fitted(clipped, paint.measureText(clipped))
+    }
+
+    /** [fit] 的直接绘制版；**返回实际占用宽度**，调用方据此给同行另一段让位。 */
+    private fun drawFitted(
+        canvas: Canvas,
+        paint: Paint,
+        text: String,
+        x: Float,
+        centerY: Float,
+        baseSize: Float,
+        minSize: Float,
+        maxWidth: Float,
+    ): Float {
+        val fitted = fit(paint, text, baseSize, minSize, maxWidth)
+        canvas.drawText(fitted.text, x, baselineFor(paint, centerY), paint)
+        return fitted.width
+    }
+
+    /**
+     * 同 [drawFitted]，但 [baselineY] 直接就是基线。
+     *
+     * 极简叠字的两行位置是从画面底边倒推的**基线**（`h - padBottom`），不是视觉中心。
+     * 把它当中心线喂进 [baselineFor] 需要一个"ascent/descent 均值 ÷ 字号"的折算系数，
+     * 而那个系数依赖字体度量、且字号在自适应之后还会变——猜出来的结果随字体而异。
+     * 需要基线的地方就用这个重载，不要折算。
+     */
+    private fun drawFittedAtBaseline(
+        canvas: Canvas,
+        paint: Paint,
+        text: String,
+        x: Float,
+        baselineY: Float,
+        baseSize: Float,
+        minSize: Float,
+        maxWidth: Float,
+    ): Float {
+        val fitted = fit(paint, text, baseSize, minSize, maxWidth)
+        canvas.drawText(fitted.text, x, baselineY, paint)
+        return fitted.width
     }
 
     /** 细线线宽：按位图宽度取，避免高分辨率下 1px 细线消失 */
@@ -962,46 +1090,87 @@ class ExifFrameViewModel @Inject constructor(
         return bmp
     }
 
-    /** 导出：全尺寸渲染 → 普通照片落盘（保留 EXIF）；实况图提取视频重新合成 */
+    /**
+     * 导出：按原分辨率重算 → [ExportManager] 落盘（格式 / 画质 / 元数据策略）→ 提交相册；
+     * 实况图再把视频与画框静态图重新合成。
+     *
+     * **修复导出分辨率腰斩。** 原实现拿预览用的 1600px 基准图直接落盘，
+     * 于是 6000px 的照片导出成 1600px——像素丢掉约 93%。同一个 bug 在编辑调节里
+     * 已经修过（CHANGELOG「导出分辨率腰斩」），修法是逐个 feature 落的，漏了这里。
+     *
+     * 版式不受影响：所有尺寸按源图宽取比例，且 [FrameGeometry.proportionalAbove]
+     * 把「1600px 以上不再触及下限」钉成了单测，所以预览与成品是同构的。
+     */
     fun export() {
         val state = _state.value
         val sourceUri = state.sourceUri ?: return
         if (state.exporting) return
-        val src = sourceBitmap
-        if (src == null) {
-            // 源图未加载成功（解码失败等）——明确提示而非 NPE 出 "导出失败：null"
-            _state.update { it.copy(message = "图片尚未加载成功，请重新选择或更换图片") }
+        // 源图没加载成功（解码失败等）时明确提示，而不是让 export 内部解一次全分辨率
+        // 再失败——后者会把「源图坏了」显示成「导出失败」，误导用户重试。
+        if (sourceBitmap == null) {
+            _state.update { it.copy(message = "图片尚未加载成功，请重新选择或更换图片", success = false) }
             return
         }
+        // 判定一次、出口两处：界面提示与导出拒绝用同一句话。
+        // 两处各判一次就会出现「开关是亮的、点下去失败」。
+        motionFormatReason(state.isMotion, state.exportConfig.format)?.let { reason ->
+            _state.update { it.copy(message = reason, success = false) }
+            return
+        }
+        // 导出期间可能改格式，所以这里定下的 config 要一路带到落盘——
+        // commitToGallery 再读一次 _state 就会与文件名/实际编码不一致
+        val config = state.exportConfig
         viewModelScope.launch {
             _state.update { it.copy(exporting = true, message = null) }
             // 在任何挂起之前就抓住：导出期间用户点「重新选择照片」会把字段置空，
             // 抓到之后再读就只剩一份普通照片，实况的那段视频白解了。
             val motionVideo = sourceMotionVideo
-            var renderedFile: File? = null
+            var exported: File? = null
             try {
-                renderedFile = withContext(Dispatchers.IO) {
-                    // 用发起时捕获的局部引用：导出期间用户重新选择会置空字段，
-                    // 此处再用 sourceBitmap!! 会 NPE
-                    val bitmap = renderFrame(src, state.template, state.fields, state)
-                    File.createTempFile("exifframe", ".jpg", context.cacheDir).apply {
-                        outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 95, it) }
-                        bitmap.recycle()
+                exported = withContext(Dispatchers.IO) {
+                    val full = decodeScaled(sourceUri, ExportLimits.maxLongEdge())
+                        ?: throw IllegalStateException("源图解码失败，请重新选择照片")
+                    val rendered = try {
+                        renderFrame(full, state.template, state.fields, state)
+                    } finally {
+                        // 全分辨率那张比预览那张大一个量级，画完立刻放掉；
+                        // 否则它会和成品位图、导出缓冲一起压在峰值上
+                        full.recycle()
+                    }
+                    try {
+                        ExportManager(context).exportRendered(
+                            bitmap = rendered,
+                            exifSource = sourceUri,
+                            config = config,
+                            nameBase = "IMAGEDGE_${System.currentTimeMillis()}",
+                        )
+                    } finally {
+                        // 必须 finally 而不是 `.also`：编码器写一半失败时 exportRendered
+                        // 会抛，而 `.also` 只在成功时跑。6000px 宽的成品位图约 136MB，
+                        // 漏掉这一次就是一次实打实的内存尖峰。
+                        rendered.recycle()
                     }
                 }
                 if (motionVideo != null) {
                     // 实况图：画框静态图 + 原视频重新合成（视频内原封面帧时间戳保持不变）。
-                    // exifSourceUri = 原图：画框成品同样保留原拍摄信息
+                    //
+                    // EXIF 策略在这里**必须自己判一次**：MotionPhotoComposer 走的是
+                    // MotionPhotoExifPreserver，它无条件把源的拍摄参数注回封面，
+                    // 不知道 ExifPolicy 是什么。不传就是「保留全部」——
+                    // 于是「清除全部信息」这个选项在实况图上是个摆设。
+                    // （STRIP_LOCATION 无需额外处理：那个 preserver 本来就不复制 GPS。）
+                    val exifForMotion =
+                        if (config.exif == ExifPolicy.STRIP_ALL) null else sourceUri
                     val result = MotionPhotoComposer.compose(
                         context = context,
-                        imageUri = Uri.fromFile(renderedFile),
+                        imageUri = Uri.fromFile(exported!!),
                         videoUri = Uri.fromFile(motionVideo),
-                        exifSourceUri = sourceUri,
+                        exifSourceUri = exifForMotion,
                     )
                     MotionPhotoComposer.saveToGallery(context, result)
                     AppLog.i("exifframe", "实况画框已导出：${result.displayName}")
                 } else {
-                    saveStill(renderedFile, sourceUri)
+                    commitToGallery(exported, sourceUri, config.format)
                     AppLog.i("exifframe", "画框照片已导出")
                 }
                 _state.update {
@@ -1014,7 +1183,7 @@ class ExifFrameViewModel @Inject constructor(
                 haptics.double()
             } finally {
                 // 失败路径同样要删：只写在成功分支上，导出失败一次就漏一份成品图
-                runCatching { renderedFile?.delete() }
+                runCatching { exported?.delete() }
             }
         }
     }
@@ -1025,32 +1194,24 @@ class ExifFrameViewModel @Inject constructor(
      * 修复 v1 的三处缺陷：文件名拼写（IMGDEGE → IMAGEDGE）、丢 EXIF（现在复制拍摄参数与
      * 时间）、落盘缺 `IS_PENDING`/`DATE_TAKEN`（相册会看到半成品，且按保存时间而非拍摄时间排序）。
      */
-    private fun saveStill(rendered: File, sourceUri: Uri) {
+    private fun commitToGallery(exported: File, sourceUri: Uri, format: ExportFormat) {
         val resolver = context.contentResolver
-        val sourceExif = runCatching {
-            resolver.openFileDescriptor(sourceUri, "r")?.use { ExifInterface(it.fileDescriptor) }
-        }.getOrNull()
         val dateMillis = runCatching {
-            (sourceExif?.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
-                ?: sourceExif?.getAttribute(ExifInterface.TAG_DATETIME))?.let(::parseExifDate)
+            resolver.openFileDescriptor(sourceUri, "r")?.use { fd ->
+                val exif = ExifInterface(fd.fileDescriptor)
+                (exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+                    ?: exif.getAttribute(ExifInterface.TAG_DATETIME))?.let(::parseExifDate)
+            }
         }.getOrNull()
 
-        // EXIF 复制在缓存文件上完成（MediaStore 目标流不可随机读写）
-        runCatching {
-            val dst = ExifInterface(rendered.absolutePath)
-            sourceExif?.let { src ->
-                for (tag in COPY_EXIF_TAGS) src.getAttribute(tag)?.let { dst.setAttribute(tag, it) }
-            }
-            dst.setAttribute(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL.toString())
-            dst.saveAttributes()
-        }.onFailure { AppLog.w("exifframe", "EXIF 复制失败（成品仍可用）：${it.message}") }
-
+        // 拍摄时间读**源图**而不是导出件：策略选「清除全部」或格式选 PNG 时，
+        // 导出件里根本没有 EXIF，这时 DATE_TAKEN 写不进去，
+        // 去年拍的照片修完就插进相册「今天」那一堆里。
         val values = android.content.ContentValues().apply {
-            put(
-                android.provider.MediaStore.MediaColumns.DISPLAY_NAME,
-                "IMAGEDGE_${System.currentTimeMillis()}.jpg"
-            )
-            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, exported.name)
+            // MIME 与扩展名必须跟着实际编码走。写死 image/jpeg 会让相册把一个
+            // WebP/PNG 索引成 JPEG，接收方按 MIME 分派解码器时直接解不出来。
+            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, format.mime)
             put(
                 android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
                 "${android.os.Environment.DIRECTORY_DCIM}/Imagedge"
@@ -1062,7 +1223,7 @@ class ExifFrameViewModel @Inject constructor(
             ?: throw IllegalStateException("创建相册条目失败")
         try {
             resolver.openOutputStream(uri)?.use { out ->
-                rendered.inputStream().use { it.copyTo(out) }
+                exported.inputStream().use { it.copyTo(out) }
             } ?: throw IllegalStateException("无法写入相册")
             runCatching {
                 resolver.update(
@@ -1074,6 +1235,7 @@ class ExifFrameViewModel @Inject constructor(
                 )
             }
         } catch (e: Exception) {
+            // 半成品留在相册里就是一个打不开的条目，删掉再抛
             runCatching { resolver.delete(uri, null, null) }
             throw e
         }
@@ -1116,33 +1278,37 @@ class ExifFrameViewModel @Inject constructor(
     }
 
     companion object {
-        /** 导出时复制的 EXIF 字段（拍摄参数 + 时间 + 作者信息） */
-        private val COPY_EXIF_TAGS = arrayOf(
-            ExifInterface.TAG_MAKE,
-            ExifInterface.TAG_MODEL,
-            ExifInterface.TAG_LENS_MODEL,
-            ExifInterface.TAG_F_NUMBER,
-            ExifInterface.TAG_EXPOSURE_TIME,
-            ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY,
-            ExifInterface.TAG_FOCAL_LENGTH,
-            ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM,
-            ExifInterface.TAG_DATETIME_ORIGINAL,
-            ExifInterface.TAG_DATETIME,
-            ExifInterface.TAG_EXPOSURE_BIAS_VALUE,
-            ExifInterface.TAG_WHITE_BALANCE,
-            ExifInterface.TAG_COLOR_SPACE,
-            ExifInterface.TAG_ARTIST,
-            ExifInterface.TAG_COPYRIGHT,
-            ExifInterface.TAG_IMAGE_DESCRIPTION,
-            ExifInterface.TAG_SOFTWARE,
-            ExifInterface.TAG_GPS_LATITUDE,
-            ExifInterface.TAG_GPS_LATITUDE_REF,
-            ExifInterface.TAG_GPS_LONGITUDE,
-            ExifInterface.TAG_GPS_LONGITUDE_REF,
-            ExifInterface.TAG_GPS_ALTITUDE,
-            ExifInterface.TAG_GPS_ALTITUDE_REF,
-            ExifInterface.TAG_GPS_TIMESTAMP,
-            ExifInterface.TAG_GPS_DATESTAMP,
-        )
+        /**
+         * 实况图的格式限制：**只能 JPEG**。
+         *
+         * Motion Photo 的规格是「一张 JPEG + 一段视频」——相册是靠 JPEG 里的
+         * XMP 与 MPF 段认出它是动态图的。换成 PNG/WebP，画框静态图与视频就再也拼不成
+         * 动态照片：合成要么失败，要么产出一个相册不认、用户看着"动不了"的文件。
+         *
+         * 所以这条不能只靠"点下去会失败"——那是用户在相册里才发现的失败。
+         * 判定一次、出口两处：界面提示与 [export] 的拒绝用同一句话。
+         *
+         * 放在 companion 而不是实例上：它不碰任何状态，而挂在实例上就没法在
+         * JVM 上直接验收（构造 ViewModel 需要 Context）。
+         *
+         * @return 一句给用户看的原因；null 表示这个组合可以导出。
+         */
+        fun motionFormatReason(isMotion: Boolean, format: ExportFormat): String? = when {
+            !isMotion -> null
+            format != ExportFormat.JPEG ->
+                "实况图只能导出为 JPEG：动态照片依赖 JPEG 里的 XMP 与 MPF 段，换格式后视频会与静态图失去关联"
+            else -> null
+        }
+
+        /**
+         * 这里曾有一份 25 个 tag 的 `COPY_EXIF_TAGS`，无条件全拷、含 GPS。
+         *
+         * 删掉的理由不是"重复"，是**它让用户无从选择**：`:share` 早就有
+         * `ExifPolicy`（保留全部 / 仅清除位置 / 清除全部），分享面板和编辑调节都接了，
+         * 只有这里一份自带常量把坐标焊死在成品里。相机照片的 EXIF 带 GPS，
+         * 发到公开平台等于公开拍摄地点——这不是隐私洁癖，是这个功能本来的用途要求的。
+         *
+         * 元数据复制现在由 [ExportManager.exportRendered] 按 [ExportConfig.exif] 统一处理。
+         */
     }
 }

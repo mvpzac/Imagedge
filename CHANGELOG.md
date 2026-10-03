@@ -83,6 +83,41 @@ All notable changes to this project are documented here. Format follows [Keep a 
 - 开关存进 `MonitoringSettings`（**唯一来源**）：另在 ViewModel 存一份运行时开关必然
   不同步，而不同步的表现是「开关显示关着但条纹还在」，比没有开关更难查
 
+**边框水印：导出按原分辨率重算，排版数学抽成可单测的纯函数**
+
+调研这个功能时先查了它自己：CHANGELOG 里记着「修复导出分辨率腰斩——原先用 1600px 编辑副本
+导出（6000px 照片只剩 1600px）」，那条修正在编辑调节与 LUT 里落地了，**边框水印漏了**。
+修法是逐个 feature 落的，"另一个编辑器有"不等于"这个编辑器有"。
+
+- **导出重新按原分辨率解码**（`ExifFrameViewModel.export`）：预览用的 1600px 基准图不再参与
+  落盘。尺寸上限由新的 `ExportLimits` 按堆上限反推，**与编辑调节共用**——原先
+  `PhotoEditViewModel` 私有一份 `exportMaxDim()`，同一个上限迟早在两个文件里漂移。
+  版式不用重排：全部尺寸按源图宽取比例，这个不变式由 `FrameGeometryTest` 钉住
+- **`FrameGeometry`（`:image`）**：四套模板的版式参数与纯计算（成品尺寸、字号自适应、
+  码点安全截断、左右分栏预算、快门格式化）。原先五套模板是 `when` 的五个分支各带一套
+  魔法比例，**渲染器一行都测不了**——量一个字符串要 `Paint`，要 `Paint` 就要 Android
+- **文字不再静默溢出**：`fitTextSize` 撞到下限就结束，长型号名与长署名会画到画布外，
+  或与同一行另一段**叠在一起**。现在按码点截断加省略号；同一行的两段先分预算再各自适应。
+  顺带修掉拍立得「拿缩放前的宽度算居中」——字号一缩整行就偏
+- **EXIF 统一到 `ExportManager`**：删掉这里第三份 25-tag 的 `COPY_EXIF_TAGS`
+  （`ExportManager`、`MotionPhotoExifPreserver` 各有一份）。它无条件复制 GPS，
+  于是"把带定位的照片发出去"在这个功能里没有任何开关可关。界面挂的是分享面板与
+  编辑调节同一份 `ExportConfigControls`，格式/画质/元数据策略三组一次给全
+- **「重置」看得见了**：只改拍摄信息**内容**（EXIF 读错时最常做的事）此前不算改动，
+  `FrameField` 加 `baseline` 之后才算——`resetStyle()` 本来就会还原值，改了却回不来
+- **快门补 APEX 兜底**：`ExposureTime` 缺失时用 `ShutterSpeedValue`（`Tv = log2(1/t)`），
+  否则该字段整个空掉。同时补上子秒分支漏掉的单位 `s`——原先长曝显示「2s」而快门
+  显示「1/125」，同一功能内不一致
+
+**开放策略开关带进来的两个新缺陷（都不是笔误，是设计遗漏）**
+
+- 实况图配 PNG/WebP 会产出相册不认的「动态照片」：Motion Photo 靠 JPEG 里的 XMP 与 MPF
+  关联视频。`motionFormatReason` 判定一次，**界面提示与导出拒绝用同一句话**
+- `ExifPolicy.STRIP_ALL` 在实况图上原本是个摆设：`MotionPhotoComposer` 走
+  `MotionPhotoExifPreserver.injectExifFrom`，它无条件把源 EXIF 注回封面，
+  **不认识 ExifPolicy**。改为该策略下传 `exifSourceUri = null`。
+  ⚠️ `STRIP_LOCATION` 看似生效其实是巧合——那个 preserver 本来就不复制 GPS
+
 ### Fixed / 修复
 
 - **0x9207 回退路径的包结构此前是错的**：`params` 挂了一个多余的 0，且数据阶段声明成

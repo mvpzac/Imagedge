@@ -37,6 +37,7 @@ import com.imagedge.camera.ui.components.AppTextField
 import com.imagedge.camera.ui.theme.Spacing
 import com.imagedge.camera.ui.components.AppButtonType
 import com.imagedge.camera.ui.components.EmptyState
+import com.imagedge.camera.ui.components.ExportConfigControls
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.ProcessingView
 import com.imagedge.camera.ui.components.ResultMessage
@@ -181,6 +182,31 @@ fun ExifFrameScreen(
                             onValueChange = { viewModel.setCustomText(it) },
                             label = "自定义文字（署名 / 地点 / ©）"
                         )
+                    }
+
+                    // ── 导出设置：格式 / 画质 / 元数据策略 ──
+                    // 用的是分享面板与编辑调节同一份组件，不是第二份实现。
+                    // 此前本功能自带一份 25 个 tag 的 EXIF 拷贝且无条件带 GPS，
+                    // 于是「把带定位的照片发出去」在这里没有任何开关可关
+                    // （见 ExportConfigControls 的 KDoc：两份导出必须给出同样的选择）。
+                    val config = state.exportConfig
+                    AppSection(title = "导出设置") {
+                        ExportConfigControls(
+                            config = config,
+                            onFormatChange = { viewModel.setExportConfig(config.copy(format = it)) },
+                            onQualityChange = { viewModel.setExportConfig(config.copy(quality = it)) },
+                            onExifChange = { viewModel.setExportConfig(config.copy(exif = it)) }
+                        )
+                        // 实况图只能出 JPEG。理由与导出出口用同一个函数，
+                        // 免得界面写一句、导出路径判一次，两边对不上
+                        val formatNote = ExifFrameViewModel.motionFormatReason(state.isMotion, config.format)
+                        if (formatNote != null) {
+                            Text(
+                                text = formatNote,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
 
                     // 换一张是另一个动作，不能和「重置样式」混成一个按钮（批次 E）

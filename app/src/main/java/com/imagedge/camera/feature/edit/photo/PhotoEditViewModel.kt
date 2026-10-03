@@ -11,6 +11,7 @@ import androidx.annotation.RequiresApi
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.imagedge.camera.core.common.AppLog
+import com.imagedge.camera.core.export.ExportLimits
 import com.imagedge.camera.data.edit.EditRecipeDocument
 import com.imagedge.camera.data.edit.EditRecipePresetStore
 import com.imagedge.camera.data.edit.sanitizePresetName
@@ -134,15 +135,6 @@ private const val LUT_PREVIEW_MAX_DIM = 640
  * 22 个滤镜 × 128² ≈ 36 万像素，一次装配耗时几十毫秒。
  */
 private const val LUT_THUMB_MAX_DIM = 128
-
-/**
- * 导出时的可用内存预算占比。
- *
- * 全分辨率导出至少要同时持有「源位图 + 输出位图」两份 ARGB_8888，
- * 24MP 源图即 96MB×2。这里按 JVM 堆上限的 1/3 反推可处理的最大长边，
- * 装不下时按 2 的幂采样降级——**宁可略降分辨率，也不能 OOM 崩掉正在编辑的照片**。
- */
-private const val EXPORT_HEAP_BUDGET_RATIO = 3
 
 data class PhotoEditState(
     /** 当前编辑的源图 URI（界面据此判断是否已加载、以及是否需要重新载入） */
@@ -1711,17 +1703,10 @@ class PhotoEditViewModel @Inject constructor(
     /**
      * 计算本次导出允许的最大长边。
      *
-     * 全分辨率导出需同时持有源位图与输出位图（各 4 字节/像素）。
-     * 按堆上限的 1/[EXPORT_HEAP_BUDGET_RATIO] 反推像素上限，再换算成边长；
-     * 至少保证 2048px，避免极端内存环境下导出到不可用的小图。
+     * 实现已挪到 [ExportLimits]：编辑调节与边框水印是两条导出路径，但**同一条内存策略**，
+     * 各自抄一份的结果就是同一个上限在两个文件里慢慢漂移。内存可注入的版本带 JVM 单测。
      */
-    private fun exportMaxDim(): Int {
-        val budgetBytes = Runtime.getRuntime().maxMemory() / EXPORT_HEAP_BUDGET_RATIO
-        // 两份位图 → 每像素 8 字节
-        val maxPixels = (budgetBytes / 8).coerceAtLeast(2048L * 2048L)
-        val maxSide = kotlin.math.sqrt(maxPixels.toDouble()).toInt()
-        return maxSide.coerceIn(2048, 6000)
-    }
+    private fun exportMaxDim(): Int = ExportLimits.maxLongEdge()
 
     /**
      * 全分辨率处理：**按水平条带**跑，避免一次性分配整图的三块缓冲。
