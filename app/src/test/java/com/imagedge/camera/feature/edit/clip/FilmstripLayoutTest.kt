@@ -44,7 +44,7 @@ class FilmstripLayoutTest {
      * 而被判给被禁用的起手柄，最终一个字也不动。
      */
     @Test
-    fun `启用集合先于定区过滤_封面 tab 上按下起手柄旁边也能拖到封面`() {
+    fun `启用集合先于定区过滤否则封面 tab 上按下起手柄旁边就是死区`() {
         // 按下点 x=100：距起手柄 0px、距封面柄 12px，两者都在 24px 半径内
         val hit = filmstripHandleFor(
             x = 100f,
@@ -58,7 +58,7 @@ class FilmstripLayoutTest {
 
     /** 反过来也要钉住：启用的柄照常命中，任何一个启用柄都不在半径内时必须是 null（不动） */
     @Test
-    fun `启用中的手柄照常命中_半径内没有启用手柄时不拖任何东西`() {
+    fun `启用的手柄照常命中而半径内没有启用手柄时不拖任何东西`() {
         assertEquals(
             FilmstripHandle.In,
             filmstripHandleFor(
