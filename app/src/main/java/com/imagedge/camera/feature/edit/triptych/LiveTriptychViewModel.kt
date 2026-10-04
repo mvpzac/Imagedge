@@ -103,9 +103,9 @@ class LiveTriptychViewModel @Inject constructor(
         val aspect: Aspect = Aspect.R16_9,
         /** 导出画质档位。经 [Aspect.cellSize] 决定三段视频的目标尺寸与拼图画布尺寸 */
         val quality: Quality = Quality.P1080,
-        /** 当前正在编辑第几格。**暂无读取方**（Task 5 的 tab 区消费它） */
+        /** 当前正在编辑第几格。读取方：Screen 的格选择条与「本格 / 封面」tab（Task 5 接上） */
         val selectedIndex: Int = 0,
-        /** 当前参数区 tab。**暂无读取方**（同上） */
+        /** 当前参数区 tab。读取方：Screen 的 tab 条（Task 5 接上，四个 tab 各渲染一块） */
         val tab: TriptychTab = TriptychTab.CELL,
         /** 导出成功且已落盘；结果页据此呈现，之后不再视为「编辑中」 */
         val done: Boolean = false,
@@ -243,10 +243,10 @@ class LiveTriptychViewModel @Inject constructor(
         invalidatePreview()
     }
 
-    /** 当前 tab。**暂无读取方**：参数区在 Task 5 才铺开，现在只有 [UiState.selectedIndex] 同理 */
+    /** 当前 tab。读取方是 Screen 的 tab 条与 tab 内容区（Task 5 接上） */
     fun setTab(tab: TriptychTab) = _state.update { it.copy(tab = tab) }
 
-    /** 选中第几格。**暂无读取方**（Task 5 的 tab 区消费它） */
+    /** 选中第几格。读取方：Screen 的格选择条；「本格 / 封面」两个 tab 的内容跟着它取槽位 */
     fun select(index: Int) {
         if (index !in _state.value.slots.indices) return
         _state.update { it.copy(selectedIndex = index) }

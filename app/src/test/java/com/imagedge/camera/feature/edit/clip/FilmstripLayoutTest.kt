@@ -1,6 +1,7 @@
 package com.imagedge.camera.feature.edit.clip
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -219,5 +220,60 @@ class FilmstripLayoutTest {
                 ),
             ),
         )
+    }
+
+    /**
+     * 封面越界态从 spec 自己推导；`coverMs == null`（还没选封面）恒 `false`。
+     *
+     * 上一版这是一枚由**调用方申报**的 `coverOutOfRange: Boolean` 参数，规则只写在
+     * KDoc 散文里（「coverMs == null 时须传 false」）。两种写错都不会有响动：
+     * 多传 `true` 会给一条根本不存在的封面画越界色；漏传（写死 `false`，
+     * 正是 Task 5 brief 的调用点犯的错）会把真越界的封面显示成正常色——
+     * 静默降级，用户无从分辨。于是判定收进 spec，参数整个删掉。
+     *
+     * `0L` 一支单独钉：0 是合法封面时刻（候选条带最左那张，见 [ClipSpec] 的 KDoc），
+     * 落在段内为 false、落在段外为 true——这一对成立才证明 `null` 没有被 0 悄悄代理。
+     */
+    @Test
+    fun `封面越界态由 spec 自证而 null 恒为不在界外`() {
+        assertFalse(coverOutOfRangeOf(ClipSpec(1000L, 3000L, null)))
+        assertFalse(coverOutOfRangeOf(ClipSpec(1000L, 3000L, 2000L)))
+        assertFalse(coverOutOfRangeOf(ClipSpec(0L, 3000L, 0L)))
+        assertTrue(coverOutOfRangeOf(ClipSpec(1000L, 3000L, 500L)))
+        assertTrue(coverOutOfRangeOf(ClipSpec(1000L, 3000L, 4000L)))
+    }
+
+    /**
+     * 「参数已被删除」这件事在 JVM 层唯一能钉的方式：签名里没有布尔形参。
+     *
+     * 编译后的 Composable 形参表是 `(List, ClipSpec, long, Set, Function1, Modifier,
+     * Composer, int)`——`coverOutOfRange` 曾住在 `Set` 与 `Function1` 之间。
+     * 哪天有人把它以别的名义加回调用方申报，这条会红。
+     */
+    @Test
+    fun `缩略图条的签名里没有留给调用方申报的布尔参数`() {
+        val method = Class.forName("com.imagedge.camera.feature.edit.clip.ClipFilmstripKt")
+            .declaredMethods
+            .single { it.name == "ClipFilmstrip" }
+        assertTrue(
+            "coverOutOfRange 参数必须已删除——散文护栏挡不住静默降级（见上一条测试）",
+            Boolean::class.javaPrimitiveType !in method.parameterTypes.toList(),
+        )
+    }
+
+    /**
+     * 毫秒 → 轨道像素的换算：绘制与命中**共用 [msToTrackPx] 这一个函数**，
+     * 这里钉换算本身。两端钳制也钉住：拖出素材末尾的封面画在轨道末端
+     * （越界另由颜色表达，见 [coverOutOfRangeOf]），负输入落回 0。
+     */
+    @Test
+    fun `毫秒折算轨道像素单调且钳在轨道内`() {
+        assertEquals(0f, msToTrackPx(0L, 10000L, 1000f), 0.001f)
+        assertEquals(300f, msToTrackPx(3000L, 10000L, 1000f), 0.001f)
+        assertEquals(500f, msToTrackPx(5000L, 10000L, 1000f), 0.001f)
+        assertEquals(1000f, msToTrackPx(10000L, 10000L, 1000f), 0.001f)
+        // 越界与负值：钳到端点，不溢出轨道
+        assertEquals(1000f, msToTrackPx(30000L, 10000L, 1000f), 0.001f)
+        assertEquals(0f, msToTrackPx(-500L, 10000L, 1000f), 0.001f)
     }
 }
