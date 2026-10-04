@@ -13,6 +13,7 @@ import com.imagedge.camera.motionphoto.MotionPhotoVideoCoverExtractor
 import com.imagedge.camera.ui.feedback.Haptics
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -344,6 +345,9 @@ class VideoToLivePhotoViewModel @Inject constructor(
             kotlinx.coroutines.delay(1_500)
             MotionPhotoComposer.trimVideo(context, clip.uri, clip.startMs, clip.endMs, audioOn = false)
         }.getOrThrow()
+        // 封面 JPEG 写在 compose 不清理的目录里（见 MotionPhotoTempFiles 的注释），
+        // 故其清理必须由这里负责；声明在 try 外以便 finally 够得着。
+        var coverFile: File? = null
         try {
             // 2) 封面：时间换算到裁剪后文件上；未手选则取段中间（-1 = 各层默认中间帧）
             val coverOffsetMs = if (clip.coverTimeMs >= 0) {
@@ -351,13 +355,12 @@ class VideoToLivePhotoViewModel @Inject constructor(
             } else {
                 -1L
             }
-            val coverUri = Uri.fromFile(
-                MotionPhotoVideoCoverExtractor.extractCoverJpeg(
-                    context = context,
-                    videoUri = Uri.fromFile(trimmed),
-                    timestampMs = coverOffsetMs,
-                )
+            coverFile = MotionPhotoVideoCoverExtractor.extractCoverJpeg(
+                context = context,
+                videoUri = Uri.fromFile(trimmed),
+                timestampMs = coverOffsetMs,
             )
+            val coverUri = Uri.fromFile(coverFile)
             // 3) 合成：封面图 + 时间戳双写（官方规范：缺省时 reader 播视频中间帧）
             //    exifSourceUri = 源视频：成品保留源素材的拍摄时间（视频容器无完整 EXIF）
             val result = MotionPhotoComposer.compose(
@@ -372,6 +375,8 @@ class VideoToLivePhotoViewModel @Inject constructor(
             // 4) 保存相册
             MotionPhotoComposer.saveToGallery(context, result)
         } finally {
+            // 封面 JPEG 不在 compose 的工作目录清理名单里，漏删就是每次导出在 cacheDir 留一张
+            runCatching { coverFile?.delete() }
             trimmed.delete()
         }
     }
