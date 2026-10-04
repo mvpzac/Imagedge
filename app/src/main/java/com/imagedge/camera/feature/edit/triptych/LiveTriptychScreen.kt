@@ -130,7 +130,7 @@ fun LiveTriptychScreen(
                             contentScale = ContentScale.Fit,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .aspectRatio(state.aspect.targetW.toFloat() / (state.aspect.targetH * 3))
+                                .aspectRatio(state.aspect.refW.toFloat() / (state.aspect.refH * 3))
                                 .clip(RoundedCornerShape(Radius.Card))
                         )
                     }
@@ -174,7 +174,7 @@ private fun EditStage(
     // ── 全局统一长宽比 ──
     AppSection(title = "统一长宽比") {
         AppChipRow(
-            items = LiveTriptychViewModel.Aspect.entries.toList(),
+            items = Aspect.entries.toList(),
             selected = state.aspect,
             // 三格固定：标签要连成品比例一起标，否则用户只能自己算纵向堆叠的结果。
             // 标签变长了就必须改横向滚动：四个长文案挤在一行等宽分栏里会各自截断
@@ -207,7 +207,7 @@ private fun PreviewStage(
             contentScale = ContentScale.Fit,
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(aspect.targetW.toFloat() / (aspect.targetH * 3))
+                .aspectRatio(aspect.refW.toFloat() / (aspect.refH * 3))
                 .clip(RoundedCornerShape(Radius.Card))
         )
     } else if (state.previewLoading) {
