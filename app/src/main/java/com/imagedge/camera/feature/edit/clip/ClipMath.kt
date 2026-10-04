@@ -29,32 +29,37 @@ object ClipMath {
     enum class Zone { None, Start, End, Cover }
 
     /**
-     * 起手钳制到 `[0, endMs - MIN_CLIP_MS]`。
+     * 起手钳制到 `[0, endMs - MIN_CLIP_MS]`。**永不产出 `startMs > endMs`。**
      *
      * 手写比较而非 `coerceIn`：后者在 `max < min` 时抛异常，而边界交叉
      * （止手被拖到起手左边）在拖拽中真的会发生。
      *
-     * 退化区间（`endMs - MIN_CLIP_MS <= 0`，两个手柄已经交叉或素材太短）
-     * 里不存在合法起手，返回 [MIN_CLIP_MS] 作为「压到最短片段」的哨兵而不是 0——
-     * 0 会让片段长度变成 0 帧，哨兵至少还能被 ClipSpec.durationMs 夹回非负，
-     * 且调用方必须同时夹两个手柄才能得到合法区间。
+     * 退化区间（`endMs - MIN_CLIP_MS <= 0`）意味着素材比 [MIN_CLIP_MS] 还短、
+     * 根本不存在合法片段。此时**塌陷到 0 而不是 [MIN_CLIP_MS]**：0 绝不会超过
+     * 非负的 `endMs`，而哨兵值会造出 `startMs=400 > endMs=0` 的倒置区间。
+     * 返回的是零长度但**有序**的区间——这不是「最短片段」，是「没有片段」。
      */
     fun clampStart(targetMs: Long, endMs: Long): Long {
         val max = endMs - MIN_CLIP_MS
-        if (max <= 0L) return MIN_CLIP_MS
+        if (max <= 0L) return 0L
         return targetMs.coerceIn(0L, max)
     }
 
     /**
-     * 止手钳制到 `[startMs + MIN_CLIP_MS, durationMs]`。同样手写比较，退化区间返回 [MIN_CLIP_MS]。
+     * 止手钳制到 `[startMs + MIN_CLIP_MS, durationMs]`。**永不产出 `endMs < startMs`。**
      *
      * 上界是 `durationMs` 本身而不是 `durationMs - MIN_CLIP_MS`：止手必须能落到素材末尾，
      * 否则永远选不到最后一帧。
+     *
+     * 退化区间（`durationMs <= startMs + MIN_CLIP_MS`）同样没有合法片段，
+     * 此时塌陷到素材末尾 `durationMs` 而不是 [MIN_CLIP_MS]：后者会造出
+     * `endMs=400 < startMs=1000` 的倒置区间，或把止手放到 100ms 的素材之外的 400ms。
+     * [clampStart] 已保证 `startMs <= durationMs`，故 `durationMs` 不会低于起手。
      */
     fun clampEnd(targetMs: Long, startMs: Long, durationMs: Long): Long {
         val min = startMs + MIN_CLIP_MS
         val max = durationMs
-        if (max <= min) return MIN_CLIP_MS
+        if (max <= min) return max.coerceAtLeast(0L)
         return targetMs.coerceIn(min, max)
     }
 

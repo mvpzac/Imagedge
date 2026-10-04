@@ -34,8 +34,22 @@ class ClipMathTest {
      */
     @Test
     fun `边界交叉时不抛异常而是给出最短片段`() {
-        assertEquals(400L, ClipMath.clampStart(3000L, endMs = 0L))
-        assertEquals(400L, ClipMath.clampEnd(0L, startMs = 1000L, durationMs = 1000L))
+        assertEquals(0L, ClipMath.clampStart(3000L, endMs = 0L))
+        assertEquals(1000L, ClipMath.clampEnd(0L, startMs = 1000L, durationMs = 1000L))
+    }
+
+    /**
+     * 两条硬约束：不能抛异常，且**不能造出倒置区间**。
+     * 倒置区间会一路传到 trimVideo，止手落在素材末尾之外。
+     */
+    @Test
+    fun `退化输入下也不会造出倒置区间`() {
+        for (end in longArrayOf(0L, 100L, 399L, 400L)) {
+            assertTrue("end=$end", ClipMath.clampStart(9999L, end) <= end)
+        }
+        for (d in longArrayOf(0L, 100L, 399L, 400L)) {
+            assertTrue("duration=$d", ClipMath.clampEnd(0L, startMs = 0L, durationMs = d) <= d)
+        }
     }
 
     @Test
