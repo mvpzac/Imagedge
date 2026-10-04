@@ -3,7 +3,6 @@ package com.imagedge.camera.motionphoto.internal.xmp
 import com.imagedge.camera.motionphoto.MotionPhotoComposeException
 import java.io.StringReader
 import java.io.StringWriter
-import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 import javax.xml.transform.OutputKeys
 import javax.xml.transform.TransformerFactory
@@ -12,9 +11,6 @@ import javax.xml.transform.stream.StreamResult
 import org.xml.sax.InputSource
 
 internal object MotionPhotoVendorXmpBuilder {
-    // Android's XMLConstants stub omits the Java 8 access-control constants; use their standard URIs.
-    private const val ACCESS_EXTERNAL_DTD = "http://javax.xml.XMLConstants/property/accessExternalDTD"
-    private const val ACCESS_EXTERNAL_SCHEMA = "http://javax.xml.XMLConstants/property/accessExternalSchema"
     private const val G_CAMERA_NAMESPACE = "http://ns.google.com/photos/1.0/camera/"
     private const val CONTAINER_NAMESPACE = "http://ns.google.com/photos/1.0/container/"
     private const val ITEM_NAMESPACE = "http://ns.google.com/photos/1.0/container/item/"
@@ -39,15 +35,16 @@ internal object MotionPhotoVendorXmpBuilder {
         ) { "XMP document type declarations are not allowed." }
         val factory = DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = true
-            isXIncludeAware = false
+            // **不要**设 `isXIncludeAware`，也**不要**调 `setFeature` / `setAttribute`：
+            // Android 的平台实现既没覆写 `setXIncludeAware`，也不认
+            // `FEATURE_SECURE_PROCESSING`、apache 的 `disallow-doctype-decl`、
+            // `ACCESS_EXTERNAL_*` 这些 Xerces/桌面 JVM 专有的旋钮——
+            // 抽象基类的默认实现会抛 UnsupportedOperationException /
+            // ParserConfigurationException，且桌面 JVM 上全都能过，
+            // 于是这类缺陷单测永远绿、只在设备上炸。2026-10-04 之前每次导出都死在这里。
+            // 本函数的加固不依赖它们：DOCTYPE/ENTITY 在上面已被字符串预检拒绝
+            // （与解析器无关），实体展开在这里关掉。
             isExpandEntityReferences = false
-            setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
-            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-            setFeature("http://xml.org/sax/features/external-general-entities", false)
-            setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-            setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
-            setAttribute(ACCESS_EXTERNAL_DTD, "")
-            setAttribute(ACCESS_EXTERNAL_SCHEMA, "")
         }
         val document = factory.newDocumentBuilder()
             .parse(InputSource(StringReader(currentXmp)))

@@ -304,7 +304,9 @@ class VideoToLivePhotoViewModel @Inject constructor(
             clips.forEachIndexed { index, clip ->
                 _state.update { it.copy(progressText = "正在导出 ${index + 1}/${clips.size}") }
                 val ok = runCatching { exportOne(clip) }
-                    .onFailure { AppLog.w("livephoto", "导出失败：${it.message}") }
+                    // 带堆栈：只记 message 时，「导出失败：open failed: ENOENT」这类
+                    // 报错看不出是谁删的文件、在哪一步删的，排查只能靠猜
+                    .onFailure { AppLog.e("livephoto", "导出失败：${it.message}", it) }
                     .isSuccess
                 if (ok) done++ else fail++
                 _state.update { it.copy(doneCount = done, failCount = fail) }

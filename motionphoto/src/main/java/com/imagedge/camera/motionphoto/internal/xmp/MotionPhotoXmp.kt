@@ -5,7 +5,6 @@ import com.imagedge.camera.motionphoto.XmpSummary
 import java.io.StringReader
 import java.nio.charset.Charset
 import com.imagedge.camera.motionphoto.internal.format.indexOfSubarray
-import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Element
 import org.xml.sax.InputSource
@@ -28,8 +27,6 @@ private data class ParsedXmp(
 private const val MAX_XMP_CHARS = 1024 * 1024
 private const val MAX_XMP_ELEMENTS = 20_000
 private const val MAX_XMP_DEPTH = 64
-private const val ACCESS_EXTERNAL_DTD = "http://javax.xml.XMLConstants/property/accessExternalDTD"
-private const val ACCESS_EXTERNAL_SCHEMA = "http://javax.xml.XMLConstants/property/accessExternalSchema"
 
 internal fun extractPreferredMotionPhotoXmp(bytes: ByteArray): String? {
     val packets = extractAllXmpPackets(bytes)
@@ -170,15 +167,11 @@ private fun parseXmpElements(xmp: String): List<Element> {
 
     val factory = DocumentBuilderFactory.newInstance().apply {
         isNamespaceAware = true
-        isXIncludeAware = false
+        // 同 [MotionPhotoVendorXmpBuilder]：Android 的平台实现既没覆写
+        // `setXIncludeAware`，也不认 `FEATURE_SECURE_PROCESSING` 与 apache/sax 的那些
+        // feature 和 `ACCESS_EXTERNAL_*` 属性——桌面 JVM 全认，所以这类缺陷单测永远绿、
+        // 只在设备上炸。加固靠上面的 DOCTYPE/ENTITY 字符串预检与下面的实体展开关闭。
         isExpandEntityReferences = false
-        setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
-        setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-        setFeature("http://xml.org/sax/features/external-general-entities", false)
-        setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-        setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
-        setAttribute(ACCESS_EXTERNAL_DTD, "")
-        setAttribute(ACCESS_EXTERNAL_SCHEMA, "")
     }
     val document = factory.newDocumentBuilder().parse(InputSource(StringReader(xmp)))
     val nodeList = document.getElementsByTagName("*")
