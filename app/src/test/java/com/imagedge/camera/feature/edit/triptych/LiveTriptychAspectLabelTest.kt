@@ -8,7 +8,7 @@ import org.junit.Test
  * <pre>
  *     author : Imagedge Team
  *     time   : 2026-09-27
- *     desc   : 三拼档位标签的算术，以及比例×画质推导出的格子像素
+ *     desc   : 三拼档位标签的算术，比例×画质推导出的格子像素，以及偶数护栏 evenFloor
  * </pre>
  */
 class LiveTriptychAspectLabelTest {
@@ -61,19 +61,57 @@ class LiveTriptychAspectLabelTest {
     }
 
     /**
-     * 这一条钉的是 spec §6.1 的第 3 步。720p 下 27:16 的长边是
-     * `720 × 27/16 = 1215`——奇数。H.264 的 yuv420 要求偶数宽高，
-     * Media3 Transformer 会在那一步失败或静默拒绝。
-     * 原实现写死 1080×640（偶数）所以从未暴露，引入画质档位才会撞上。
+     * 这一条钉的是**当前这 8 个输出的取值事实**：4 个比例 × 2 个画质，两条边都是偶数。
+     *
+     * 它**不覆盖 `evenFloor`**——经 [cellSize] 这条路根本触发不了取偶（现有参考尺寸与
+     * 缩放结果本来就全是偶数），把 `evenFloor` 整个删掉这条照样绿。
+     * `evenFloor` 本身由下面 `evenFloor 把奇数向下取到偶数` 那条直接喂奇数来钉。
+     *
+     * 留下这条仍有价值：它会在「有人改坏参考尺寸 / 加了新档位导致某个输出变成奇数」时报警。
      */
     @Test
-    fun `任何档位下两条边都是偶数`() {
+    fun `现有八个档位组合的输出两条边都是偶数`() {
         for (aspect in Aspect.entries) {
             for (quality in Quality.entries) {
                 val size = aspect.cellSize(quality)
                 assertEquals("${aspect.name}/${quality.name} 宽必须是偶数", 0, size.width % 2)
                 assertEquals("${aspect.name}/${quality.name} 高必须是偶数", 0, size.height % 2)
             }
+        }
+    }
+
+    // ── evenFloor：奇数护栏本身 ──────────────────────────────────
+    //
+    // 直接调 internal 的 evenFloor，而不是绕道 cellSize——8 个现有组合都是偶数，
+    // 绕道进去测不到任何东西（那就是这条测试被提出来的原因）。
+    //
+    // 输入一律取**任意奇数**，不取「720 × 27/16 = 1215」那个数：1215 只在**放大**规则
+    // （短边硬拉到 720）下才出现，而现行规则是 `min(1f, cap / refShort)`，27:16 在
+    // 720p 下 shortSide=640 < cap → scale 取 1，根本不缩，1215 不可达。把它写进测试
+    // 会让下一个读者以为那是真实场景。
+
+    @Test
+    fun `evenFloor 把奇数向下取到偶数`() {
+        assertEquals(1200, evenFloor(1201))
+        assertEquals(1080, evenFloor(1081))
+        assertEquals(640, evenFloor(641))
+        assertEquals(2, evenFloor(3))
+        // 偶数原样返回，不做任何上取
+        assertEquals(1080, evenFloor(1080))
+        assertEquals(640, evenFloor(640))
+        // 定义域边界：1 落到 0。函数没有下限保护（没加 coerceAtLeast(2)），
+        // 这里把**当前行为**钉住，免得有人以为它已经保底 2
+        assertEquals(0, evenFloor(1))
+    }
+
+    @Test
+    fun `evenFloor 对非负输入恒为非负偶数且不超过输入`() {
+        // 0..2001 覆盖奇偶两端，并跨过 640 / 1080 / 1201 这些真实会出现的量级
+        for (v in 0..2001) {
+            val got = evenFloor(v)
+            assertTrue("evenFloor($v)=$got 不是偶数", got % 2 == 0)
+            assertTrue("evenFloor($v)=$got 出现负数", got >= 0)
+            assertTrue("evenFloor($v)=$got 比输入还大", got <= v)
         }
     }
 

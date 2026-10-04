@@ -10,7 +10,13 @@ import kotlin.math.roundToInt
  * </pre>
  */
 
-/** 导出画质。数值**借用** ClearCut `model/ExportConfig.kt` 的表，非本项目推导 */
+/**
+ * 导出画质档位：短边上限 + 码率。数值**借用** ClearCut `model/ExportConfig.kt` 的表，非本项目推导。
+ *
+ * **尚未接线**：全仓没有任何生产调用方（`cellSize` 只有测试在调），
+ * 导出路径仍然直接读 `aspect.refW`/`refH`。接线在 Task 4（`Quality` 进 ViewModel 状态）
+ * 与 Task 7（码率落到编码器）。别把 `bitrate` 当成已经生效的设置读。
+ */
 enum class Quality(val shortSideCap: Int, val bitrate: Int) {
     P720(720, 6_000_000),
     P1080(1080, 12_000_000);
@@ -18,17 +24,24 @@ enum class Quality(val shortSideCap: Int, val bitrate: Int) {
     val label: String get() = "${shortSideCap}p"
 }
 
-/** 每格的转码归一尺寸 */
+/**
+ * 每格的转码归一尺寸。**当前无生产调用方**——导出路径仍用 `aspect.refW`/`refH`，
+ * 接 [cellSize] 是 Task 4。
+ */
 data class CellSize(val width: Int, val height: Int)
 
 /**
  * 三拼的画布档位（**每一格**的形状，不是成品）。
  *
- * 形状与尺寸正交：[ratio] 管裁切窗口，[refW]/[refH] 是 **1080p 档下的参考尺寸**，
- * [cellSize] 拿它与 [Quality] 相乘得出实际转码尺寸。
+ * 形状与尺寸正交：[ratio] 管裁切窗口（`cropToAspect`/`cropFractions` 都吃它），
+ * [refW]/[refH] 是 **1080p 档下的参考尺寸**，[cellSize] 拿它与 [Quality] 一起
+ * 推导出目标转码尺寸。
  * 原实现把 `1920, 1080` 直接当成输出尺寸，于是「换一档画质」只能改形状定义——
  * 两者焊在一起就再也插不进中间档。参考尺寸与输出尺寸分开后，
  * `refW/refH` 是**这个档位长什么样**，输出尺寸才是画质决定的。
+ *
+ * 注意 [cellSize] 还没接到导出上：`export()` 现在仍然直接用 `aspect.refW`/`refH` 当
+ * 目标尺寸，也就是恒为 1080p 档。[Quality] 是为 Task 4 预留的。
  */
 enum class Aspect(val ratio: Float, val refW: Int, val refH: Int) {
     R16_9(16f / 9f, 1920, 1080),
@@ -44,6 +57,10 @@ enum class Aspect(val ratio: Float, val refW: Int, val refH: Int) {
      * 只标每格比例会误导：看到「16:9」的用户会以为那是竖屏故事档，
      * 而它三格堆叠后其实是 16:27；反过来看到「27:16」也没人想得到那是 9:16 成品。
      * 两个都写，用户不用心算。
+     *
+     * 比例取自 `refW`/`refH`（即**参考尺寸**），不是 [ratio] 字段——两者今天相等，
+     * 但若哪天有人只改了 `ratio`，标签会跟参考尺寸走。用 [cells] 参数而非写死 3，
+     * 是因为「成品 = 每格竖堆 N 格」才是 `buildTriptychBitmap` 的实际做法。
      */
     fun label(cells: Int): String {
         fun reduce(w: Int, h: Int): String {
@@ -56,16 +73,26 @@ enum class Aspect(val ratio: Float, val refW: Int, val refH: Int) {
 }
 
 /**
- * 参考尺寸 × 画质 → 实际转码尺寸。
+ * 参考尺寸 × 画质 → 目标转码尺寸。
  *
- * 规则只有一句：**把参考尺寸等比缩到短边等于档位上限，且只缩不放。**
- * 「只缩不放」不是保守——27:16 的参考短边是 640，本来就低于 720p 的上限，
- * 拉到 720 会把它**放大**，而放大换不出画质，只会让文件变大。
+ * 规则只有一句：**等比缩到短边不超过档位上限，且只缩不放**——
+ * `scale = min(1f, cap / refShort)`。上限是天花板，不是目标值：27:16 的参考短边
+ * 是 640，本来就低于 720p 的上限，硬拉到 720 会把它**放大**，而放大换不出画质，
+ * 只会让文件变大。所以 27:16 在 720p 下仍然是 1080×640。
  *
- * 缩放结果**两条边各自向下取整到偶数**。这一步不可省：
- * 720p 下 27:16 若按比例硬算是 `720 × 27/16 = 1215`（奇数），
- * 而 H.264 的 yuv420 要求偶数宽高，Media3 Transformer 会在那一步失败或静默拒绝。
- * 原实现写死 1080×640（偶数）所以从未暴露，一引入画质档位就会撞上。
+ * 缩放结果两条边各自经 [evenFloor] 向下取整到偶数。
+ *
+ * **这是给将来新增档位准备的无条件护栏，不是对现有任何一档的修复。**
+ * 按上面这条规则，现有 4 个比例 × 2 个画质共 8 个组合在取偶之前就**已经全是偶数**
+ * （1920×1080 / 1080×1080 / 1080×1350 / 1080×640，以及 1280×720 / 720×720 /
+ * 720×900 / 1080×640），`evenFloor` 一次都没有生效。它值得留着，是因为
+ * H.264 的 yuv420 硬性要求偶数宽高，而 `refW`/`refH` 是**手写常量**：将来加一档、
+ * 或者把某个参考尺寸改成奇数，算出来的值就会是奇数，Media3 Transformer 会在编码
+ * 那一步失败或静默拒绝，而报错离病因很远。
+ * 护栏本身由 `evenFloor` 的直接测试钉住（`LiveTriptychAspectLabelTest`），
+ * 「8 个现有输出都是偶数」是另一回事、由另一条测试钉。
+ *
+ * **当前无生产调用方**，导出路径仍读 `aspect.refW`/`refH`（Task 4 接线）。
  */
 fun Aspect.cellSize(quality: Quality): CellSize {
     val refShort = minOf(refW, refH)
@@ -76,5 +103,17 @@ fun Aspect.cellSize(quality: Quality): CellSize {
     )
 }
 
-/** 向下取整到偶数。这是 H.264 yuv420 的硬性要求，不是风格选择 */
-private fun evenFloor(v: Int): Int = v - (v % 2)
+/**
+ * 向下取整到偶数。这是 H.264 yuv420 的硬性要求，不是风格选择。
+ *
+ * 定义域是**非负数**（`cellSize` 的输入恒为正：正整数参考尺寸 × 正比例系数）。
+ * 负数不在契约内，也不需要防：`v % 2` 在 Kotlin 里对负数取负余，本函数不做钳制。
+ *
+ * 没有下限保护：`evenFloor(1) == 0`。当前枚举表最小边是 640，够不着；
+ * 若将来加入极小参考尺寸，`cellSize` 会返回 0 边（Media3 直接拒绝）。
+ * 这是已知的待办，不在这里悄悄加 `coerceAtLeast(2)` 改变行为。
+ *
+ * `internal` 是为了让测试能直接喂奇数进去——8 个现有组合全是偶数，
+ * 经 [cellSize] 这条路**根本触发不了这个函数**。
+ */
+internal fun evenFloor(v: Int): Int = v - (v % 2)
