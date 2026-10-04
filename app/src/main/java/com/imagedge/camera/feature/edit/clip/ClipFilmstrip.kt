@@ -62,10 +62,14 @@ private val COVER_WIDTH: Dp = 3.dp
  * density=2.75 上同一段轨道就给 14 张，低端机 OOM 的概率跟着屏幕走。
  * 改成 dp 之后函数体内**没有任何密度因子**，密度无关性由构造保证，
  * 不依赖调用方记得换算（换算错了就是静默错一半的帧数）。
- * 调用方传 `BoxWithConstraints` 作用域里的 `maxWidth.value`——它本来就是 [Dp]。
+ *
+ * 调用约定：**调用方自己在自己的 `BoxWithConstraints` 里读自己的 `maxWidth.value`**
+ * （它本来就是 [Dp]），再把这个 dp 数字传进来。本组件内那份 `maxWidth` 只用于绘制，
+ * 外面的调用方读不到它——张数是在调用方那边算的，本组件不抽帧、[thumbs] 是既成事实。
  *
  * `/48` 的含义是「每张缩略图约 48dp 宽」（也正好是规范 §8.1 的最小触控目标）：
- * 360dp 轨道 → 8 张、每张 45dp；≥ 672dp 才触到 14 的上限，此后单张只会更宽。
+ * 360dp 轨道 → 8 张、每张 45dp；**≥ 648dp** 就取到 14 的上限
+ * （`648 / 48 = 13.5`，`roundToInt` 的平局向正无穷取整得 14），此后单张只会更宽。
  * 上游只给了 `6` / `14` 这两个夹取值（见测试的 KDoc），**没给 48**——除数是本项目自己的取值。
  *
  * 内存量级（**按尺寸算出来的估算，不是本组件的实测值**）：前提有三条，
@@ -81,9 +85,17 @@ private val COVER_WIDTH: Dp = 3.dp
  *   0、负值与 `NaN` 取下限。
  */
 fun filmstripHandleCount(trackDp: Float): Int {
-    // 先夹再取整：Float.roundToInt() 在结果超出 Int 范围时抛 IllegalArgumentException，
-    // 而未约束宽（`Dp.Infinity.value`）与 Float 极大值都会走到那儿。纯函数不该抛。
-    // NaN 单独挡：`coerceIn` 对 NaN 无效，漏了它会一路传到 roundToInt。
+    // NaN 单独挡——**这才是本函数唯一的崩溃点**（实测：`NaN.roundToInt()` 抛
+    // IllegalArgumentException "Cannot round NaN value."）。它单挡是因为 `coerceIn`
+    // 对 NaN 是空操作：照样返回 NaN，于是不挡就会一路传到 roundToInt。
+    //
+    // 反过来**无限值不会抛**（实测更正）：`Float.POSITIVE_INFINITY.roundToInt()` 返回
+    // 2147483647 而不是抛——标准库内部是 `Math.round(f)`，溢出时饱和。旧代码末尾的
+    // `coerceIn(6, 14)` 早就把无限值收成 14 了，那条路径上从来没有崩过。
+    //
+    // 末尾那个 `coerceIn(6, 14)` 在非 NaN 输入下是可证明的冗余：前面的
+    // `coerceIn(6f, 14f)` 已把商夹进 [6, 14]，而 [6, 14] 里的数取整仍在 [6, 14]。
+    // 它不参与防抛，只是把返回值落在 [6, 14] 这件事说两遍。
     if (trackDp.isNaN()) return 6
     return (trackDp / 48f).coerceIn(6f, 14f).roundToInt().coerceIn(6, 14)
 }
@@ -139,8 +151,10 @@ fun filmstripHandleFor(
  * 3. **`systemGestureExclusion()`。** 起手柄初始就在 x≈0，不排掉会被系统后滑手势抢走
  *    （OpenLoop `:450`）。注意它来自 `androidx.compose.foundation`，不是 `…foundation.layout`。
  *
- * @param thumbs 缩略图帧，**个数由调用方按 [filmstripHandleCount] 的同一策略抽**；
- *   本组件把它们等分铺满，不校验个数。多给少给都不崩，少给只是画面上更粗。
+ * @param thumbs 缩略图帧，**个数由调用方按 [filmstripHandleCount] 算**：调用方在自己的
+ *   `BoxWithConstraints` 里读自己的 `maxWidth.value`（dp）传进去算张数，再抽同样多的帧——
+ *   本组件读不到调用方的作用域，也不抽帧。本组件把它们等分铺满，不校验个数；
+ *   多给少给都不崩，少给只是画面上更粗。
  * @param spec 当前选区（`startMs`/`endMs`）与封面时刻（`coverMs`），拖拽后回传给调用方。
  * @param durationMs 素材时长（ms）。**必须 > 0**：它是 `msToPx` 的除数，为 0 时无意义。
  * @param enabled 当前 tab 开放哪些手柄。**先按它过滤再判定**（见 [filmstripHandleFor]）。

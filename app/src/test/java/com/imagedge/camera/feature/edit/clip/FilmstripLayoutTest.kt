@@ -4,7 +4,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import kotlin.math.roundToInt
 
 /**
  * <pre>
@@ -20,7 +19,8 @@ class FilmstripLayoutTest {
      * `FILMSTRIP_FRAME_MIN` / `FILMSTRIP_FRAME_MAX`（评审已在源码处核对）。
      *
      * **除数 48 没有上游来源**——那是本项目自己的取值，含义是「每张缩略图约 48dp 宽」
-     * （360dp 轨道 → 8 张、每张 45dp；≥672dp 触到 14 的上限，此后单张只会更宽）。
+     * （360dp 轨道 → 8 张、每张 45dp；≥648dp 就取到 14 的上限：
+     * `648 / 48 = 13.5`，`roundToInt` 平局向正无穷得 14）。
      * 至于「少于 6 张看不出运动」那是观感取舍，同样是本项目的判断，不是上游给的。
      */
     @Test
@@ -33,28 +33,67 @@ class FilmstripLayoutTest {
     }
 
     /**
-     * 密度无关性钉在这里，而且**钉的是单位本身**：`filmstripHandleCount` 的入参是 dp，
-     * 函数体里没有 density 因子，于是同一段 dp 宽度在任何屏幕上都是同一个数——
-     * 没有可换算错的环节。
+     * 密度无关性钉在这里，而**能钉住的只有签名**。
      *
-     * 反证写在同一条用例里：若参数被误当成像素，360dp 的轨道在 density=2.75 上是 990px，
-     * `/48` 会给出 20 → 被夹到 14，与期望的 8 差整整 6 张（帧数直接翻倍，内存开销也翻倍）。
+     * 上一版把它写成了一条数值反证（"360dp@2.75 = 990px → 20 → 14"），实测它咬不住：
+     * `360 / 48 = 7.5 → 8`，**除数是像素时也是 8**——同一个数字区分不出单位。
+     * 而按 dp 契约，调用方在 density=1 与 density=2.75 上传进来的**本来就是同一个数字 360**
+     * （读的是 `maxWidth.value`，不是 `toPx()`），再比一次两次相同的调用同样区分不出东西。
+     *
+     * 真正能区分的是**函数体里有没有密度因子**：一旦有，就必须再加一个 density 入参
+     * （函数体里拿不到别处的密度），签名于是从 `(Float) -> Int` 变成两参。下面三条分别
+     * 从编译期、运行期签名、数值上把它钉死，**实测各自会红**：
+     *
+     * - 钉 1（编译期）：`val count: (Float) -> Int = ::filmstripHandleCount`。
+     *   **只能咬住必填的 density 入参**——加上 `density: Float` 后编译失败：
+     *   `Initializer type mismatch: expected '(Float) -> Int', actual 'KFunction2<Float, Float, Int>'`。
+     * - 钉 2（运行期签名，反射）：形参恰好一个 float。**带默认值的 density 入参钉 1 抓不住**
+     *   （实测 `fun f(x: Float, y: Float = 1f)` 赋给 `(Float) -> Int` 照样编译通过，
+     *   Kotlin 会把有默认值的尾参适配掉），但这里会红：
+     *   `expected:<[float]> but was:<[float, float]>`。
+     * - 钉 3（数值锚点）：签名不变、只在函数体里偷偷除一个密度因子时，钉 1/钉 2 全都不响，
+     *   只有这一条会红（`360 / 2.75 / 48 = 2.73` → 夹到下限 6，与期望的 8 冲突）。
+     *
+     * 数值断言到此为止只作锚点。`990f` 是 **990dp**（一条更宽的轨道）的输入，它给 14 是
+     * **钳位**、不是密度效应：`990 / 48 = 20.625` → `roundToInt` 得 21 → 夹到 14。
      */
     @Test
-    fun `轨道宽度以 dp 计故 360dp 的轨道在任何密度下都是 8 张`() {
-        assertEquals(8, filmstripHandleCount(360f))
-        // 旧写法（除 48 **像素**）在 density=2.75 上会得到的数，与上面的 8 不可调和
-        val asPx = (360f * 2.75f / 48f).roundToInt().coerceIn(6, 14)
-        assertEquals(14, asPx)
+    fun `轨道宽度以 dp 计故签名里没有密度因子360dp 的轨道恒为 8 张`() {
+        // 钉 1（编译期）：签名就是 (Float) -> Int，一个入参，多一个就编译不过
+        val count: (Float) -> Int = ::filmstripHandleCount
+
+        // 钉 2（运行期）：形参恰好一个 float。多出 density 之类的入参当场红。
+        // ClipFilmstripKt 是 ClipFilmstrip.kt 的 JVM 门面类（顶层函数的宿主）。
+        val signature = Class.forName("com.imagedge.camera.feature.edit.clip.ClipFilmstripKt")
+            .declaredMethods
+            .single { it.name == "filmstripHandleCount" }
+        assertEquals(
+            "签名里不允许出现密度入参——密度换算一旦进了函数体，帧数就会跟着屏幕走",
+            listOf(Float::class.javaPrimitiveType),
+            signature.parameterTypes.toList(),
+        )
+
+        // 锚点：360dp 轨道恒 8 张（每张 45dp），与跑在哪块屏上无关
+        assertEquals(8, count(360f))
+        // 990dp 是另一条更宽的轨道：990/48 = 20.625 → 21 → 钳到 14
+        assertEquals(14, count(990f))
     }
 
     /**
      * 退化宽度也必须是合法张数：0 宽、负值、未约束宽（`Dp.Infinity.value`）、`NaN`
      * 都不得产出 0 张、越界，**更不得抛异常**。
      *
-     * 后两档是真实输入不是刁难：调用方传的是 `BoxWithConstraints` 的 `maxWidth.value`，
-     * 忘了 `fillMaxWidth()` 它就是 `Float.POSITIVE_INFINITY`，而 `Float.roundToInt()`
-     * 在结果超出 Int 范围时抛 `IllegalArgumentException`——纯函数不该抛，所以先夹后取整。
+     * 后两档是真实输入不是刁难：调用方在自己的 `BoxWithConstraints` 里读自己的
+     * `maxWidth.value`，忘了 `fillMaxWidth()` 它就是 `Float.POSITIVE_INFINITY`。
+     *
+     * 但**无限值不是崩溃点**（实测更正上一轮的说法）：
+     * `Float.POSITIVE_INFINITY.roundToInt()` 返回 `2147483647` 而不是抛异常——
+     * 标准库内部是 `Math.round(f)`，溢出时饱和。旧代码靠末尾的 `coerceIn(6, 14)`
+     * 就已经把它收成 14，那条路径上从来没有崩过。
+     * 真正抛 `IllegalArgumentException` 的只有 `NaN`，而 `NaN` 同样真实可达：
+     * `Dp.Unspecified.value` 就是 `NaN`。它没被 `coerceIn` 挡住，是因为
+     * `coerceIn` 对 `NaN` 是空操作、照样返回 `NaN`。
+     * 所以「先夹后取整 + 单独挡 NaN」这条实现没错，错的是上一轮给它的理由。
      */
     @Test
     fun `任何轨道宽度都不会产出零张或超过上限`() {
