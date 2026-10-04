@@ -11,6 +11,7 @@ import androidx.media3.transformer.Effects
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Transformer
+import com.imagedge.camera.motionphoto.ClipBounds
 import com.imagedge.camera.motionphoto.MotionPhotoComposeException
 import com.imagedge.camera.motionphoto.internal.io.MotionPhotoTempFiles
 import android.util.Log
@@ -38,11 +39,11 @@ import kotlin.coroutines.resumeWithException
 @UnstableApi
 internal object VideoTrimmer {
 
-    /** 单段最大时长（用户需求：不超过 5 秒） */
-    const val MAX_CLIP_MS = 5_000L
+    /** 单段最大时长（用户需求：不超过 5 秒）。真源见 [ClipBounds] */
+    const val MAX_CLIP_MS = ClipBounds.MAX_CLIP_MS
 
-    /** 最小可选段长（低于此值实况观感太短） */
-    const val MIN_CLIP_MS = 1_500L
+    /** 最小可选段长（低于此值实况观感太短）。真源见 [ClipBounds] */
+    const val MIN_CLIP_MS = ClipBounds.MIN_CLIP_MS
 
     /** 输出视频短边上限（px） */
     const val TARGET_SHORT_SIDE = 1080
