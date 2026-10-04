@@ -76,12 +76,46 @@ class LiveTriptychViewModel @Inject constructor(
 
     /** 一张已解析的实况图槽位 */
     data class TriptychSlot(
+        /**
+         * 这一格的身份，由本 ViewModel 在解析时铸造，**整份生命周期不变**。
+         *
+         * 它存在的唯一理由是：异步结果必须按身份写回，不能按下标。
+         * `loadCoverThumbs` 置 loading → 挂起抽 9 帧 → 写回，中间用户点一次「上移」
+         * 就把两个槽位换了位置；按下标写回会把 A 格抽出的九帧画到**交换后占据那个下标的
+         * B 格**上，而 A 格永远停在 `coverThumbsLoading = true` 且 `coverThumbs` 为空——
+         * Screen 的 `FilmstripArea` 先查 loading、`loadCoverThumbs` 又在 loading 时早退，
+         * 于是那一格的选段条与封面条**永久转圈**。写回见 [updatedBySlotId]。
+         *
+         * 为什么不用 [sourceUri] 当身份：同一张实况图被选两次会得到两个槽位、同一个 URI
+         * 与两份不同的临时文件，按 URI 找回的还是错的格子。
+         *
+         * 取值来自 `nextSlotId`，**单调递增、永不复用**：`startOver` 之后旧批次的在途结果
+         * 找不到同身份的槽位，于是整写回原样落空（见 [updatedBySlotId] 的「找不到」那一支），
+         * 而不是盖到刚好复用了同一个号的新格上。
+         */
+        val slotId: Long,
         val sourceUri: Uri,
         val displayName: String,
         /** 提取出的静态 JPEG（临时文件；用户未重选封面时即用它裁切） */
         val imageFile: File,
         /** 提取出的嵌入视频（临时文件） */
         val videoFile: File,
+        /**
+         * 静态 JPEG 的像素（解析时读一次文件头，见 `readImageBounds`；不解码像素）。
+         *
+         * 单独存它而不是让界面继续用 [videoWidth]/[videoHeight] 想事：拼图那一格裁的是
+         * **解码后的这张图**（`cropToAspect`），而小米一类实况图的静态帧与视频比例常见地不一致
+         * （4:3 的图配 16:9 的视频）。[alignmentMatters] 判的就是这一格会不会被纵向裁切，
+         * 判据用错了数就等于把一枚还在生效的手柄收起来。
+         * 0 = 文件头没读出尺寸（该格画面也解不出来，与 `decodeSampled` 是同一对判据，
+         * 那一刻 [alignmentMatters] 只按视频那一路回答）。
+         *
+         * 严格说 `cropToAspect` 读的是**采样解码后**那张位的宽高，本字段是文件头的原始宽高：
+         * 两者只差 `inSampleSize` 的整数取整，差到能翻掉「哪一支裁法」的只有源比例恰好
+         * 落在 [CROP_ASPECT_EPS] 那道容差边上的情形。
+         */
+        val imageWidth: Int,
+        val imageHeight: Int,
         val videoDurationMs: Long,
         val videoWidth: Int,
         val videoHeight: Int,
@@ -191,19 +225,53 @@ class LiveTriptychViewModel @Inject constructor(
             retriever.release()
         }
         require(width > 0 && height > 0) { "invalid video size ${width}x$height" }
+        // 静态图的宽高**也在这里读**：界面要靠它判断那一格会不会被纵向裁切
+        // （`cropToAspect` 吃的是这张 JPEG 而不是视频，见 TriptychSlot.imageWidth）
+        val (imageWidth, imageHeight) = readImageBounds(parsed.imageFile)
         // 缩略图必须采样解码：实况图静态帧可达 24MP，整图解码约 96MB，
         // 只为一张 360px 缩略图付这个代价会直接把低端机顶到 OOM 阈值
         val thumb = decodeSampled(parsed.imageFile, 360)
         TriptychSlot(
+            slotId = nextSlotId++,
             sourceUri = uri,
             displayName = queryDisplayName(uri) ?: "实况图",
             imageFile = parsed.imageFile,
             videoFile = parsed.videoFile,
+            imageWidth = imageWidth,
+            imageHeight = imageHeight,
             videoDurationMs = durationMs,
             videoWidth = width,
             videoHeight = height,
             thumbnail = thumb,
         )
+    }
+
+    /**
+     * 槽位身份的发号器，由 [parseSlot] 取值。**单调、从不在 `startOver` / [reset] 时归零**：
+     * 归零会让新批次的第一格拿到旧批次第一格那个号，而旧批次在途的那一路 `loadCoverThumbs`
+     * 就会把九帧写进新格——[updatedBySlotId] 按身份找回，找回的必须真是发起它的那一格。
+     * 只在 [parseSlot]（一条顺序循环，全在同一协程里）自增，无并发写。
+     */
+    private var nextSlotId = 0L
+
+    /**
+     * 只读图片文件头的尺寸（`inJustDecodeBounds`，**不解码像素**）。
+     *
+     * 读不出（不是图片 / 文件损坏）返回 `0 to 0`，与 [decodeSampled] 的
+     * `outWidth <= 0 || outHeight <= 0` 是同一对判据——那条路上这一格也画不出画面。
+     *
+     * 这里多花的是一次容器头解析：[decodeSampled] 内部本来也读了一遍同样的头、
+     * 又把结果丢掉了。没有把它改成「顺带把尺寸返回出来」，因为那要动它另外三处调用点，
+     * 而它们只关心位图。
+     */
+    private fun readImageBounds(file: File): Pair<Int, Int> {
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, options)
+        return if (options.outWidth > 0 && options.outHeight > 0) {
+            options.outWidth to options.outHeight
+        } else {
+            0 to 0
+        }
     }
 
     /**
@@ -217,6 +285,10 @@ class LiveTriptychViewModel @Inject constructor(
      * 浪费得有限，而在此处按「视频尺寸 vs 目标比例」去跳过重建会漏掉一种情况：
      * `cropToAspect` 吃的是**解码出来那张图**的比例（静态图可能与视频不同），
      * 拿 `videoWidth/videoHeight` 代替它就是拿一个数去判断另一件事。
+     *
+     * 那个数现在**真的在状态里了**（[TriptychSlot.imageWidth]/[TriptychSlot.imageHeight]，
+     * 解析时读文件头），界面那一排 chip 的显隐因此改由 [alignmentMatters] 判——
+     * 它把两路裁切（这一格画面的 `cropToAspect` 与导出的 [cropFractions]）都算进去。
      */
     fun setAlignment(index: Int, alignment: Alignment) {
         updateSlot(index) { it.copy(alignment = alignment) }
@@ -284,12 +356,25 @@ class LiveTriptychViewModel @Inject constructor(
         refreshPreview()
     }
 
-    /** 装载某槽位的封面候选帧（9 帧均匀抽取，264px 宽） */
+    /**
+     * 装载某槽位的封面候选帧（9 帧均匀抽取，264px 宽）。
+     *
+     * **两处写回都按 [TriptychSlot.slotId]，不按 [index]**（见 [updatedBySlotId]）：
+     * 抽帧挂在 IO 线程上要挂起才回（9 次抽帧的耗时本轮未实测），其间用户点一次「上移」
+     * 就把这一格挪到了别的下标，
+     * 按下标写回会把这九帧画到**别的格子**上，并把发起方永远留在转圈态。
+     * [index] 只用来在**发起的那一刻**取回槽位，取到之后身份就固定下来。
+     */
     fun loadCoverThumbs(index: Int) {
         val slot = _state.value.slots.getOrNull(index) ?: return
         if (slot.coverThumbs.isNotEmpty() || slot.coverThumbsLoading) return
+        // 身份在这里取一次，后面两次写回都用它；抽帧也用这份快照里的 videoFile，
+        // 于是这一路与「那一刻之后列表怎么重排」完全无关
+        val slotId = slot.slotId
         _state.update { s ->
-            s.copy(slots = s.slots.mapIndexed { i, t -> if (i == index) t.copy(coverThumbsLoading = true) else t })
+            s.copy(slots = updatedBySlotId(s.slots, TriptychSlot::slotId, slotId) {
+                it.copy(coverThumbsLoading = true)
+            })
         }
         viewModelScope.launch(Dispatchers.IO) {
             val duration = slot.videoDurationMs.coerceAtLeast(1L)
@@ -302,8 +387,8 @@ class LiveTriptychViewModel @Inject constructor(
                     ?.let { CoverThumb(t, it) }
             }
             _state.update { s ->
-                s.copy(slots = s.slots.mapIndexed { i, t ->
-                    if (i == index) t.copy(coverThumbs = thumbs, coverThumbsLoading = false) else t
+                s.copy(slots = updatedBySlotId(s.slots, TriptychSlot::slotId, slotId) {
+                    it.copy(coverThumbs = thumbs, coverThumbsLoading = false)
                 })
             }
         }
@@ -469,10 +554,10 @@ class LiveTriptychViewModel @Inject constructor(
         return runCatching { BitmapFactory.decodeFile(file.absolutePath, opts) }.getOrNull()
     }
 
-    /** 位图中心/对齐裁切到目标比例 */
+    /** 位图中心/对齐裁切到目标比例。等比判据用 [CROP_ASPECT_EPS]，与 [alignmentMatters] 同一道 */
     private fun cropToAspect(bmp: Bitmap, targetRatio: Float, alignment: Alignment): Bitmap {
         val srcRatio = bmp.width.toFloat() / bmp.height
-        if (Math.abs(srcRatio - targetRatio) < 0.01f) return bmp
+        if (Math.abs(srcRatio - targetRatio) < CROP_ASPECT_EPS) return bmp
         val cropW: Int; val cropH: Int
         if (srcRatio > targetRatio) {
             // 源更宽：水平居中裁两侧
@@ -786,4 +871,84 @@ fun initialClipSpec(mediaDurationMs: Long): ClipSpec {
         // 不能写 0L——0 是候选条带第一格的合法封面时刻，写 0 等于替用户选了一帧
         coverMs = null,
     )
+}
+
+/**
+ * 「源与目标等比」的容差，两处共用同一个数：`cropToAspect`（ViewModel 私有）拿它判
+ * 「等比就原样返回、一个像素都不裁」，[alignmentMatters] 拿它判静态图那一路会不会被纵向裁。
+ * 从前它只在 `cropToAspect` 里是一个字面量 `0.01f`，而 Screen 那边另抄了一份
+ * 同值的 `ALIGNMENT_HIDE_EPS`——两份同值常量就是下一次「改一处忘改另一处」的候选。
+ */
+const val CROP_ASPECT_EPS = 0.01f
+
+/**
+ * 这一格的**顶/中/底**此刻到底改不改变得了画面——界面上那一排 chip 该不该在。
+ *
+ * 对齐在两处生效，两处的「源」不是同一个东西，所以判据必须两路都算：
+ * 1. 拼图格子里那一张：`cropToAspect` 吃的是**封面位图**——没重选封面时它是
+ *    [LiveTriptychViewModel.TriptychSlot.imageWidth]/
+ *    [LiveTriptychViewModel.TriptychSlot.imageHeight] 那张静态 JPEG，重选之后是抽出来的
+ *    视频帧，而抽帧失败还会回落到静态图（见 `buildTriptychBitmap`）。
+ *    等比（差在 [CROP_ASPECT_EPS] 之内）它**原样返回**，对齐一个像素都不动。
+ * 2. 导出的那三段视频：`cropFractions` 吃 `videoWidth/videoHeight`，**与封面选没选过无关**。
+ *    它没有等比早退那一道，只要源不比目标更宽就按对齐裁上下。
+ *
+ * 两支裁法里只有「源比目标**更高**」那支用对齐裁上下；源更宽的那支裁左右、
+ * `y` 恒为 0（`cropToAspect` 三个对齐都算出 0，`cropFractions` 那一支根本不读对齐）。
+ * 于是取两路的**并**：任何一路会被纵向裁切，对齐就是活参数，chip 必须在。
+ *
+ * **上一版只按 `videoWidth/videoHeight` 判，缺的就是第 1 路**：视频 16:9 + 静态图 4:3
+ * 配 16:9 目标时，视频那一路完全等比、chip 被收起，而那一格画面**正在被纵向裁切**，
+ * 用户选过的「顶」还在生效却再也碰不到。那不是观感问题，是对一个活参数失去控制。
+ *
+ * 剩下的一格保守多余：静态图会被纵裁、视频不会被、且封面已重选且抽帧成功——
+ * 那一刻 chip 在但对齐不改变任何一帧。这是**故意**偏向「露出来」：
+ * 多显示一枚用不上的 chip 的代价是一个按钮，收起的代价是一个生效却摸不到的参数。
+ *
+ * 尺寸为 0 的那一路**不参与**判定（读不出尺寸就当它不裁）：
+ * `imageWidth/imageHeight` 为 0 意味着那张静态图连画面都解不出来、这一格在拼图里被跳过，
+ * 此刻对齐只剩第 2 路。视频尺寸不会是 0——`parseSlot` 里有 `require(width > 0 && height > 0)`。
+ */
+fun alignmentMatters(
+    imageWidth: Int,
+    imageHeight: Int,
+    videoWidth: Int,
+    videoHeight: Int,
+    targetRatio: Float,
+): Boolean {
+    val imageCroppedVertically = imageWidth > 0 && imageHeight > 0 &&
+        imageWidth.toFloat() / imageHeight < targetRatio - CROP_ASPECT_EPS
+    val videoCroppedVertically = videoWidth > 0 && videoHeight > 0 &&
+        videoWidth.toFloat() / videoHeight < targetRatio
+    return imageCroppedVertically || videoCroppedVertically
+}
+
+/**
+ * 按**身份**写回列表里的一项：把 `idOf(it) == itemId` 的那一项换成 [transform] 的结果，
+ * 找不到时**原样返回同一个列表**（不新增、不抛）。
+ *
+ * 它是 [LiveTriptychViewModel.loadCoverThumbs] 那两次写回的骨架，单独立成函数是为了让它
+ * **能被测**——`TriptychSlot` 揣着 `android.net.Uri`，JVM 单测里根本造不出来（本模块没有
+ * Robolectric，`android.jar` 的方法是「not mocked」），所以这里的泛型不是抽象癖，
+ * 是把「异步结果落在哪一格上」这件事从 Android 依赖里摘出来的唯一办法。
+ * 测试见 `TriptychSlotIdentityTest`。
+ *
+ * 为什么不用下标：抽帧挂在 IO 线程上要挂起才回，其间一次「上移」就把两格换了位置。
+ * 按下标写回会把 A 格抽出的九帧画到**交换后占据那个下标的 B 格**上，
+ * 而 A 格永远停在 `coverThumbsLoading = true` 且 `coverThumbs` 为空——
+ * Screen 的 `FilmstripArea` 先查 loading、`loadCoverThumbs` 又在 loading 时早退，
+ * 那一格的选段条与封面条**从此永久转圈**（一次点击就能撞上，不是理论竞态）。
+ *
+ * 先 `indexOfFirst` 定住位置、再在那一个位置上换，两步都在同一次状态更新里，
+ * 所以「身份 → 位置」这一次映射不会跨越挂起点。
+ */
+fun <T> updatedBySlotId(
+    items: List<T>,
+    idOf: (T) -> Long,
+    itemId: Long,
+    transform: (T) -> T,
+): List<T> {
+    val index = items.indexOfFirst { idOf(it) == itemId }
+    if (index < 0) return items
+    return items.mapIndexed { i, item -> if (i == index) transform(item) else item }
 }

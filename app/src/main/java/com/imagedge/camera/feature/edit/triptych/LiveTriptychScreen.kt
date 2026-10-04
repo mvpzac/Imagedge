@@ -51,7 +51,6 @@ import com.imagedge.camera.ui.layout.EditorFrameState
 import com.imagedge.camera.ui.theme.Radius
 import com.imagedge.camera.ui.theme.Spacing
 import com.imagedge.camera.ui.theme.UiSize
-import kotlin.math.abs
 
 /**
  * LIVE 图三拼（批次 B，对标 DJI Mimo「Live 三拼」，单阶段 + 常驻预览）：
@@ -118,8 +117,13 @@ fun LiveTriptychScreen(
             state.done -> ResultStage(state, viewModel)
 
             ready -> {
-                // 缩略图是「本格」与「封面」两 tab 的 filmstrip 共用的，选定哪格就装哪格的；
-                // VM 对重复调用幂等（非空或在途直接返回），换 tab 不会重复抽帧
+                // 缩略图是「本格」与「封面」两 tab 的 filmstrip 共用的，选定哪格就装哪格的。
+                // 这里只保证**一半**：VM 的幂等只管「已经抽完或正在抽」的重复调用会早退，
+                // 而 key 是 selectedIndex 的副作用在上移/下移后也会再跑一次（选中跟着格子走）。
+                // 让「在途的那一路」不串格的是另一半——VM 抽完九帧按 slotId 写回
+                // （`updatedBySlotId`），不是按当初那个下标；换成下标写回时，中途一次「上移」
+                // 会把九帧画到交换后占据该下标的那一格上，而发起方永远停在 loading 态、
+                // 下面的 `FilmstripArea` 先查 loading 就让它从此只显示转圈
                 LaunchedEffect(state.selectedIndex) {
                     viewModel.loadCoverThumbs(state.selectedIndex)
                 }
@@ -416,12 +420,21 @@ private fun AudioTab(state: UiState, viewModel: LiveTriptychViewModel) {
 }
 
 /**
- * 对齐只在**确实会裁切**时才显示：`cropToAspect` 用 `|srcRatio - target| < 0.01`
- * 判「等比则原样返回」，此刻顶/中/底三枚 chip 是无效控件（规格 §4「隐藏无效控件」）。
- * 这条 epsilon 与 VM 里 `cropToAspect` 各写一份是已知的二处判定——漂移的后果只是
- * chip 显不显示（观感），不像画布尺寸那种会分家，故留在这里而没有下沉 VM。
- * 阈值判据取 `videoWidth/videoHeight`：VM 的 `setAlignment` KDoc 已经论证过
- * 「静态图比例可能与视频不同」，那一支的对齐影响此刻看不见，规格按视频比裁定。
+ * 对齐只在**确实会裁切**时才显示，判据是 [alignmentMatters]——它同时看两路：
+ * 拼图格子里那张**封面位图**（未重选封面时就是静态 JPEG 的
+ * [TriptychSlot.imageWidth]/[TriptychSlot.imageHeight]）与导出时那三段**视频**
+ * （`cropFractions` 用的 `videoWidth/videoHeight`）。哪一路会被纵向裁切，顶/中/底就还是活参数。
+ *
+ * **上一版只按 `videoWidth / videoHeight` 对目标比例判，那是拿一个数去判断另一件事**：
+ * `cropToAspect` 裁的是解码出来的那张图，而小米一类实况图的静态帧与视频比例常见地不一致。
+ * 视频 16:9 + 静态图 4:3 配 16:9 目标时，视频那一路等比、chip 被收起，**而那一格画面
+ * 正在被纵向裁切**：用户先前选的「顶」还在生效，却再也没有入口能改。
+ * `AlignmentRow` 的旧注释把这叫做「看不见」——它不是观感问题，是对一个生效中的参数失去控制。
+ *
+ * 等比容差现在与 `cropToAspect` 共用 VM 那份 `CROP_ASPECT_EPS`（此前这里私藏了一份
+ * 同值的 `ALIGNMENT_HIDE_EPS`，两份常量就是下一次漂移的候选）。
+ * 剩下的一格是**故意**偏保守的（chip 在、但对齐那一刻不改变任何一帧）：
+ * 一枚用不上的按钮比一个摸不到的生效参数好——理由见 [alignmentMatters]。
  */
 @Composable
 private fun AlignmentRow(
@@ -430,8 +443,14 @@ private fun AlignmentRow(
     index: Int,
     viewModel: LiveTriptychViewModel,
 ) {
-    val srcRatio = slot.videoWidth.toFloat() / slot.videoHeight
-    if (abs(srcRatio - aspect.ratio) < ALIGNMENT_HIDE_EPS) return
+    if (!alignmentMatters(
+            imageWidth = slot.imageWidth,
+            imageHeight = slot.imageHeight,
+            videoWidth = slot.videoWidth,
+            videoHeight = slot.videoHeight,
+            targetRatio = aspect.ratio,
+        )
+    ) return
     AppSection(title = "裁切对齐") {
         AppChipRow(
             items = LiveTriptychViewModel.Alignment.entries.toList(),
@@ -477,11 +496,31 @@ private fun canvasAspect(state: UiState): Float {
 }
 
 /**
- * 选段条与候选帧的挂载高度。**56 不是随手写的**：UI-SPEC §4.4「列表行最小高度 56
- * （含 48dp 触控目标）」；手柄触控由组件内部 24px（density=1）命中半径保证 ≥48dp
- * （`ClipMath.TOUCH_RADIUS_PX`），56 是留给这条带的可视高度。
+ * 选段条与候选帧的挂载高度。**56 不是随手写的**：UI-SPEC §4.4
+ * （`docs/UI-SPEC.md:121`）「列表行最小高度 56（含 48dp 触控目标）」，这条带子就是一条行。
+ *
+ * 但对**手柄**它只保证得住一个方向，别说成两个方向都够：
+ * 命中判定在 density=1 的空间里按 `ClipMath.TOUCH_RADIUS_PX = 24f` 收半径，组件把指针坐标
+ * 除以 density（`ClipFilmstrip` 里的 `hitScale`），所以那一圈换算回来就是 24dp 半径 /
+ * 48dp 直径。竖直方向轨道高 56dp，一圈在竖直方向装得下 ✓；水平方向**只有手柄离轨道两端
+ * 都不止 24dp 时**，那一圈才整个落在手指能按到的地方。
+ *
+ * **贴在轨道端点上的手柄因此只剩一半**：[initialClipSpec] 恒给 `startMs = 0L`
+ * （`ClipMath.clampStart(0, …)` 的结果就是 0），而素材时长 ≤ `ClipMath.MAX_CLIP_MS`（5000ms）时
+ * 两个钳制都塌到素材边界上——`endMs == 素材时长`，折算成像素就是
+ * `msToTrackPx(duration, duration, trackPx) == trackPx`——于是
+ * **每一格的默认态两个手柄都正好压在轨道左右两端**，各自的可命中带是 24dp × 56dp，
+ * 水平那一维短于 §8.1（`docs/UI-SPEC.md:229`）要求的 48dp。
+ * 素材长过 5s 时止手停在 5000ms 那个位置，只有它离轨道右端不止 24dp 时才恢复 48dp 直径
+ * （10s 素材上它在正中、6s 素材上它已在右侧 1/6 处），起手任何时候都仍是半宽；
+ * 封面手柄拖到 0ms 或素材末尾时同样退化成 24dp。
+ * 溢出轨道外的那半边圆也够不回来：整条带子在 `EditorFrame` 的
+ * `padding(horizontal = Spacing.L)`（16dp，见 `ui/theme/Spacing.kt:18`）之内，
+ * 而 `pointerInput` 的 Box 就到轨道边缘为止。
+ *
+ * 要真把端点手柄做回 48dp，得让**输入区比可视条带更宽**（负 padding 外扩 `pointerInput`）
+ * 或者给贴边手柄一份加宽的边缘命中带（动 `ClipMath.resolveZone` 的半径语义，而它与短片段
+ * 重叠的那套判据由 `ClipMathTest` 三条命中测试与 `FilmstripLayoutTest` 三条定区测试钉着）
+ * ——那两条都是在为一句注释掰布局，本轮不做，先把话说明白。
  */
 private val STRIP_HEIGHT = 56.dp
-
-/** 「等比即不显示对齐」的阈值，与 VM `cropToAspect` 的 0.01f 同值（见 [AlignmentRow]） */
-private const val ALIGNMENT_HIDE_EPS = 0.01f

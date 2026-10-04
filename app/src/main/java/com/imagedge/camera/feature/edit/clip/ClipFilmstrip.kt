@@ -80,8 +80,14 @@ internal fun handlesToRender(enabled: Set<FilmstripHandle>, coverMs: Long?): Set
  *
  * `coverMs == null` 时没有封面，也就没有「越界的封面」——恒 `false`。
  * 上一版这条规则只写在 `@param coverOutOfRange` 的散文里（「调用方须传 false」），
- * 忘了传 true 编译不响、测试不响，越界态就画在一条根本不存在的封面上；
- * 如今它由代码执行，调用方没有能传错的参数。
+ * 而那句散文当时把风险说大了两处，按 `git show bd2fa9d^` 的实现改正：
+ * 那个参数**没有默认值**（`coverOutOfRange: Boolean,` 是必填位），漏传是编译错误，
+ * 不是「静默降级」；而那一版 `CoverMark` 也只在 `coverMs != null` 时才发出去
+ * （`coverMs?.takeIf { Cover in activeHandles }`），所以「多传 `true` 会把越界色画在
+ * 一条根本不存在的封面上」也不成立——它什么都不会画（旧散文自己下一句就是
+ * 「传什么都不显示」，同一份文档里两处互相拆台）。
+ * 真正留得下来的隐患只有一个：**硬写 `false`**。真越界的封面会被显示成正常色，
+ * 用户无从分辨。删参数堵的是这一个，不是那两条要么编译不过、要么什么都不会发生的路。
  * （也别拿 0 代 `null` 去喂 [ClipMath.coverOutOfRange]：0 是合法封面时刻，见 [ClipSpec]。）
  */
 internal fun coverOutOfRangeOf(clip: ClipSpec): Boolean =

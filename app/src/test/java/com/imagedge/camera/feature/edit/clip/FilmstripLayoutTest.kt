@@ -226,10 +226,12 @@ class FilmstripLayoutTest {
      * 封面越界态从 spec 自己推导；`coverMs == null`（还没选封面）恒 `false`。
      *
      * 上一版这是一枚由**调用方申报**的 `coverOutOfRange: Boolean` 参数，规则只写在
-     * KDoc 散文里（「coverMs == null 时须传 false」）。两种写错都不会有响动：
-     * 多传 `true` 会给一条根本不存在的封面画越界色；漏传（写死 `false`，
-     * 正是 Task 5 brief 的调用点犯的错）会把真越界的封面显示成正常色——
-     * 静默降级，用户无从分辨。于是判定收进 spec，参数整个删掉。
+     * KDoc 散文里（「coverMs == null 时须传 false」）。删掉它的理由只有一条，
+     * 而旧注释把另外两条写成了风险——按 `git show bd2fa9d^` 核对过实现，那两条不成立：
+     * 那个参数是**必填位、没有默认值**，漏传当场编译错误（不会「没有响动」）；
+     * 而 `CoverMark` 当时也只在 `coverMs != null` 时才发，多传 `true` 什么也画不出来。
+     * 真正静默的只有**硬写 `false`**：真越界的封面被画成正常色，用户无从分辨——
+     * 判定收进 spec、参数整个删掉，堵的就是这一条。
      *
      * `0L` 一支单独钉：0 是合法封面时刻（候选条带最左那张，见 [ClipSpec] 的 KDoc），
      * 落在段内为 false、落在段外为 true——这一对成立才证明 `null` 没有被 0 悄悄代理。
