@@ -151,4 +151,73 @@ class FilmstripLayoutTest {
             ),
         )
     }
+
+    /**
+     * `coverMs == null`（还没选封面）时封面手柄**整支不存在**：不画，也不可拖。
+     *
+     * 这条钉的是「不退回 0」那一半。把 null 画成 0ms，用户看到的就是「他选中了第 0 帧」，
+     * 而 0ms 在条带上是一个**合法位置**：三拼的候选条带按 `duration * i / count` 抽帧，
+     * `i = 0` 那一张（最左）的时刻就是 0（见 [ClipSpec] 的 KDoc）——
+     * C2 用类型消掉的那个歧义就会在绘制这一侧原样长回来。
+     *
+     * 各条断言分别管住一种写坏的方式：
+     * - 收窄只摘 Cover，In/Out 原样留着（摘错一支等于整条带子失效）；
+     * - `0L` 走非空那一支，封面手柄照旧存在（0 是合法封面时刻，不是「未选」的哨兵）；
+     * - 单独只剩 Cover 时收窄成空集（封面 tab 上「未选」就是没有可拖的东西）。
+     */
+    @Test
+    fun `没有封面时刻时封面手柄整支不存在而不是被画在零毫秒`() {
+        val all = setOf(FilmstripHandle.In, FilmstripHandle.Out, FilmstripHandle.Cover)
+        assertEquals(
+            setOf(FilmstripHandle.In, FilmstripHandle.Out),
+            handlesToRender(all, null),
+        )
+        assertEquals(all, handlesToRender(all, 0L))
+        assertEquals(
+            setOf(FilmstripHandle.In),
+            handlesToRender(setOf(FilmstripHandle.In, FilmstripHandle.Cover), null),
+        )
+        assertEquals(
+            emptySet<FilmstripHandle>(),
+            handlesToRender(setOf(FilmstripHandle.Cover), null),
+        )
+    }
+
+    /**
+     * 收窄后的集合喂回定区函数，按下 0ms 这一点**判不出 Cover**。
+     *
+     * 这一条把组件里那句「`coverPx` 传 0f 只是占位、不参与判定」变成可证伪的事实：
+     * [filmstripHandleFor] 对不在启用集里的手柄先把位置挪出命中半径，所以未选封面时
+     * 那个 0f 无论落在哪儿都不会被读成「封面手柄在 0ms」。
+     */
+    @Test
+    fun `未选封面时零毫秒那个占位值不参与定区`() {
+        assertNull(
+            filmstripHandleFor(
+                x = 0f,
+                startPx = 900f,
+                endPx = 1000f,
+                coverPx = 0f,
+                enabled = handlesToRender(
+                    setOf(FilmstripHandle.In, FilmstripHandle.Out, FilmstripHandle.Cover),
+                    null,
+                ),
+            ),
+        )
+        // 对照：同一组坐标，封面时刻为 0L 时那一支必须还能被命中，
+        // 否则上面那条 assertNull 是坐标本身造成的，跟收窄无关
+        assertEquals(
+            FilmstripHandle.Cover,
+            filmstripHandleFor(
+                x = 0f,
+                startPx = 900f,
+                endPx = 1000f,
+                coverPx = 0f,
+                enabled = handlesToRender(
+                    setOf(FilmstripHandle.In, FilmstripHandle.Out, FilmstripHandle.Cover),
+                    0L,
+                ),
+            ),
+        )
+    }
 }

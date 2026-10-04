@@ -13,9 +13,14 @@ import kotlin.math.roundToInt
 /**
  * 导出画质档位：短边上限 + 码率。数值**借用** ClearCut `model/ExportConfig.kt` 的表，非本项目推导。
  *
- * **尚未接线**：全仓没有任何生产调用方（`cellSize` 只有测试在调），
- * 导出路径仍然直接读 `aspect.refW`/`refH`。接线在 Task 4（`Quality` 进 ViewModel 状态）
- * 与 Task 7（码率落到编码器）。别把 `bitrate` 当成已经生效的设置读。
+ * 两个维度的接线状态**不一样**，别把它们混成一句「已接线」：
+ * - [shortSideCap] 已生效（Task 4）：经 [cellSize] 决定三段视频的转码目标尺寸与
+ *   拼图画布尺寸，切档会改产物分辨率。
+ * - [bitrate] **至今没有任何读取方**：全仓 `bitrate` 只命中下面这行声明和注释，
+ *   没有一处代码读它。`MotionPhotoComposer.trimVideo` 的签名里没有 `bitrate` 参数
+ *   （Task 7 才加），编码器走 Media3 自己的默认值。所以切到 P720 **只降分辨率、
+ *   不降码率**，别把 `bitrate` 当成已经生效的设置读；`estimateTriptychBytes` 也正因为
+ *   如此按像素推导、不按它推导。
  */
 enum class Quality(val shortSideCap: Int, val bitrate: Int) {
     P720(720, 6_000_000),
@@ -25,8 +30,13 @@ enum class Quality(val shortSideCap: Int, val bitrate: Int) {
 }
 
 /**
- * 每格的转码归一尺寸。**当前无生产调用方**——导出路径仍用 `aspect.refW`/`refH`，
- * 接 [cellSize] 是 Task 4。
+ * 每格的转码归一尺寸，也就是**成品里一格的像素**。
+ *
+ * 由 [cellSize] 推导。生产读取方是 `LiveTriptychViewModel` 里的四处：
+ * `export()` 把 `width`/`height` 交给 `trimVideo` 的 `targetW`/`targetH`、
+ * `buildTriptychBitmap` 用它定画布、[triptychCanvasSize] 与 `estimateTriptychBytes`
+ * 从它推导。**四处必须同一个值**——分家的那一侧就是「屏幕上那格」与「相册里那格」
+ * 是两个尺寸（Task 4 之前正是这个状态：导出直接抄 `refW`/`refH`）。
  */
 data class CellSize(val width: Int, val height: Int)
 
@@ -40,8 +50,10 @@ data class CellSize(val width: Int, val height: Int)
  * 两者焊在一起就再也插不进中间档。参考尺寸与输出尺寸分开后，
  * `refW/refH` 是**这个档位长什么样**，输出尺寸才是画质决定的。
  *
- * 注意 [cellSize] 还没接到导出上：`export()` 现在仍然直接用 `aspect.refW`/`refH` 当
- * 目标尺寸，也就是恒为 1080p 档。[Quality] 是为 Task 4 预留的。
+ * [cellSize] 已经接到导出与拼图上（Task 4）：换 [Quality] 会同时改掉三段视频的转码
+ * 目标尺寸与拼图画布尺寸。[refW]/[refH] 因此**只是参考尺寸**，导出侧读的是 `cellSize`
+ * 的结果而不是这两个数——`refW`/`refH` 如今在 `Aspect` 之外没有读取方（只有
+ * [label] 与 [cellSize] 自己用）。
  */
 enum class Aspect(val ratio: Float, val refW: Int, val refH: Int) {
     R16_9(16f / 9f, 1920, 1080),
@@ -92,7 +104,9 @@ enum class Aspect(val ratio: Float, val refW: Int, val refH: Int) {
  * 护栏本身由 `evenFloor` 的直接测试钉住（`LiveTriptychAspectLabelTest`），
  * 「8 个现有输出都是偶数」是另一回事、由另一条测试钉。
  *
- * **当前无生产调用方**，导出路径仍读 `aspect.refW`/`refH`（Task 4 接线）。
+ * 生产读取方有四处（Task 4 已接线），名单在 [CellSize] 的 KDoc 里：导出的转码目标尺寸、
+ * 拼图画布、[triptychCanvasSize]、体积预估。**四处都从这一句推导**，别在调用方再写一份
+ * 「短边上限怎么缩」——那一份额就是下一个 720p 分家事故。
  */
 fun Aspect.cellSize(quality: Quality): CellSize {
     val refShort = minOf(refW, refH)

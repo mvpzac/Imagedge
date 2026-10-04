@@ -15,6 +15,8 @@ import androidx.lifecycle.viewModelScope
 import com.imagedge.camera.core.common.AppLog
 import com.imagedge.camera.feature.edit.clip.ClipMath
 import com.imagedge.camera.feature.edit.clip.ClipSpec
+import com.imagedge.camera.feature.edit.clip.CoverSource
+import com.imagedge.camera.feature.edit.clip.coverSourceFor
 import com.imagedge.camera.motionphoto.MotionPhotoComposer
 import com.imagedge.camera.motionphoto.MotionPhotoParser
 import com.imagedge.camera.ui.feedback.Haptics
@@ -42,7 +44,7 @@ import kotlinx.coroutines.withContext
  * LIVE 图三拼 ViewModel（批次 B，对标 DJI Mimo「Live 三拼」）。
  *
  * **没有两阶段**：三张实况图（**任意长宽比**，横竖屏混选均可）先统一裁切到同一
- * 长宽比（16:9 / 1:1 / 4:5 全局选择），每格可选起止、封面帧、声音、对齐；
+ * 长宽比（16:9 / 1:1 / 4:5 / 27:16 全局选择），每格可选起止、封面帧、声音、对齐；
  * 三格竖排拼图**常驻在编辑页上**，参数一改就重建，导出是页面上唯一的主按钮。
  * 原先的 `Phase.EDIT/PREVIEW` 只是把本来就能实时显示的东西延后到一次点击之后，
  * 于是「参数变了但预览没变」成了靠 phase 门控维持的假象。
@@ -83,7 +85,10 @@ class LiveTriptychViewModel @Inject constructor(
         val videoDurationMs: Long,
         val videoWidth: Int,
         val videoHeight: Int,
-        /** 选段 + 封面 + 声音。封面时间相对**原始**视频，可越界 */
+        /**
+         * 选段 + 封面 + 声音。`coverMs` 为 `null` = 未重选封面（用原始静态图）；
+         * 非 `null` 时相对**原始**视频，可越界（收口在 [coverSourceFor]）
+         */
         val clip: ClipSpec = initialClipSpec(videoDurationMs),
         /** 该格在统一比例下保上/中/下。三拼拼贴独有，不进 ClipSpec */
         val alignment: Alignment = Alignment.CENTER,
@@ -98,8 +103,9 @@ class LiveTriptychViewModel @Inject constructor(
         val aspect: Aspect = Aspect.R16_9,
         /** 导出画质档位。经 [Aspect.cellSize] 决定三段视频的目标尺寸与拼图画布尺寸 */
         val quality: Quality = Quality.P1080,
-        /** 当前正在编辑第几格（Task 5 的 tab 区消费它） */
+        /** 当前正在编辑第几格。**暂无读取方**（Task 5 的 tab 区消费它） */
         val selectedIndex: Int = 0,
+        /** 当前参数区 tab。**暂无读取方**（同上） */
         val tab: TriptychTab = TriptychTab.CELL,
         /** 导出成功且已落盘；结果页据此呈现，之后不再视为「编辑中」 */
         val done: Boolean = false,
@@ -109,7 +115,7 @@ class LiveTriptychViewModel @Inject constructor(
         /** 拼接预览（所见即所得：封面裁切后的三格拼图） */
         val previewBitmap: Bitmap? = null,
         val previewLoading: Boolean = false,
-        /** 预估导出大小（字节） */
+        /** 预估导出大小（字节）。**估算值**，推导见 [estimateTriptychBytes] */
         val estimatedBytes: Long = 0L,
         val message: String? = null,
         val success: Boolean = false,
@@ -137,6 +143,10 @@ class LiveTriptychViewModel @Inject constructor(
                 it.copy(
                     parsing = true, message = null, success = false,
                     slots = emptyList(), done = false, selectedIndex = 0,
+                    // 旧拼图必须一起作废：留着它，新素材解析完之前那一屏显示的是**上一批**
+                    // 的三格，而它此刻挂在 `ready == false` 的分支之外看着还像当前内容。
+                    // 这正是 [invalidatePreview] 的 KDoc 说它要防的那个洞
+                    previewBitmap = null, estimatedBytes = 0L,
                 )
             }
             val slots = mutableListOf<TriptychSlot>()
@@ -197,9 +207,16 @@ class LiveTriptychViewModel @Inject constructor(
     }
 
     /**
-     * 裁切对齐。源比目标比例更高时，[cropFractions] 用它决定竖向裁上/中/下
-     * （源更宽的那一支走水平居中，与对齐无关），拼图那一格则由
-     * `cropToAspect` 用同一个字段裁。**两处都变**，所以对齐一改预览必须重建。
+     * 裁切对齐。[Alignment] **只在源比目标比例更高（`srcRatio < aspect.ratio`）时才有效果**：
+     * 那一条分支上 [cropFractions] 裁的是**上下**、按对齐定位置，拼图那一格由
+     * `cropToAspect` 裁上下、也按同一个字段定位置——两处都变，所以对齐一改预览必须重建。
+     *
+     * **源更宽的那一支（`srcRatio > aspect.ratio`）改对齐不改变任何一帧**：
+     * [cropFractions] 那一支裁的是左右且水平居中，`cropToAspect` 同一支也裁左右，
+     * `y` 算出来恒为 0。此刻重建预览是白费的 3 帧开销，但它发生在一次用户动作之后，
+     * 浪费得有限，而在此处按「视频尺寸 vs 目标比例」去跳过重建会漏掉一种情况：
+     * `cropToAspect` 吃的是**解码出来那张图**的比例（静态图可能与视频不同），
+     * 拿 `videoWidth/videoHeight` 代替它就是拿一个数去判断另一件事。
      */
     fun setAlignment(index: Int, alignment: Alignment) {
         updateSlot(index) { it.copy(alignment = alignment) }
@@ -217,16 +234,19 @@ class LiveTriptychViewModel @Inject constructor(
      * [Aspect.cellSize]，于是同时改掉三段视频的转码目标尺寸与拼图画布尺寸。
      *
      * 码率这一维**此刻没有传下去**：`MotionPhotoComposer.trimVideo` 的签名里
-     * 还没有 `bitrate` 参数（Task 7 才加），编码器走的是它自己的默认值。
-     * 所以切到 P720 只降分辨率、不降码率——别把这个 setter 当成「省流量的那个开关」。
+     * 还没有 `bitrate` 参数（Task 7 才加），编码器走的是 Media3 自己的默认值。
+     * 所以切到 P720 只降分辨率、不降码率——别把这个 setter 当成「省流量的那个开关」，
+     * [estimateTriptychBytes] 也正因为如此只按像素算、不按 [Quality.bitrate] 算。
      */
     fun setQuality(q: Quality) {
         _state.update { it.copy(quality = q) }
         invalidatePreview()
     }
 
+    /** 当前 tab。**暂无读取方**：参数区在 Task 5 才铺开，现在只有 [UiState.selectedIndex] 同理 */
     fun setTab(tab: TriptychTab) = _state.update { it.copy(tab = tab) }
 
+    /** 选中第几格。**暂无读取方**（Task 5 的 tab 区消费它） */
     fun select(index: Int) {
         if (index !in _state.value.slots.indices) return
         _state.update { it.copy(selectedIndex = index) }
@@ -234,16 +254,22 @@ class LiveTriptychViewModel @Inject constructor(
 
     /**
      * 写回某一格的选段。封面时间允许越界（用户可以先挑最好的帧再决定裁哪段），
-     * 由 [ClipMath.effectiveCoverMs] 在预览与导出两处收口。
+     * 收口统一在 [coverSourceFor] 里的 `ClipMath.effectiveCoverMs`：预览与导出
+     * 走的是同一个函数，所以「屏幕上那一帧」与「产物那一帧」不可能分家。
      */
     fun setSpec(index: Int, spec: ClipSpec) {
         updateSlot(index) { it.copy(clip = spec) }
         invalidatePreview()
     }
 
-    /** 恢复原静态图封面 = 封面时间回到 0（`coverMs == 0` 就是「未重选」这一态） */
+    /**
+     * 恢复原静态图封面 = 回到「未重选」这一态，即 [ClipSpec.coverMs] 置 `null`。
+     *
+     * **不是**置 0：0 是候选条带第一格的合法封面时刻（见 [ClipSpec] 的 KDoc），
+     * 置 0 会让画面变成「视频第 0 帧」而不是原静态图，而两者看起来几乎一样。
+     */
     fun resetCover(index: Int) {
-        val spec = _state.value.slots.getOrNull(index)?.clip?.copy(coverMs = 0L) ?: return
+        val spec = _state.value.slots.getOrNull(index)?.clip?.copy(coverMs = null) ?: return
         setSpec(index, spec)
     }
 
@@ -283,26 +309,30 @@ class LiveTriptychViewModel @Inject constructor(
         }
     }
 
-    /** 上移一格（顺序即拼图从上到下的顺序） */
+    /**
+     * 上移一格（顺序即拼图从上到下的顺序）。**换不动就不重建**：
+     * `invalidatePreview()` 会白白抽 3 帧，而没换顺序时旧拼图就是对的。
+     */
     fun moveUp(index: Int) {
         if (index <= 0) return
-        _state.update { s ->
-            if (index >= s.slots.size) return@update s
-            val slots = s.slots.toMutableList()
-            val tmp = slots[index - 1]; slots[index - 1] = slots[index]; slots[index] = tmp
-            s.copy(slots = slots)
-        }
+        if (!swapSlots(index, index - 1)) return
         invalidatePreview()
     }
 
     fun moveDown(index: Int) {
+        if (!swapSlots(index, index + 1)) return
+        invalidatePreview()
+    }
+
+    /** 相邻两格对调。越界或索引无效时返回 false（**不改状态**） */
+    private fun swapSlots(i: Int, j: Int): Boolean {
+        if (i !in _state.value.slots.indices || j !in _state.value.slots.indices) return false
         _state.update { s ->
-            if (index >= s.slots.size - 1) return@update s
             val slots = s.slots.toMutableList()
-            val tmp = slots[index + 1]; slots[index + 1] = slots[index]; slots[index] = tmp
+            val tmp = slots[j]; slots[j] = slots[i]; slots[i] = tmp
             s.copy(slots = slots)
         }
-        invalidatePreview()
+        return true
     }
 
     private inline fun updateSlot(index: Int, transform: (TriptychSlot) -> TriptychSlot) {
@@ -366,7 +396,7 @@ class LiveTriptychViewModel @Inject constructor(
             }
             // 预估按**选段**时长算，不是素材总时长：用户把三段各收到 2s 之后，
             // 产物也是 6s 的视频，再用素材总长估就是拿一个不会发生的数糊弄界面
-            val estimated = estimateTriptychBytes(slots.map { it.clip.durationMs }, quality)
+            val estimated = estimateTriptychBytes(slots.map { it.clip.durationMs }, aspect, quality)
             _state.update {
                 it.copy(previewBitmap = bitmap, previewLoading = false, estimatedBytes = estimated)
             }
@@ -397,16 +427,24 @@ class LiveTriptychViewModel @Inject constructor(
         val result = createBitmap(cellW, cellH * slots.size)
         val canvas = Canvas(result)
         slots.forEachIndexed { index, slot ->
-            // 封面时间必须先收口，否则用户把封面拖到选区外时，
-            // 拼图显示的那一帧与导出产物的封面不是同一帧
-            val coverMs = ClipMath.effectiveCoverMs(
-                slot.clip.startMs, slot.clip.endMs, slot.clip.coverMs
-            )
-            // 格画面来源：重选封面 → 精确帧；未重选（coverMs == 0）→ 原静态图
-            val cover = if (slot.clip.coverMs == 0L) {
-                decodeSampled(slot.imageFile, frameWidth)
-            } else {
-                extractFrame(slot.videoFile, coverMs, MediaMetadataRetriever.OPTION_CLOSEST, frameWidth)
+            // 格画面来源交给 [coverSourceFor] 判：未重选封面 → 原静态图，
+            // 重选了 → 视频在该时刻的帧（**已按选段收口**，收口不放在这里，
+            // 放进 `if/else` 两侧就等于给「收口」和「取帧」各留一个能漏的口子）。
+            //
+            // 抽帧失败**回退到静态图**，而不是留空：留空的那一格在预览里是透明的，
+            // 存成 JPEG 后 alpha 0 压成**一条黑带**，而界面照样写「已保存」。
+            // 两条路都拿不到画面时（静态图也解不开）才跳过这一格。
+            val cover = when (val source = coverSourceFor(slot.clip)) {
+                is CoverSource.Still -> decodeSampled(slot.imageFile, frameWidth)
+                is CoverSource.Frame -> extractFrame(
+                    slot.videoFile, source.timeMs, MediaMetadataRetriever.OPTION_CLOSEST, frameWidth
+                ) ?: run {
+                    AppLog.w(
+                        "triptych",
+                        "第 ${index + 1} 格封面抽帧失败 @${source.timeMs}ms，回退到静态图"
+                    )
+                    decodeSampled(slot.imageFile, frameWidth)
+                }
             } ?: return@forEachIndexed
             val cropped = cropToAspect(cover, aspect.ratio, slot.alignment)
             canvas.drawBitmap(
@@ -513,12 +551,19 @@ class LiveTriptychViewModel @Inject constructor(
         null
     }
 
-    /** 导出：三段裁切+转码归一（统一尺寸） → 序列拼接 → 与拼图合成 → 保存 */
+    /**
+     * 导出：三段裁切+转码归一（统一尺寸） → 序列拼接 → 与拼图合成 → 保存。
+     *
+     * `done` 是一次的终点，**这道拒绝必须写在 ViewModel 里**而不是只靠界面把按钮藏起来：
+     * 上一轮同一个缺陷就复发过一次（CHANGELOG「三拼的骨架主按钮和阶段主按钮撞车」），
+     * `saveVisible` 一旦因为任何理由重新为真，界面挡不住一次重复导出——
+     * 而重复导出的后果是相册里多出一份文件，界面还在说「已保存」。
+     */
     fun export() {
         val slots = _state.value.slots
         val aspect = _state.value.aspect
         val quality = _state.value.quality
-        if (slots.size != 3 || _state.value.exporting) return
+        if (slots.size != 3 || _state.value.exporting || _state.value.done) return
         // 三处必须共用这一个 cellSize：三段视频的转码目标尺寸、拼图画布尺寸、封面抽帧宽度。
         // 混批取值会让「预览里那张图」与「相册里那张图」在 720p 档下是两个尺寸
         val cell = aspect.cellSize(quality)
@@ -668,27 +713,50 @@ fun triptychCanvasSize(aspect: Aspect, quality: Quality, cells: Int = 3): CellSi
 }
 
 /**
- * 体积预估：视频 ≈ Σ时长 × [Quality.bitrate] ÷ 8，静态拼图 JPEG 记 3 MiB。
+ * 体积预估：视频 ≈ 格子像素 × 帧数 × 每像素比特数 ÷ 8，静态拼图 JPEG 记 3 MiB。
  *
- * 码率取自画质档位，所以换档位时这个数会跟着变——原来写死的 10Mbps 经验值
- * 与 [Quality] 的两档都不是一回事。
+ * **为什么按像素算而不是按 [Quality.bitrate] 算**：码率**根本没有传到编码器**——
+ * `MotionPhotoComposer.trimVideo` 的签名里没有 `bitrate`，`VideoTrimmer` 也没有
+ * `setEncoderFactory` / `setVideoEncoderSettings`，于是走的是 Media3 `Transformer` 的
+ * 默认编码器工厂（`media3-transformer` 1.9.3 `DefaultEncoderFactory`）。那份实现
+ * （`javap` 反编译核对过）在没拿到显式码率时**只会**从源 `Format.averageBitrate`
+ * 或按 `getSuggestedBitrate(宽, 高, 帧率) = (int)(0.14 × 宽 × 高 × 帧率)` 自己估一个，
+ * 两条都与本项目的档位无关。拿 [Quality.bitrate] 乘出来的数（12Mbps / 6Mbps）是一个
+ * 编码器从未被告知的值：切 P720 在界面上少一半，产物却不会。
  *
- * 三点必须知道：
- * - **只在片段非空时** 720p 才严格小于 1080p。空输入下视频部分是 0，两档都只剩
- *   那个 3 MiB 常数，于是**完全相等**。
- * - 时长是**选段**时长（`ClipSpec.durationMs`），不是素材总长；负值按 0 计。
- * - 这是**估算**，不是编码器实测值：真实码率随画面复杂度浮动。
+ * 画质档位**当前唯一真正改到的就是分辨率**（`export()` 把 `cell.width/height` 交给
+ * `trimVideo` 的 `targetW/targetH`），所以预估就该跟着像素走：像素少了，编码器要吞的
+ * 比特自然少了，方向是对的。27:16 是唯一两档同尺寸的比例（短边 640 < 720 的上限，
+ * 不缩，见 [cellSize]），它的两档预估**必然相等**——这正是应该显示的结果。
+ *
+ * 0.14 比特/像素/帧这个量级与 Media3 自己的默认值同数量级（30fps 下 1920×1080 ≈ 8.7Mbps），
+ * 取的是**量级**，不是它的公式：真源帧率本文件没读（`TriptychSlot` 不带 frameRate），
+ * 画面复杂度也会让实际码率浮动。**这是估算，不是编码器实测值**——
+ * 界面上那一行也照此写了话，别把它改成一句看起来更确定的说法。
+ *
+ * 其余两点不变：时长是**选段**时长（`ClipSpec.durationMs`），不是素材总长；负值按 0 计。
  */
-fun estimateTriptychBytes(clipDurationsMs: List<Long>, quality: Quality): Long {
+fun estimateTriptychBytes(clipDurationsMs: List<Long>, aspect: Aspect, quality: Quality): Long {
     val seconds = clipDurationsMs.sumOf { it.coerceAtLeast(0L) } / 1000.0
-    val video = (seconds * quality.bitrate / 8).toLong()
-    return video + 3L * 1024 * 1024
+    val cell = aspect.cellSize(quality)
+    val video = (seconds * cell.width * cell.height * ESTIMATE_FRAMES_PER_SECOND * BITS_PER_PIXEL_FRAME / 8)
+        .toLong()
+    return video + COLLAGE_JPEG_BYTES
 }
+
+/** 预估用的帧率。源帧率不在 [TriptychSlot] 里（`MediaMetadataRetriever` 读的是时长与尺寸） */
+private const val ESTIMATE_FRAMES_PER_SECOND = 30f
+
+/** 每像素每帧的比特数。量级对齐 Media3 `DefaultEncoderFactory.getSuggestedBitrate` 的 0.14 */
+private const val BITS_PER_PIXEL_FRAME = 0.14f
+
+/** 静态拼图 JPEG 的体积常数。3 MiB，与 [estimateTriptychBytes] 的调用点无关 */
+private const val COLLAGE_JPEG_BYTES = 3L * 1024 * 1024
 
 /**
  * 一格素材解析完成后的**初始选段**：从头取，最多到 [ClipMath.MAX_CLIP_MS]。
  *
- * 走 [ClipMath.clampStart] / [ClipMath.clampEnd] 而不是直接写 `ClipSpec(0, duration, 0)`，
+ * 走 [ClipMath.clampStart] / [ClipMath.clampEnd] 而不是直接写 `ClipSpec(0, duration, null)`，
  * 是为了让 10s 素材的初始选段就是 5s——导出侧 `VideoTrimmer.trim` 会把超长的段
  * 截到 `startMs + MAX_CLIP_MS`，初始态若按素材总长给，用户看到的起点就已经是
  * 一个导出时会**静默改短**的选段（这正是 ClipBounds 要共源的原因）。
@@ -714,6 +782,8 @@ fun initialClipSpec(mediaDurationMs: Long): ClipSpec {
     return ClipSpec(
         startMs = start,
         endMs = ClipMath.clampEnd(wanted, start, mediaDurationMs.coerceAtLeast(0L)),
-        coverMs = 0L,
+        // 初始态是「未重选封面」：画面用实况图里的原始静态图。
+        // 不能写 0L——0 是候选条带第一格的合法封面时刻，写 0 等于替用户选了一帧
+        coverMs = null,
     )
 }

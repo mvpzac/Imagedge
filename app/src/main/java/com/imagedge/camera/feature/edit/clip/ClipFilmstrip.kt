@@ -48,6 +48,23 @@ import kotlin.math.roundToInt
 /** 缩略图条上可拖的三个手柄 */
 enum class FilmstripHandle { In, Out, Cover }
 
+/**
+ * 把调用方声明的启用集收窄成**此刻真的存在**的手柄集。
+ *
+ * 唯一的收窄规则：[ClipSpec.coverMs] 为 `null`（用户还没选封面）时把
+ * [FilmstripHandle.Cover] 摘掉——没有封面时刻，就没有封面手柄可放。
+ *
+ * 这条规则**只写在这一个函数里**，命中判定与绘制共用它，于是「画着却拖不动」
+ * 与「拖得动却没画」这两种分家在这条带上不可能出现；调用方也不必在每个点位
+ * 自己判 `spec.coverMs ?: 0L`（各写一遍就各有一份能漏、还能写出不一样的兜底）。
+ *
+ * **不退回 0ms。** 0 在这条带上是一个**合法的封面时刻**（候选条带最左那张就落在 0，
+ * 见 [ClipSpec] 的 KDoc），把「未选」画成「选中的是第 0 帧」正是 `coverMs` 可空
+ * 要消掉的那个歧义，重新引进来等于白改一次类型。
+ */
+internal fun handlesToRender(enabled: Set<FilmstripHandle>, coverMs: Long?): Set<FilmstripHandle> =
+    if (coverMs == null) enabled - FilmstripHandle.Cover else enabled
+
 /** 起手/止手柄的宽度。左边贴选区起边、右边贴选区止边，两侧对称 */
 private val HANDLE_WIDTH: Dp = 6.dp
 
@@ -156,10 +173,18 @@ fun filmstripHandleFor(
  *   本组件读不到调用方的作用域，也不抽帧。本组件把它们等分铺满，不校验个数；
  *   多给少给都不崩，少给只是画面上更粗。
  * @param spec 当前选区（`startMs`/`endMs`）与封面时刻（`coverMs`），拖拽后回传给调用方。
+ *   **`coverMs == null`（还没选封面）时这一带只有两个手柄**：封面竖线不画，封面也不参与
+ *   命中判定（见 [handlesToRender]）。不把它画在 0ms 上——0 是一个**合法的封面时刻**
+ *   （候选条带最左那张就落在 0），画出来等于宣称用户选中了他没选过的那一帧。
  * @param durationMs 素材时长（ms）。**必须 > 0**：它是 `msToPx` 的除数，为 0 时无意义。
- * @param enabled 当前 tab 开放哪些手柄。**先按它过滤再判定**（见 [filmstripHandleFor]）。
+ * @param enabled 当前 tab 开放哪些手柄。**先按它过滤再判定**（见 [filmstripHandleFor]），
+ *   判定之前再按 `coverMs` 是否为 `null` 收窄一次（见 [handlesToRender]）。
  * @param coverOutOfRange 由 [ClipMath.coverOutOfRange] 算出，本组件自己不调（签名由 brief 定死）。
  *   封面**不被钳进选区**（spec §2.1：先挑最好的帧，再决定裁哪一段），越界只在这里显形。
+ *
+ *   `coverMs == null` 时没有封面可越界，调用方须传 `false`——此刻这一格不画封面手柄，
+ *   传什么都不显示；`ClipMath.coverOutOfRange` 收的是非空 `Long`，为 `null` 造一个 0 进去
+ *   就是拿「越界判定」去回答一个还没发生的问题。
  *
  *   但「不钳」只针对**选区**这一个方向，别读成两个方向都放开：位移经 [ClipMath.pxToMs]，
  *   而它把像素比钳在 `0..1`，于是 `targetMs = anchorMs + [0, durationMs]`——
@@ -187,6 +212,10 @@ fun ClipFilmstrip(
 ) {
     // 退化输入：见上面 KDoc 的「退化输入什么都不画」——不画而不是画空轨道
     if (durationMs <= 0L || thumbs.isEmpty()) return
+    // 封面时刻的可空性在这里**收一次**：命中判定、拖拽锚点、绘制三处都读这两个局部量，
+    // 而不是各自 `spec.coverMs ?: 0L`。兜底写三遍就给了「哪一遍漏了」留口子
+    val coverMs: Long? = spec.coverMs
+    val activeHandles = handlesToRender(enabled, coverMs)
     val density = LocalDensity.current
 
     BoxWithConstraints(modifier = modifier.clip(RoundedCornerShape(Radius.Tag))) {
@@ -221,21 +250,32 @@ fun ClipFilmstrip(
                 .pointerInput(Unit) {
                     detectDragGestures(
                         onDragStart = { pos ->
+                            val x = pos.x / hitScale
                             val handle = filmstripHandleFor(
-                                x = pos.x / hitScale,
+                                x = x,
                                 startPx = msToHitPx(spec.startMs),
                                 endPx = msToHitPx(spec.endMs),
-                                coverPx = msToHitPx(spec.coverMs),
-                                enabled = enabled,
+                                // coverMs == null 时 Cover 已被 activeHandles 摘掉，而
+                                // filmstripHandleFor 对不在启用集里的手柄一律把位置挪出命中半径
+                                // ——这个 0f 因此不参与任何判定，它不是「把未选当成 0ms」
+                                coverPx = if (coverMs != null) msToHitPx(coverMs) else 0f,
+                                enabled = activeHandles,
                             )
-                            dragging = handle
-                            if (handle != null) {
-                                anchorHitPx = pos.x / hitScale
-                                anchorMs = when (handle) {
-                                    FilmstripHandle.In -> spec.startMs
-                                    FilmstripHandle.Out -> spec.endMs
-                                    FilmstripHandle.Cover -> spec.coverMs
-                                }
+                            // 锚点：手柄与它的起始毫秒值必须同时成立才进入拖拽。
+                            // Cover 那一支拿的是同一个可空 coverMs，两者不一致（命中了封面
+                            // 却没有封面时刻）时不拖——宁可不响应，也不发起一次没有起点的拖拽
+                            val handleAnchorMs: Long? = when (handle) {
+                                null -> null
+                                FilmstripHandle.In -> spec.startMs
+                                FilmstripHandle.Out -> spec.endMs
+                                FilmstripHandle.Cover -> coverMs
+                            }
+                            if (handle != null && handleAnchorMs != null) {
+                                dragging = handle
+                                anchorHitPx = x
+                                anchorMs = handleAnchorMs
+                            } else {
+                                dragging = null
                             }
                         },
                         onDrag = { change, _ ->
@@ -304,7 +344,9 @@ fun ClipFilmstrip(
             // 手柄：起手柄左缘贴选区起边、止手柄右缘贴选区止边。
             // 偏移一律减自己的宽度而不是触控半径——减半径会留下 24dp-6dp 的缝，
             // 手柄看着没压在边界上。
-            if (FilmstripHandle.In in enabled) {
+            // 三支一律按 activeHandles 决定画不画（与命中判定同一个集合），
+            // 收窄规则只有 [handlesToRender] 一处，绘制这侧不可能比判定侧多出一支。
+            if (FilmstripHandle.In in activeHandles) {
                 StripHandle(
                     modifier = Modifier.offset {
                         IntOffset(msToPx(spec.startMs).roundToInt(), 0)
@@ -313,7 +355,7 @@ fun ClipFilmstrip(
                     stateMs = spec.startMs,
                 )
             }
-            if (FilmstripHandle.Out in enabled) {
+            if (FilmstripHandle.Out in activeHandles) {
                 StripHandle(
                     modifier = Modifier.offset {
                         IntOffset(
@@ -325,12 +367,16 @@ fun ClipFilmstrip(
                     stateMs = spec.endMs,
                 )
             }
-            if (FilmstripHandle.Cover in enabled) {
+            // 封面竖线：**没有封面就不画**，也不退回 0ms（理由见 [handlesToRender]）。
+            // `takeIf` 把「有没有封面」与「这一支画不画」收成同一次判定：这里既没有 `!!`，
+            // 也没有第二处兜底。CoverMark 的 coverMs 参数保持非空——要判的都在这上面判完了。
+            val coverMarkMs = coverMs?.takeIf { FilmstripHandle.Cover in activeHandles }
+            if (coverMarkMs != null) {
                 CoverMark(
                     modifier = Modifier.offset {
-                        IntOffset(msToPx(spec.coverMs).roundToInt() - coverHalfPx.roundToInt(), 0)
+                        IntOffset(msToPx(coverMarkMs).roundToInt() - coverHalfPx.roundToInt(), 0)
                     },
-                    coverMs = spec.coverMs,
+                    coverMs = coverMarkMs,
                     outOfRange = coverOutOfRange,
                 )
             }

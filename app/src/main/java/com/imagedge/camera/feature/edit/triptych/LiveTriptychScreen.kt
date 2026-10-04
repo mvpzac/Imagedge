@@ -47,14 +47,13 @@ import com.imagedge.camera.ui.glass.GlassSwitch
 import com.imagedge.camera.ui.components.EmptyState
 import com.imagedge.camera.ui.components.Lucide
 import com.imagedge.camera.ui.components.ProcessingView
-import com.imagedge.camera.ui.components.ResultMessage
 import com.imagedge.camera.ui.theme.Radius
 import com.imagedge.camera.ui.components.AppIconButton
 
 /**
  * LIVE 图三拼（批次 B，对标 DJI Mimo「Live 三拼」，单阶段 + 常驻预览）：
  *
- * 三张实况图（横竖屏可混选）统一裁切比例（16:9/1:1/4:5），逐张重选封面帧、
+ * 三张实况图（横竖屏可混选）统一裁切比例（16:9/1:1/4:5/27:16），逐张重选封面帧、
  * 开关声音、调整对齐与顺序；三格竖排拼图常驻在参数区上方，参数一改就重建，
  * 主按钮直接导出。没有「先编辑、再进入预览」这一道门。
  *
@@ -76,6 +75,12 @@ fun LiveTriptychScreen(
     // 三拼是分段生成的（解析 → 裁切转码 → 拼接 → 合成），骨架的主按钮写的就是「当前那一步」。
     // 参数区自己再摆一个主按钮会撞出两个下一步。
     val ready = state.slots.size == 3
+    // 结果页**不出现**骨架主按钮：那里已经有一个 PRIMARY（「再拼一张」），
+    // 再摆一个「生成三拼 LIVE 图」就是同屏两个主操作（UI-SPEC §2），
+    // 而且那一个还会在同一批素材上再跑一遍流水线、相册里多出一份文件。
+    // 上一轮同一个缺陷复发过一次（CHANGELOG「三拼的骨架主按钮和阶段主按钮撞车」）。
+    // `export()` 里也有一道同样的拒绝（`done` 即拒绝），不是只靠这一行挡。
+    val editing = ready && !state.done
 
     EditorFrame(
         title = "LIVE 图三拼",
@@ -91,7 +96,7 @@ fun LiveTriptychScreen(
             // 三拼没有「只清调整不清素材」这一档：清空就是重新来过，
             // 所以标题栏不放重置，完成页上的「再拼一张」才是它的后继动作
             // 选图页与完成页没有「下一步」，主按钮因此不出现
-            saveVisible = ready,
+            saveVisible = editing,
             result = state.message,
             resultOk = state.success
         ),
@@ -134,9 +139,7 @@ fun LiveTriptychScreen(
                 }
 
                 else -> {
-                    if (state.message != null) {
-                        ResultMessage(text = state.message.orEmpty(), ok = state.success)
-                    }
+                    // 同样不渲染 state.message——骨架已经渲染（见 ResidentPreview 里的同一条说明）
                     EmptyState(
                         title = "LIVE 图三拼",
                         icon = Lucide.Images,
@@ -194,8 +197,8 @@ private fun EditStage(
 @Composable
 private fun ResidentPreview(state: LiveTriptychViewModel.UiState) {
     val preview = state.previewBitmap
-    // 失败信息必须在编辑页也能看到（原先只在预览分支渲染 message）
-    state.message?.let { ResultMessage(text = it, ok = state.success) }
+    // 这里**不**再渲染 state.message：骨架的 `EditorFrameState.result` 已经把它渲染在
+    // 内容之上（EditorFrame.kt:165），页面里再渲染一次就是同屏两条一样的失败信息
     if (preview != null) {
         Image(
             bitmap = preview.asImageBitmap(),
@@ -211,8 +214,11 @@ private fun ResidentPreview(state: LiveTriptychViewModel.UiState) {
             CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
         }
     }
+    // 估算值，不是编码器实测：码率还没落到编码器（Task 7），画质档当前只改分辨率。
+    // 推导见 `estimateTriptychBytes`，那句「只按分辨率估」是这个数唯一能保证的事
     Text(
-        text = "预估导出大小 ≈ %.1f MB".format(state.estimatedBytes / 1024.0 / 1024.0),
+        text = "预估导出大小 ≈ %.1f MB（估算；当前画质档只改分辨率，码率尚未落到编码器）"
+            .format(state.estimatedBytes / 1024.0 / 1024.0),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -257,6 +263,8 @@ private fun SlotCard(
             }
 
             // ── 封面候选帧条带（点选重选封面；高亮当前选择）──
+            // 高亮判据是 `coverMs == 该帧时刻`：`coverMs` 为 null（用原静态图）时
+            // 九张都不高亮——包括时刻恰为 0 的第一张，那也是一个可被选中的合法时刻
             if (slot.coverThumbsLoading) {
                 Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth()) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -283,15 +291,17 @@ private fun SlotCard(
                     }
                 }
             }
-            // 当前封面来源提示 + 恢复原图封面
+            // 当前封面来源提示 + 恢复原图封面。
+            // 判据是 `null`（未重选）而不是 0：0 是候选条带第一格的合法封面时刻，
+            // 拿它当「未重选」会让点中第一张的用户看到「已恢复原图」的结果
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = if (slot.clip.coverMs == 0L) "封面：原图静态画面" else "封面：已重选帧（候选条带高亮项）",
+                    text = if (slot.clip.coverMs == null) "封面：原图静态画面" else "封面：已重选帧（候选条带高亮项）",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
                 )
-                if (slot.clip.coverMs != 0L) {
+                if (slot.clip.coverMs != null) {
                     AppLink(
                         text = "恢复原图",
                         onClick = { viewModel.resetCover(index) }
